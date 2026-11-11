@@ -1850,6 +1850,33 @@ function defMapFigure(d) {
   <div class="legend zlegend"><span><i class="hz-c2"></i>STRONG: shooters clearly below their norm</span><span><i class="hz-c1"></i>Below norm</span><span><i class="hz-n"></i>Near norm</span><span><i class="hz-h1"></i>Above norm</span><span><i class="hz-h2"></i>WEAK: shooters clearly above their norm</span><span><i class="hz-low"></i>Too few shots</span></div>
   <p class="small muted">Rings from the basket: inside 6 ft, 6-10 ft, 10-15 ft, long twos and threes. Each shows what shooters make with him as the closest defender, and the gap to what those same shooters normally make (negative = good defence). NBA.com tracks defenders by distance, not by court side, so left and right are not split.</p>`;
 }
+// ---------------- Matchup maps: projected FG% by zone against a chosen team, player(s) or playstyle
+// Offence vs a team / playstyle: his zone FG% (shrunk toward league with 25 attempts) plus that defence's gap to the
+// league in the same zone (shrunk with 150 attempts). Against defenders, and for his own defence, the data is by
+// distance (NBA.com closest-defender tracking), so those maps are drawn in four rings.
+const RING_OF = { rim: "rim", shL: "short", shC: "short", shR: "short", mBL: "mid", mWL: "mid", mT: "mid", mWR: "mid", mBR: "mid", tCL: "three", tWL: "three", tT: "three", tWR: "three", tCR: "three" };
+const RINGS = [["rim", "Inside 6 ft"], ["short", "6-15 ft"], ["mid", "Long twos"], ["three", "Threes"]];
+function ringsFromZ14(rows) { const o = Object.fromEntries(RINGS.map(([k]) => [k, { a: 0, m: 0 }])); for (const x of rows || []) { const k = RING_OF[x.id]; if (k && x.att) { o[k].a += x.att; o[k].m += x.made ?? (x.pct / 100) * x.att; } } return o; }
+function defRingDiffs(d) { // his defence: shooters' FG% vs their norm, by ring (6-15 ft derived)
+  const R = Object.fromEntries((d?.rows || []).map((x) => [x.id, x])); const mk = (x) => (x ? { a: x.fga, m: (x.pct / 100) * x.fga, e: (x.exp / 100) * x.fga } : null);
+  const rim = mk(R.rim), two = mk(R.two), mid = mk(R.mid), th = mk(R.three);
+  const sh = two && rim && mid ? { a: two.a - rim.a - mid.a, m: two.m - rim.m - mid.m, e: two.e - rim.e - mid.e } : null;
+  const out = {}; for (const [k, v] of [["rim", rim], ["short", sh], ["mid", mid], ["three", th]]) if (v && v.a > 0) out[k] = { a: v.a, diff: ((v.m - v.e) / v.a) * (v.a / (v.a + 60)) }; return out;
+}
+const MM_LG = () => { if (S.mmLg) return S.mmLg; const o = Object.fromEntries(RINGS.map(([k]) => [k, { a: 0, m: 0 }])); const z = {}; for (const t of S.teams || []) for (const x of t.zones14?.off || []) { const k = RING_OF[x.id]; if (k) { o[k].a += x.att; o[k].m += x.made; } (z[x.id] ||= { a: 0, m: 0 }); z[x.id].a += x.att; z[x.id].m += x.made; } S.mmLg = { ring: Object.fromEntries(RINGS.map(([k]) => [k, o[k].a ? o[k].m / o[k].a : null])), zone: Object.fromEntries(Object.entries(z).map(([k, v]) => [k, v.a ? v.m / v.a : null])) }; return S.mmLg; };
+function ringFigure(cells, legendMode = "off") {
+  const hx = 250, hy = 52.5, r3 = 237.5, yb = hy + Math.sqrt(r3 * r3 - 220 * 220), H = 330, uid = "rf" + Math.random().toString(36).slice(2, 7);
+  const cl = (c) => (!c || c.pct == null ? "hz-low" : c.low ? "hz-low" : c.d >= 4 ? "hz-h2" : c.d >= 1.5 ? "hz-h1" : c.d <= -4 ? "hz-c2" : c.d <= -1.5 ? "hz-c1" : "hz-n");
+  const three = `M30 -10 V${yb.toFixed(1)} A${r3} ${r3} 0 0 0 470 ${yb.toFixed(1)} V-10Z`;
+  const lab = (c, y) => (c && c.pct != null ? `<text class="hz-t" x="${hx}" y="${y}">${Math.round(c.pct)}%<tspan class="hz-ar ${c.d >= 0 ? "up" : "dn"}" dx="3">${c.d > 0 ? "+" : ""}${c.d.toFixed(1)}</tspan></text>` : "");
+  const tip = (c, n) => (c && c.pct != null ? `${n}: ${c.pct.toFixed(1)}% (${c.d > 0 ? "+" : ""}${c.d.toFixed(1)} vs ${legendMode === "def" ? "norm" : "league"})` : `${n}: not enough data`);
+  return `<figure class="hz"><svg viewBox="0 0 500 ${H}" role="img" aria-label="${esc(RINGS.map(([k, n]) => tip(cells[k], n)).join("; "))}">
+    <defs><clipPath id="${uid}-in"><path d="${three}"/></clipPath><mask id="${uid}-out"><rect width="500" height="${H}" fill="#fff"/><path d="${three}" fill="#000"/></mask></defs>
+    <rect class="hz-bg" width="500" height="${H}"/><rect class="hz-z ${cl(cells.three)}" width="500" height="${H}" mask="url(#${uid}-out)"/>
+    <g clip-path="url(#${uid}-in)"><rect class="hz-z ${cl(cells.mid)}" width="500" height="${H}"/><circle class="hz-z ${cl(cells.short)}" cx="${hx}" cy="${hy}" r="150"/><circle class="hz-z ${cl(cells.rim)}" cx="${hx}" cy="${hy}" r="60"/></g>
+    <g class="hz-lines" fill="none"><path d="${three}"/><circle cx="${hx}" cy="${hy}" r="60"/><circle cx="${hx}" cy="${hy}" r="150"/><rect width="500" height="${H}"/></g>
+    ${lab(cells.rim, hy + 8)}${lab(cells.short, hy + 110)}${lab(cells.mid, hy + 196)}${lab(cells.three, H - 22)}</svg></figure>`;
+}
 function scoutDefense(p) {
   const d = p.defense;
   if (!d?.rows?.length) return `<section class="card" id="s-def" tabindex="-1"><h2>Defensive profile</h2><p class="small muted">No defender tracking on record for him.</p></section>`;
@@ -1920,7 +1947,7 @@ async function vScout(id, labTid) {
   const splits = allSplits(p), groups = [...new Set(splits.map((s) => SPLIT_GROUP[s.type] || "Other"))];
   let labTeam = S.T[labTid] && labTid !== p.team ? labTid : nextOpp || ranked[0]?.team || others[0]?.id;
   let role = ROLE[row?.role] ? row.role : "starter", sg0 = "top";
-  const sections = [["s-sw", "Strengths and weaknesses"], ["s-map", "Shot map"], ["s-def", "Defence"], ["s-style", "Playstyle"], ["s-cul", "Culture"], ["s-lab", "Matchup lab"], ["s-sit", "Situations"]];
+  const sections = [["s-sw", "Strengths and weaknesses"], ["s-map", "Shot map"], ["s-def", "Defence"], ["s-style", "Playstyle"], ["s-cul", "Culture"], ["s-lab", "Matchup lab"], ["s-mm", "Matchup maps"], ["s-sit", "Situations"]];
 
   app.innerHTML = `<a class="back" href="#/scout">‹ Scout: all players</a>
     <header class="ehead">${avatar(p.id, p.n, { size: "xl" })}<div class="ehead-b"><h1>${esc(p.n)}</h1>
@@ -1944,6 +1971,12 @@ async function vScout(id, labTid) {
         <span class="small muted">Toughest on paper</span><div class="chips">${ranked.slice(-3).reverse().map((r) => `<button class="fbtn sm" type="button" data-lab="${esc(r.team)}">${esc(T(r.team).abbr)} ${sg(r.paperPts)}</button>`).join("")}</div></div>` : ""}
       <div id="lab-out" aria-live="polite"></div>
     </section>
+    <section class="card" id="s-mm" tabindex="-1" aria-labelledby="s-mm-h"><h2 id="s-mm-h">Matchup maps: offence and defence</h2>
+      <p class="small muted">Projected shooting by zone against the opponent you choose. Red = better than league average, blue = worse (for his defence: red = shooters do better than usual against him).</p>
+      <div class="filters" role="group" aria-label="Side"><button class="fbtn" type="button" data-mm-side="off" aria-pressed="true">His offence</button><button class="fbtn" type="button" data-mm-side="def" aria-pressed="false">His defence</button></div>
+      <div class="filters" role="group" aria-label="Against"><button class="fbtn" type="button" data-mm-vs="team" aria-pressed="true">vs team</button><button class="fbtn" type="button" data-mm-vs="player" aria-pressed="false">vs player(s)</button><button class="fbtn" type="button" data-mm-vs="style" aria-pressed="false">vs playstyle</button></div>
+      <div id="mm-ctl"></div><div id="mm-out" aria-live="polite"></div>
+    </section>
     <section class="card" id="s-sit" tabindex="-1" aria-labelledby="s-sit-h"><h2 id="s-sit-h">Other situations that apply to him</h2>
       <p class="small muted">Each number is measured against <b>his own usual</b>: his gap against the projection in that spot minus his overall gap across all his games${p.splits?.overall ? ` (${esc(p.splits.overall.n)} games, ${sg(p.splits.overall.pts)} points overall)` : ""}. So a player who was generally under-projected does not look strong everywhere.</p>
       <p class="small muted">${esc(p.splits?.note || "Counts already include last season (with its play-in and playoffs), this season and preseason. Listed from 5 games against a specific team, opposing player or arena (the schedule allows only 3-4 meetings a season) and from 8 games for other situations; under 10 games is a small sample.")}</p>
@@ -1956,6 +1989,65 @@ async function vScout(id, labTid) {
       <a class="go" href="#/player/${esc(p.id)}">Full profile ›</a>
     </section>`;
 
+  // ---- matchup maps
+  { const mm = { side: "off", vs: "team", team: labTeam, style: null, players: [] };
+    const tags = [...new Set((S.teams || []).flatMap((t) => t.style?.tags || []))].sort();
+    mm.style = tags.find((t) => /defen/i.test(t)) || tags[0];
+    const plist = Object.values(S.P || {}).filter((q) => String(q.id) !== String(p.id) && q.team !== p.team).sort((a, b) => a.n.localeCompare(b.n));
+    const pcache = new Map(); const getP = async (pid) => { if (!pcache.has(pid)) pcache.set(pid, await load(`players/${pid}.json`).catch(() => null)); return pcache.get(pid); };
+    const ctl = () => {
+      const el = document.getElementById("mm-ctl"); if (!el) return;
+      if (mm.vs === "team") el.innerHTML = `<select class="field" id="mm-team">${others.map((t) => `<option value="${esc(t.id)}"${t.id === mm.team ? " selected" : ""}>${esc(t.name)}${t.id === nextOpp ? " (next game)" : ""}</option>`).join("")}</select>`;
+      else if (mm.vs === "style") el.innerHTML = `<select class="field" id="mm-style">${tags.map((t) => `<option${t === mm.style ? " selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
+      else el.innerHTML = `<label class="small" for="mm-pin">${mm.side === "off" ? "Add up to 3 defenders" : "Choose a shooter"}</label><input class="field" id="mm-pin" list="mm-pl" placeholder="Type a player name"><datalist id="mm-pl">${plist.map((q) => `<option value="${esc(q.n)}">`).join("")}</datalist>
+        <div class="chips" id="mm-chips">${mm.players.map((q) => `<button class="chip" type="button" data-mm-rm="${esc(q.id)}">${esc(q.n)} ✕</button>`).join("")}</div>`;
+      el.querySelector("#mm-team")?.addEventListener("change", (e) => { mm.team = e.target.value; draw(); });
+      el.querySelector("#mm-style")?.addEventListener("change", (e) => { mm.style = e.target.value; draw(); });
+      el.querySelector("#mm-pin")?.addEventListener("change", (e) => { const q = plist.find((x) => x.n === e.target.value); if (!q) return; if (mm.side === "def") mm.players = [q]; else if (!mm.players.some((x) => x.id === q.id)) mm.players = [...mm.players, q].slice(-3); ctl(); draw(); });
+      el.querySelectorAll("[data-mm-rm]").forEach((b) => b.addEventListener("click", () => { mm.players = mm.players.filter((x) => String(x.id) !== b.dataset.mmRm); ctl(); draw(); }));
+    };
+    const teamsFor = () => (mm.vs === "team" ? [S.T[mm.team]].filter(Boolean) : (S.teams || []).filter((t) => t.style?.tags?.includes(mm.style)));
+    const who = () => (mm.vs === "team" ? T(mm.team).name : mm.vs === "style" ? `teams tagged "${mm.style}" (${teamsFor().map((t) => t.abbr).join(", ")})` : mm.players.map((q) => q.n).join(", "));
+    const draw = async () => {
+      const out = document.getElementById("mm-out"); if (!out) return;
+      const LG = MM_LG(), hz = p.zones14?.rows;
+      if (mm.side === "off" && mm.vs !== "player") {
+        if (!hz?.length) { out.innerHTML = `<p class="small muted">No zone shooting on record for him yet.</p>`; return; }
+        const ts = teamsFor(); if (!ts.length) { out.innerHTML = `<p class="small muted">No team matches this filter.</p>`; return; }
+        const rows = hz.map((x) => {
+          const lg = (x.lgPct ?? 0) / 100, hp = ((x.made ?? 0) + 25 * lg) / ((x.att ?? 0) + 25);
+          let da = 0, dm = 0; for (const t of ts) { const z = t.zones14?.def?.find((y) => y.id === x.id); if (z) { da += z.att; dm += z.made; } }
+          const td = (dm + 150 * lg) / (da + 150) - lg, proj = Math.min(0.95, Math.max(0.05, hp + td)), d = (proj - lg) * 100;
+          return { id: x.id, att: x.att, made: x.made, pct: Math.round(proj * 1000) / 10, lgPct: x.lgPct, diff: Math.round(d * 10) / 10, tag: x.att < 10 ? "neutral" : d >= 4 ? "hot" : d <= -4 ? "cold" : "neutral", low: x.att < 10 ? 1 : undefined };
+        });
+        const best = [...rows].filter((x) => !x.low).sort((a, b) => b.diff - a.diff);
+        out.innerHTML = `<h3>His offence vs ${esc(who())}</h3>${hz14Figure(rows, "off", `${p.n} projected vs ${who()}`)}
+          <p class="small">Best spots: ${best.slice(0, 3).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ") || "-"}. Toughest: ${best.slice(-3).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ") || "-"}.</p>
+          <p class="small muted">Projected FG% = his zone FG% (shrunk toward league with 25 attempts) + the defence's gap to league in that zone (shrunk with 150 attempts). Grey = under 10 of his attempts in the zone.</p>`;
+        return;
+      }
+      if (mm.side === "off" && mm.vs === "player") {
+        if (!mm.players.length) { out.innerHTML = `<p class="small muted">Add one or more defenders above.</p>`; return; }
+        const ds = (await Promise.all(mm.players.map((q) => getP(q.id)))).map((x) => defRingDiffs(x?.defense));
+        const hr = ringsFromZ14(hz), cells = {};
+        for (const [k] of RINGS) { const lg = LG.ring[k]; if (lg == null || !hr[k].a) { cells[k] = null; continue; } const hp = (hr[k].m + 25 * lg) / (hr[k].a + 25); let w = 0, sd = 0; for (const d of ds) if (d[k]) { w += d[k].a; sd += d[k].diff * d[k].a; } const proj = hp + (w ? sd / w : 0); cells[k] = { pct: proj * 100, d: (proj - lg) * 100, low: hr[k].a < 10 }; }
+        out.innerHTML = `<h3>His offence vs ${esc(who())}</h3>${ringFigure(cells, "off")}<p class="small muted">His shooting by distance plus how much the chosen defenders hold shooters below (or let them above) their norm at that distance, NBA.com closest-defender tracking. Numbers show projected FG% and the gap to league.</p>`;
+        return;
+      }
+      // his defence
+      const mine = defRingDiffs(p.defense);
+      if (!Object.keys(mine).length) { out.innerHTML = `<p class="small muted">No defender tracking on record for him.</p>`; return; }
+      let base = null, label = "";
+      if (mm.vs === "player") { if (!mm.players.length) { out.innerHTML = `<p class="small muted">Choose a shooter above.</p>`; return; } const q = await getP(mm.players[0].id); base = ringsFromZ14(q?.zones14?.rows); label = mm.players[0].n; }
+      else { const ts = teamsFor(); base = Object.fromEntries(RINGS.map(([k]) => [k, { a: 0, m: 0 }])); for (const t of ts) { const rg = ringsFromZ14(t.zones14?.off); for (const [k] of RINGS) { base[k].a += rg[k].a; base[k].m += rg[k].m; } } label = who(); }
+      const cells = {};
+      for (const [k] of RINGS) { const lg = LG.ring[k]; if (lg == null) { cells[k] = null; continue; } const b = base?.[k]?.a ? (base[k].m + 40 * lg) / (base[k].a + 40) : lg; const proj = b + (mine[k]?.diff || 0); cells[k] = { pct: proj * 100, d: (proj - b) * 100, low: !mine[k] }; }
+      out.innerHTML = `<h3>His defence vs ${esc(label)}</h3>${ringFigure(cells, "def")}<p class="small muted">Projected FG% of ${esc(label)} with him as the closest defender: their usual shooting at each distance, plus how much he moves shooters away from their norm. The small number is the change he makes (blue = he holds them down).</p>`;
+    };
+    app.querySelectorAll("[data-mm-side]").forEach((b) => b.addEventListener("click", () => { mm.side = b.dataset.mmSide; mm.players = mm.side === "def" ? mm.players.slice(0, 1) : mm.players; app.querySelectorAll("[data-mm-side]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); ctl(); draw(); }));
+    app.querySelectorAll("[data-mm-vs]").forEach((b) => b.addEventListener("click", () => { mm.vs = b.dataset.mmVs; app.querySelectorAll("[data-mm-vs]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); ctl(); draw(); }));
+    ctl(); draw();
+  }
   // ---- other situations
   const drawSit = () => {
     const sorted = [...splits].sort((a, b) => b.pts - a.pts);
