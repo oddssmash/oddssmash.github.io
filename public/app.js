@@ -708,7 +708,7 @@ function trustBlock(t, { unit = "points", who = "him" } = {}) {
   return `<div class="trust"><span class="chip ${c}">${esc(txt)}</span>${t.small ? smallTag(true, `only ${t.games} games`) : ""}</div>
     <ul class="mrows">${meterRow({ label: `Average miss, last ${esc(t.games)} games`, value: `${f1(t.mae)} vs ${f1(t.typical)} typical`, x, scale: 40,
       sub: `Bar to the right = misses more than usual for projections like these; to the left = closer than usual. ${lean} All ${esc(num(t.allGames))} projected games: average miss ${f1(t.allMae)} ${esc(unit)}.` })}</ul>
-    <p class="small muted">A label of "reads well" needs a recent miss 15% below typical, "keeps missing" 20% above. It describes recent games; in the back-test it barely predicted the next game's miss, so it is context, not a forecast.</p>`;
+    <p class="small muted">A label of "reads well" needs a recent miss 15% below typical, "off lately" 20% above. It describes recent games; in the back-test it barely predicted the next game's miss, so it is context, not a forecast.</p>`;
 }
 
 // ---------------------------------------------------------------- player: on-court, game scripts, returns, interactions, who guarded whom
@@ -846,7 +846,7 @@ function ixBlock(p) {
   return `<h4>Game scripts and who is missing (evidence only)</h4><ul class="dots">${out.join("")}</ul>
     <p class="small muted">Measured from past games and shown for context. These effects did not improve accuracy in the back-test, so they are not added to his projection.</p>`;
 }
-const trustLine = (t) => (t && t.games ? `<p class="small muted">Trust meter: average miss ${f1(t.mae)} points over his last ${esc(t.games)} games against ${f1(t.typical)} typical${t.label && t.label !== "typical" ? ` (${esc(t.label === "reads well" ? "the model reads him well" : t.label === "keeps missing" ? "the model keeps missing him" : t.label)})` : ""}.</p>` : "");
+const trustLine = (t) => (t && t.games ? `<p class="small muted">Trust meter: average miss ${f1(t.mae)} points over his last ${esc(t.games)} games against ${f1(t.typical)} typical${t.label && t.label !== "typical" ? ` (${esc(t.label === "reads well" ? "the model reads him well" : t.label === "keeps missing" ? "our recent projections for him have been further off than usual" : t.label)})` : ""}.</p>` : "");
 
 // ---------------------------------------------------------------- team: coach habits, quarters, on/off, interactions, trust
 function teamFlowCards(t) {
@@ -990,6 +990,7 @@ function rowWhy(p) {
 }
 function reasonParts(p) {
   const s = S.P[p.id], src = s?.cur?.[0] >= 3 ? s.cur : s?.prev, avg = src?.[2], avgMin = src?.[1], a = p.adj || {}, r = [];
+  const basis = s?.cur?.[0] >= 3 ? `this-season average (${s.cur[0]} games)` : s?.prev ? "2025-26 average (too few games this season)" : "average"; // say which average the gap is measured from
   // [signed points effect, text]; only reasons pointing the same way as the gap are shown.
   if (avgMin != null && p.min != null && Math.abs(p.min - avgMin) >= 1.5) r.push([(p.min - avgMin) * (avg || 0) / Math.max(avgMin, 1), `${f0(p.min)} projected minutes vs his ${f1(avgMin)} average`]);
   if (a.absence && Math.abs(a.absence) >= 0.5) r.push([a.absence, a.absence > 0 ? "teammates out give him more shots" : "returning teammates take shots"]);
@@ -1001,7 +1002,7 @@ function reasonParts(p) {
   if (p.q) r.push([-3, "listed questionable, minutes trimmed"]);
   const diff = avg != null && p.pts != null ? p.pts - avg : null;
   const top = r.filter((x) => diff == null || Math.abs(diff) < 1 || Math.sign(x[0]) === Math.sign(diff)).sort((x, y) => Math.abs(y[0]) - Math.abs(x[0])).slice(0, 2).map((x) => x[1]);
-  const lead = diff == null ? `Projected ${f1(p.pts)} pts` : Math.abs(diff) < 1 ? `Projected ${f1(p.pts)} pts, close to his ${f1(avg)} average` : `Projected ${f1(p.pts)} pts, ${sg(diff)} vs his ${f1(avg)} average`;
+  const lead = diff == null ? `Projected ${f1(p.pts)} pts` : Math.abs(diff) < 1 ? `Projected ${f1(p.pts)} pts, close to his ${f1(avg)} ${basis}` : `Projected ${f1(p.pts)} pts, ${sg(diff)} vs his ${f1(avg)} ${basis}`;
   return { lead, top, diff };
 }
 function gameLines(g) {
@@ -1145,9 +1146,9 @@ async function vGame(id) {
         <a class="h2-side r" href="#/team/${esc(home.tid)}"><span><b>${esc(T(home.tid).abbr)}</b><strong>${f1(g.pred.hs)}</strong></span>${teamLogo(home.tid, { size: "lg" })}</a>
       </div>
       <div class="h2-wc"><div><small>Win chance</small><strong>${pct(1 - ph)}</strong></div><div class="wp" aria-hidden="true"><span style="flex:${1 - ph}"></span><span style="flex:${ph}"></span></div><div class="r"><small>${esc(T(home.tid).short)}</small><strong>${pct(ph)}</strong></div></div>
-      <p class="small muted" style="margin:8px 0 0;text-align:center">Projected score · <b>${esc(T(fav.tid).name)}</b> favoured (${pct(favP)})${g.venue ? " · " + esc(g.venue) : ""}</p>
+      <p class="small muted" style="margin:8px 0 0;text-align:center">Projected score · <b>${esc(T(fav.tid).name)}</b> favoured (${pct(favP)}${g.pred.pHomeRaw != null ? `; ${pct(fav.tid === home.tid ? g.pred.pHomeRaw : 1 - g.pred.pHomeRaw)} before upset watch, which pulls flagged games toward 50% while the projected score and spread stay as modelled` : ""})${g.venue ? " · " + esc(g.venue) : ""}</p>
       <div class="chips" style="justify-content:center;margin-top:8px">
-        <span class="chip ${g.conf.grade === "High" ? "good" : g.conf.grade === "Low" ? "bad" : "info"}">Confidence: ${esc(g.conf.grade)}</span>
+        ${confChip(g)}
         <span class="chip">Close game (within 5): ${pct(g.pred.close)}</span>
         <span class="chip">Blowout (15+): ${pct(g.pred.blowout)}</span>
         ${g.upset.flag ? `<span class="chip warn">⚠ Upset watch</span>` : ""}
@@ -1875,9 +1876,10 @@ async function teamVersus(t) {
       const h2h = R.filter((g) => (g.home === t.id && g.away === o.id) || (g.home === o.id && g.away === t.id)).sort((a, b) => b.date.localeCompare(a.date));
       const w = h2h.filter((g) => (g.home === t.id ? g.act.hs > g.act.as : g.act.as > g.act.hs)).length;
       const best = (rows) => [...rows].filter((x) => !x.low).sort((a, b) => b.diff - a.diff);
+      S.learning ||= await load("learning.json").catch(() => null); const HA = S.learning?.params?.at?.(-1)?.homeAdv ?? 1.8; // same learned home court as the Why page and season simulation
       const lgOff = lgStyle("off"), pace = ((t.style?.pace || 100) + (o.style?.pace || 100)) / 2;
       const ptsT = (t.style.off * o.style.def / lgOff) * pace / 100, ptsO = (o.style.off * t.style.def / lgOff) * pace / 100, mg = ptsT - ptsO, pW = 1 - pNorm(-mg / 13);
-      const scoreCard = `<div class="pv"><h3>Projected on a neutral court</h3><div class="statgrid sg4"><div class="stat"><b>${f1(ptsT)}</b><span>${esc(t.abbr)} points</span></div><div class="stat"><b>${f1(ptsO)}</b><span>${esc(o.abbr)} points</span></div><div class="stat"><b>${pct(pW)}</b><span>${esc(t.abbr)} wins</span></div><div class="stat"><b>${f1(pace)}</b><span>pace</span></div></div><p class="small muted">From both teams' current-season (2026-27) offence and defence per 100 possessions and their pace; works even if they have not met. Home court adds about 2 points. The game page has the full-model projection when they actually play.</p></div>`;
+      const scoreCard = `<div class="pv"><h3>Projected on a neutral court</h3><div class="statgrid sg4"><div class="stat"><b>${f1(ptsT)}</b><span>${esc(t.abbr)} points</span></div><div class="stat"><b>${f1(ptsO)}</b><span>${esc(o.abbr)} points</span></div><div class="stat"><b>${pct(pW)}</b><span>${esc(t.abbr)} wins</span></div><div class="stat"><b>${f1(pace)}</b><span>pace</span></div></div><p class="small muted">From both teams' current-season (2026-27) offence and defence per 100 possessions and their pace; works even if they have not met. Home court adds about ${f1(HA)} points (learned from results, the same figure as the Why page and the season simulation). This is a simpler estimate than the game page, which uses the full model (injuries, rotations, matchups, rest), so the two can differ by a point or two, even after allowing for home court.</p></div>`;
       box.innerHTML = scoreCard + `<div class="tv-cmp"><div><b>${esc(t.abbr)}</b><span>net ${sg(t.ratings?.adjNet)} · pace ${f1(t.style?.pace)}</span><span class="small muted">${esc((t.style?.tags || []).join(", ") || "-")}</span></div><div><b>${esc(o.abbr)}</b><span>net ${sg(o.ratings?.adjNet)} · pace ${f1(o.style?.pace)}</span><span class="small muted">${esc((o.style?.tags || []).join(", ") || "-")}</span></div></div>
         <p class="small vs-rec"><b>Head-to-head since October 2025:</b> ${h2h.length ? `${esc(t.abbr)} ${w}-${h2h.length - w}. ${h2h.slice(0, 4).map((g) => `${esc(new Date(g.date).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric", year: "2-digit" }))}: ${esc(T(g.away).abbr)} ${g.act.as}-${g.act.hs} ${esc(T(g.home).abbr)}`).join(" · ")}` : "no meetings yet."}</p>
         <div class="grid two"><div><h3>${esc(t.abbr)} offence vs ${esc(o.abbr)} defence</h3>${hz14Figure(mine, "off", `${t.name} offence projected vs ${o.name}`)}<p class="small">Best: ${best(mine).slice(0, 2).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}. Toughest: ${best(mine).slice(-2).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}.</p></div>
@@ -2693,7 +2695,7 @@ async function vAccuracy() {
       return `<div class="card"><h2>The honest test: predictions saved before tip-off</h2>
         <p class="small muted">Each game's last prediction made before tip-off is frozen (with the model version) and graded after the final. Nothing here can be recomputed afterwards, so it is the cleanest measure of the model. The record started on November 11, 2026.</p>
         ${n ? `<div class="tiles">
-          <div class="tile"><div class="l">Winner called</div><div class="v">${pct(w / n)}</div><div class="s">${num(n)} games graded${pend ? ` · ${pend} waiting` : ""}</div></div>
+          <div class="tile"><div class="l">Winner called${n < 30 ? " (early sample)" : ""}</div><div class="v">${pct(w / n)}</div><div class="s">${num(n)} games graded${n < 30 ? (() => { const ph = w / n, z = 1.96, d = 1 + z * z / n, c = (ph + z * z / (2 * n)) / d, h = (z * Math.sqrt(ph * (1 - ph) / n + z * z / (4 * n * n))) / d; return ` · only ${n}, so the true rate could be anywhere from ${Math.round(Math.max(0, c - h) * 100)}% to ${Math.round(Math.min(1, c + h) * 100)}%`; })() : ""}${pend ? ` · ${pend} waiting` : ""}</div></div>
           <div class="tile"><div class="l">Brier score</div><div class="v">${(b / n).toFixed(3)}</div><div class="s">log loss ${(ll / n).toFixed(3)}</div></div>
           <div class="tile"><div class="l">Margin miss</div><div class="v">${f1(m / n)}</div><div class="s">total miss ${f1(t / n)}</div></div>
           <div class="tile"><div class="l">Closing line value</div><div class="v">${clvN ? (clvS / clvN > 0 ? "+" : "") + (clvS / clvN).toFixed(1) : "-"}</div><div class="s">${clvN ? `pts of win chance · line moved our way in ${pct(clvPos / clvN)} of ${clvN} games` : "needs closing lines (from the next games on)"}</div></div>
@@ -2756,7 +2758,7 @@ async function vMore(tab) {
     const takes = await load("takes.json");
     const kind = S.kind || "all";
     // Keep only items that name a player or a team; drop promos, "top 10 plays" reels and generic news pages.
-    const PROMO = /get your latest|top d+ plays|top plays|subscribe|watch live|best of|mixtape|full episode|podcast episode|daily recap/i;
+    const PROMO = /get your latest|top \d+ plays|top plays|subscribe|watch live|best of|mixtape|full episode|podcast episode|recap|highlights|full game|condensed game|press conference|postgame|post-game|pregame show|live stream|livestream|every (?:bucket|basket|point)/i; // reels and recaps are not takes
     const relevant = (t) => ((t.teams || []).length || (t.athletes || []).length) && !PROMO.test(t.title || "");
     const rows = takes.filter(relevant).filter((t) => kind === "all" || (kind === "checked" ? t.checks.some((c) => VERDICT[c.verdict]) : t.kind === kind)).slice(0, 80);
     body = `<p class="lead">Headlines from sports news desks, blogs, YouTube analysts and r/nba. When a take praises or doubts a player, it is checked against his recent numbers first. Takes never move a projection by themselves; only reported minutes limits do.</p>
@@ -3028,7 +3030,7 @@ function simPage(s) {
     </section>
 
     <section class="card" id="s-joint" tabindex="-1" aria-labelledby="s-joint-h"><h2 id="s-joint-h">Same-game combinations</h2>
-      <p class="small muted">Counted in the same simulated games, so players and the result move together the way they do on the court. "If unrelated" multiplies the two chances, only to show how much they are linked.</p>
+      <p class="small muted">Counted in the same simulated games, so players and the result move together the way they do on the court. "If unrelated" multiplies the two chances, only to show how much they are linked. These are information, not picks: most land well under 50%.</p>
       ${s.joint?.length ? `<div class="tw"><table><thead><tr><th>Both happen</th><th class="n">Chance</th><th class="n">If unrelated</th></tr></thead><tbody>
         ${s.joint.map((j) => `<tr><td>${esc(j.label)}<div class="small muted">${esc(j.a?.label)} ${pct(j.a?.p)} · ${esc(j.b?.label)} ${pct(j.b?.p)}</div></td><td class="n"><b>${pc1(j.p)}</b></td><td class="n">${pc1(j.ifUnrelated)}</td></tr>`).join("")}</tbody></table></div>` : `<p class="small muted">No combinations in this file.</p>`}
     </section>
@@ -3306,7 +3308,7 @@ async function insightGame(I, id) {
     ${brk.length ? `<section class="card"><h2>Breakout watch in this game</h2>${brk.map(breakoutRow).join("")}<p class="small"><a class="go" href="#/breakout">All breakout candidates ›</a></p></section>` : ""}
     ${tn && (tn.teams?.length || tn.players?.length) ? `<section class="card"><h2>Trust meter tonight</h2><ul class="plain small">
       ${(tn.teams || []).filter((t) => t && t.tid).map((t) => `<li class="spread"><span>${teamName(t.tid)}</span><span>${esc(trustWord(t.label))} · miss ${f1(t.mae)} pts${t.games ? ` <span class="muted">(${esc(t.games)} g)</span>` : ""}</span></li>`).join("")}
-      ${(tn.players || []).map((p) => `<li class="spread"><span>${playerChip(p.id, p.n, { href: `#/player/${p.id}` })}</span><span>${esc(p.label === "keeps missing" ? "model keeps missing" : p.label === "reads well" ? "model reads well" : p.label)} <span class="muted">(${esc(p.games)} g)</span></span></li>`).join("")}</ul>
+      ${(tn.players || []).map((p) => `<li class="spread"><span>${playerChip(p.id, p.n, { href: `#/player/${p.id}` })}</span><span>${esc(p.label === "keeps missing" ? "off lately" : p.label === "reads well" ? "model reads well" : p.label)} <span class="muted">(${esc(p.games)} g)</span></span></li>`).join("")}</ul>
       ${I.trust?.persistence?.t ? `<p class="small muted">${esc(I.trust.persistence.t)}</p>` : ""}</section>` : ""}
     ${insightNote(I)}`;
 }
@@ -3632,12 +3634,12 @@ const up = await load("upcoming.json").catch(() => []);
       if (gm.date && Date.parse(gm.date) < Date.now()) continue;
       const H = T(gm.home).abbr, A = T(gm.away).abbr;
       const base = { gid, home: gm.home, away: gm.away, date: gm.date };
-      if (c?.winner?.ourProb != null) { const ph = gm.pred.pHome, home = ph >= 0.5; out.push({ ...base, kind: "Moneyline", pick: `${home ? H : A} to win`, p: Math.max(ph, 1 - ph), book: home ? c.winner.bookProb : 1 - c.winner.bookProb, ours: `our margin ${home ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}` }); }
+      if (c?.winner?.ourProb != null) { const ph = gm.pred.pHome, home = ph >= 0.5; out.push({ ...base, kind: "Moneyline", pick: `${home ? H : A} to win`, p: Math.max(ph, 1 - ph), book: home ? c.winner.bookProb : 1 - c.winner.bookProb, ours: `our margin ${home ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}${gm.pred.pHomeRaw != null ? `; ${Math.round((home ? gm.pred.pHomeRaw : 1 - gm.pred.pHomeRaw) * 100)}% before upset watch, ${Math.round(Math.max(ph, 1 - ph) * 100)}% after` : ""}` }); }
       if (c?.spread?.ourProb != null) { const q = c.spread.ourProb, l = c.spread.bookLine, team = c.spread.team, other = team === H ? A : H; const takeTeam = q >= 0.5;
         out.push({ ...base, kind: "Spread", pick: takeTeam ? `${team} ${l > 0 ? "+" : ""}${l}` : `${other} ${-l > 0 ? "+" : ""}${-l}`, p: Math.max(q, 1 - q), book: takeTeam ? c.spread.bookProb : 1 - c.spread.bookProb, ours: `our margin ${gm.pred.hs >= gm.pred.as ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}` }); }
       if (c?.total?.ourProb != null) { const q = c.total.ourProb; out.push({ ...base, kind: "Total", pick: `${q >= 0.5 ? "Over" : "Under"} ${c.total.bookLine}`, p: Math.max(q, 1 - q), book: q >= 0.5 ? c.total.bookProb : 1 - c.total.bookProb, ours: `our total ${f1(gm.pred.hs + gm.pred.as)}` }); }
     }
-    for (const x of out) { const ob = ODDS?.games?.[x.gid], gm2 = GAME[x.gid]; x.mgap = ob && gm2 && Number.isFinite(ob.spreadHome) ? (gm2.pred.hs - gm2.pred.as) - -ob.spreadHome : null; x.price = priceFor(x.gid, x.kind, x.pick, T(x.home).abbr); edgeOf(x); x.dec = decOf(x.price); Object.assign(x, robustOf(x)); x.gold = x.qual && x.dec != null && x.dec >= GOLD.minOdds && x.p >= GOLD.minP && !x.wrong && x.hold != null && x.hold >= GOLD.minHold && x.libAgainst <= x.libFor; }
+    for (const x of out) { const ob = ODDS?.games?.[x.gid], gm2 = GAME[x.gid]; x.mgap = !ob || !gm2 ? null : x.kind === "Total" ? (Number.isFinite(ob.total) ? (gm2.pred.hs + gm2.pred.as) - ob.total : null) : Number.isFinite(ob.spreadHome) ? (gm2.pred.hs - gm2.pred.as) - -ob.spreadHome : null; /* totals compare totals, spreads and winners compare margins */ x.price = priceFor(x.gid, x.kind, x.pick, T(x.home).abbr); edgeOf(x); x.dec = decOf(x.price); Object.assign(x, robustOf(x)); x.gold = x.qual && x.dec != null && x.dec >= GOLD.minOdds && x.p >= GOLD.minP && !x.wrong && x.hold != null && x.hold >= GOLD.minHold && x.libAgainst <= x.libFor; }
     return out.sort((a, b) => b.p - a.p);
   };
   // Sportsbook pre-game player prop prices (display only). ESPN lists two prices per line without saying which is
@@ -3901,7 +3903,7 @@ const up = await load("upcoming.json").catch(() => []);
       : `<p class="small muted">Built only from legs in different games, so the legs do not depend on each other and the combined chance is multiplied. "Using past hit rates" multiplies how often picks in each leg's band really came true, which is the more honest number. Same-game combinations are listed separately, counted directly from the simulations.</p>
         ${parlays.map(([name, l]) => `<div class="card"><h2>${esc(name)}</h2><ol class="dots">${l.map((x) => `<li>${esc(x.label)} <span class="muted">(${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}, ${pct(x.p)}; past rate ${x.hit?.rate != null ? esc(x.hit.rate) + "%" : "-"})</span></li>`).join("")}</ol>
           <div class="statgrid" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${pct(pr(l))}</b><span>Adjusted chance</span></div><div class="stat"><b>${pct(hr(l))}</b><span>Using past hit rates</span></div></div></div>`).join("") || `<p class="empty">Not enough strong legs (88%+ after adjustment, no questionable players, no low lines) in separate games on this day.</p>`}
-        ${sameGame.length ? `<div class="card"><h2>Same-game combinations</h2><p class="small muted">These legs are linked (a team win and its star scoring big tend to go together), so their chance is counted directly from the 10,000 simulated games, never multiplied.</p><ul class="plain">${sameGame.map((j) => `<li class="spread"><span>${esc(j.label)} <span class="muted">(${esc(T(GAME[j.game]?.away).abbr)} at ${esc(T(GAME[j.game]?.home).abbr)})</span></span><span class="num">${pct(j.p)} <span class="muted">vs ${pct(j.ifUnrelated)} if unrelated</span></span></li>`).join("")}</ul></div>` : ""}`}`;
+        ${sameGame.length ? `<div class="card"><h2>Same-game combinations</h2><p class="small muted">These legs are linked (a team win and its star scoring big tend to go together), so their chance is counted directly from the 10,000 simulated games, never multiplied. Shown for information, not as picks: most are well under 50%, and where the two numbers are close the legs barely affect each other.</p><ul class="plain">${sameGame.map((j) => `<li class="spread"><span>${esc(j.label)} <span class="muted">(${esc(T(GAME[j.game]?.away).abbr)} at ${esc(T(GAME[j.game]?.home).abbr)})</span></span><span class="num">${pct(j.p)} <span class="muted">vs ${pct(j.ifUnrelated)} if unrelated</span></span></li>`).join("")}</ul></div>` : ""}`}`;
     app.querySelectorAll("[data-pk-day]").forEach((b) => b.addEventListener("click", () => { S.pkDay = b.dataset.pkDay; route(); }));
     app.querySelectorAll("[data-pk-kind]").forEach((b) => b.addEventListener("click", () => { S.pkKind = b.dataset.pkKind; draw(); }));
     app.querySelectorAll("[data-gs-go]").forEach((b) => b.addEventListener("click", () => { const c = app.querySelector(`[data-gs="${b.dataset.gsGo}"]`); if (!c) return; c.querySelector(".gw-more")?.setAttribute("open", ""); window.scrollTo({ top: c.getBoundingClientRect().top + window.scrollY - 80, behavior: "auto" }); }));
@@ -4139,6 +4141,9 @@ function pointsChart(t) {
         <text x="${W}" y="${y + 13}" text-anchor="end" class="vt vv">${f1(p.pts)}</text>`; }).join("")}
     </svg></figure>`;
 }
+// One confidence label on every page: the model's grade (data quality, capped by how close the win chance is) when published, else from the win chance alone.
+function confLabel(g) { const ph = g.pred?.pHome ?? 0.5, pf = Math.max(ph, 1 - ph), gr = g.conf?.grade || g.conf || (pf >= 0.7 ? "High" : pf >= 0.58 ? "Medium" : "Low"); return { grade: gr, text: gr === "Low" && pf < 0.58 ? "low (near coin-flip)" : String(gr).toLowerCase() }; }
+const confChip = (g) => { const c = confLabel(g); return `<span class="chip ${c.grade === "High" ? "good" : c.grade === "Low" ? "warn" : ""}">Confidence: ${esc(c.text)}</span>`; };
 const meter = (p) => `<span class="meter" aria-hidden="true"><span style="width:${Math.round(Math.min(1, Math.max(0, p)) * 100)}%"></span></span>`;
 
 
@@ -4155,7 +4160,7 @@ function gameCardNew(g) {
     <div class="gc-bar" aria-hidden="true"><span style="flex:${1 - ph};background:var(--s1)"></span><span style="flex:${ph};background:var(--s2)"></span></div>
     <div class="gc-f"><span>O/U ${L.total.toFixed(1)}</span><span>${esc(T(L.fav).abbr)} ${spreadTxt(L.spread)}</span><span>Proj ${f0(g.pred.as)}-${f0(g.pred.hs)}</span><span aria-hidden="true">›</span></div>
     ${liveBadge(lv)}
-    <div class="gc-x gc-ess"><span class="chip ${Math.max(ph, 1 - ph) >= 0.7 ? "good" : Math.max(ph, 1 - ph) >= 0.58 ? "" : "warn"}">Confidence: ${Math.max(ph, 1 - ph) >= 0.7 ? "high" : Math.max(ph, 1 - ph) >= 0.58 ? "medium" : "low (near coin-flip)"}</span>${out.length ? `<span class="gc-out">🚑 Out: ${esc(out.slice(0, 4).join(", "))}${out.length > 4 ? ` +${out.length - 4}` : ""}</span>` : `<span class="muted">No key absences listed</span>`}</div>
+    <div class="gc-x gc-ess">${confChip(g)}${g.pred.pHomeRaw != null ? `<span class="chip warn">Upset watch: ${esc(T(hFav ? g.home : g.away).abbr)} ${Math.round(Math.max(ph, 1 - ph) * 100)}% (${Math.round((hFav ? g.pred.pHomeRaw : 1 - g.pred.pHomeRaw) * 100)}% before)</span>` : ""}${out.length ? `<span class="gc-out">🚑 Out: ${esc(out.slice(0, 4).join(", "))}${out.length > 4 ? ` +${out.length - 4}` : ""}</span>` : `<span class="muted">No key absences listed</span>`}</div>
     ${top ? `<div class="gc-x">Top scorers: ${top}</div>` : ""}${flag}
   </a>`;
 }
@@ -4509,7 +4514,7 @@ function predictionsCard(g, sim, board) {
   const seen = new Set(), best = [];
   // First choice: leans at the sportsbook's main line (our chance, the book only sets the line).
   const WORD = { pts: "points", reb: "rebounds", ast: "assists", tpm: "threes", pra: "pts+reb+ast" };
-  for (const c of (sim?.comparison?.props || []).filter((x) => WORD[x.stat] && x.ourProbOver != null && !devCheck(g, x.id, x.stat)?.unexplained).map((x) => ({ ...x, q: Math.max(x.ourProbOver, 1 - x.ourProbOver) })).filter((x) => x.q >= 0.6).sort((a, b) => b.q - a.q)) {
+  for (const c of (sim?.comparison?.props || []).filter((x) => WORD[x.stat] && x.ourProbOver != null && !devCheck(g, x.id, x.stat)?.unexplained && !(x.ourMedian != null && x.bookLine && Math.abs(x.ourMedian - x.bookLine) > Math.max(PROP_GAP[x.stat] || 2, 0.2 * x.bookLine))) /* sanity: our median 20%+ away from the main line is more likely our data than a real edge (combined props included) */.map((x) => ({ ...x, q: Math.max(x.ourProbOver, 1 - x.ourProbOver) })).filter((x) => x.q >= 0.6).sort((a, b) => b.q - a.q)) {
     if (seen.has(String(c.id))) continue; seen.add(String(c.id));
     best.push({ label: `${c.n} ${c.ourProbOver >= 0.5 ? "over" : "under"} ${c.bookLine} ${WORD[c.stat]}`, p: c.q, player: { id: c.id, n: c.n }, mainLine: true, median: c.ourMedian });
     if (best.length === 3) break;

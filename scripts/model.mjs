@@ -1378,7 +1378,7 @@ for (const e of futureEvents) {
   const H = projectTeam(g, e.home, e.away, true, kH), A = projectTeam(g, e.away, e.home, false, kA);
   const pred = finishGame(g, H, A, { starters: null, newsLimit: new Set([...kH.newsLimit, ...kA.newsLimit]) });
   const up = upsetSignals(pred, H, A);
-  if (UPSET_ON && up.flag) pred.pHome = upsetAdj(pred.pHome);
+  if (UPSET_ON && up.flag) { pred.pHomeRaw = pred.pHome; pred.pHome = upsetAdj(pred.pHome); } // keep the before-upset-watch number for display
   const sideOut = (side, inj) => side.proj.sort((a, b) => b.proj.pts - a.proj.pts).map((x) => ({
     id: x.id, n: x.n, pos: x.pos, role: x.role, r2k: x.r2k, min: round(x.proj.min), pts: round(x.proj.pts), reb: round(x.proj.reb), ast: round(x.proj.ast), tpm: round(x.proj.tpm),
     stl: round(x.proj.stl), blk: round(x.proj.blk), scen: x.scen.map((s) => ({ s, pts: round(learn.scen[scenKey(s, x.role, "pts")]?.w || 0, 2), n: learn.scen[scenKey(s, x.role, "pts")]?.n || 0 })),
@@ -1396,7 +1396,7 @@ for (const e of futureEvents) {
   upcomingCtx.push({ id: e.id, pred });
   upcoming.push({
     id: e.id, date: e.date, phase: phaseOf(e.season, e.stype).label, home: e.home, away: e.away, venue: e.venue,
-    pred: { hs: round(pred.h.pts), as: round(pred.a.pts), pHome: round(pred.pHome, 3), pace: round(pred.expPace), close: round(pred.shape.close, 3), blowout: round(pred.shape.blowout, 3) },
+    pred: { hs: round(pred.h.pts), as: round(pred.a.pts), pHome: round(pred.pHome, 3), pHomeRaw: pred.pHomeRaw != null ? round(pred.pHomeRaw, 3) : undefined, pace: round(pred.expPace), close: round(pred.shape.close, 3), blowout: round(pred.shape.blowout, 3) },
     models: MODEL_KEYS.map((k) => ({ k, label: MODEL_LABEL[k], margin: round(pred.models[k]), weight: round(learn.w[k], 2) })),
     ref: pred.ref.tot || pred.ref.home ? { tot: round(pred.ref.tot), home: round(pred.ref.home), crew: g.officials } : null,
     conf: confidence(pred, H, A, e),
@@ -1499,7 +1499,11 @@ function confidence(pred, H, A, e) {
   const models = MODEL_KEYS.map((k) => pred.models[k]);
   const split = models.some((m) => m > 2) && models.some((m) => m < -2);
   if (split) why.push("The rating systems disagree on the winner");
-  const grade = why.length >= 2 || e.stype === 1 ? "Low" : why.length === 1 ? "Medium" : "High";
+  // One label for every page: data-quality reasons above, capped by how close the (upset-adjusted) win chance is.
+  const pf = Math.max(pred.pHome, 1 - pred.pHome);
+  let grade = why.length >= 2 || e.stype === 1 ? "Low" : why.length === 1 ? "Medium" : "High";
+  if (pf < 0.58) { grade = "Low"; why.push("Near coin-flip: the win chance is under 58%" + (pred.pHomeRaw != null ? " after the upset-watch adjustment" : "")); }
+  else if (pf < 0.7 && grade === "High") { grade = "Medium"; why.push("Win chance under 70%"); }
   return { grade, why };
 }
 function pickStyle(s) { return { pace: round(s.pace), off: round(s.off), def: round(s.def), net: round(s.off - s.def), tags: s.tags, tpar: round(s.tpar, 3), paint: round(s.paint), fb: round(s.fb), depth: round(s.depth), starterShare: round(s.starterShare, 3), benchPts: round(s.benchPts), efg: round(s.efg, 3), oppEfg: round(s.oppEfg, 3) }; }
@@ -1870,7 +1874,7 @@ writeJSON(path.join(OUT, "takes.json"), takes);
 fs.rmSync(path.join(OUT, "upcoming"), { recursive: true, force: true });
 for (const u of upcoming) writeJSON(path.join(OUT, "upcoming", `${u.id}.json`), u);
 writeJSON(path.join(OUT, "upcoming.json"), upcoming.map((u) => ({
-  id: u.id, date: u.date, phase: u.phase, home: u.home, away: u.away, venue: u.venue, pred: u.pred,
+  id: u.id, date: u.date, phase: u.phase, home: u.home, away: u.away, venue: u.venue, pred: u.pred, conf: u.conf?.grade,
   upset: { flag: u.upset.flag, n: u.upset.reasons.length, dogP: round(u.upset.dogP, 3) },
   out: u.teams.map((t) => t.out.filter((o) => o.star).map((o) => o.n)),
   top: u.teams.map((t) => t.players.slice(0, 3).map((p) => ({ n: p.n, pts: p.pts, reb: p.reb, ast: p.ast }))),
