@@ -1108,3 +1108,6 @@ a.gtab { color: var(--ink-2); }
 .pk-hit { text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: color-mix(in srgb, var(--ink) 4%, transparent); color: inherit; font-size: 15px; cursor: pointer; }
 .pk-hit:hover, .pk-hit:focus { border-color: var(--accent); }
 .pk-none { padding: 6px 2px; }
+.ol-item { display: grid; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; }
+.ol-why { padding: 2px 6px 6px; line-height: 1.45; }
+.ol-why ul { margin: 4px 0; }

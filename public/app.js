@@ -1970,6 +1970,38 @@ function scoutItem(p) {
     <span class="t3">${p.cur ? `<b>${f1(p.cur[2])}</b> pts` : `<span class="muted small">no games yet</span>`}</span></a>`;
 }
 // The player search behind both #/scout (scouting reports) and #/players (plain profiles). Same list, different destination.
+// Next-game outlook for the Scout list: our projection for his next game against his season average, with the reasons
+// behind the gap (minutes, opponent defence, pace, matchups, teammates out, scenarios, blowout risk). From our model only.
+async function nextGameOutlook() {
+  if (S.outlook) return S.outlook;
+  const up = await load("upcoming.json").catch(() => []);
+  const future = up.filter((u) => Date.parse(u.date) > Date.now()).sort((a, b) => a.date.localeCompare(b.date));
+  if (!future.length) return (S.outlook = { day: null, rows: [] });
+  const day = dayKey(future[0].date), games = future.filter((u) => dayKey(u.date) === day);
+  const full = (await Promise.all(games.map((u) => load(`upcoming/${u.id}.json`).catch(() => null)))).filter(Boolean);
+  const rows = [];
+  for (const g of full) for (const t of g.teams) {
+    const opp = g.teams.find((x) => x !== t);
+    for (const p of (t.players || []).filter((x) => x.min >= 15)) {
+      const sp = S.P?.[String(p.id)], c = sp?.cur, b0 = seasonLine(sp); if (!b0) continue;
+      const b = c && c[0] >= 5 ? { min: c[1], pts: c[2], reb: c[3], ast: c[4], g: c[0], basis: `this-season average (${c[0]} games)` } : { ...b0, basis: `average (only ${c?.[0] || 0} games this season, so blended with last season)` };
+      if (!(b.pts > 3)) continue;
+      const delta = p.pts - b.pts, pctd = delta / b.pts, why = [];
+      if (b.min > 0 && Math.abs(p.min - b.min) >= 2.5) why.push([Math.abs(p.min - b.min) * (b.pts / b.min), `${p.min > b.min ? "more" : "fewer"} minutes: ${f0(p.min)} projected vs his ${f0(b.min)}`]);
+      if (p.adj?.defense && Math.abs(p.adj.defense - 1) >= 0.03) why.push([Math.abs(p.adj.defense - 1) * b.pts, `${esc(T(opp.tid).abbr)} defence ${p.adj.defense < 1 ? "is tough on" : "is soft on"} players like him (${p.adj.defense > 1 ? "+" : ""}${Math.round((p.adj.defense - 1) * 100)}%)`]);
+      if (p.adj?.pace && Math.abs(p.adj.pace - 1) >= 0.02) why.push([Math.abs(p.adj.pace - 1) * b.pts, `${p.adj.pace > 1 ? "faster" : "slower"} game pace (${p.adj.pace > 1 ? "+" : ""}${Math.round((p.adj.pace - 1) * 100)}%)`]);
+      for (const sc of (p.scen || []).filter((x) => Math.abs(x.pts) >= 0.4).sort((a, b2) => Math.abs(b2.pts) - Math.abs(a.pts)).slice(0, 2)) why.push([Math.abs(sc.pts), `${sc.s} (${sc.pts > 0 ? "+" : ""}${f1(sc.pts)} pts, learned from ${num(sc.n)} player-games)`]);
+      if (p.zm?.tag && !/neutral/.test(p.zm.tag)) why.push([Math.abs(p.zm.paper || 0.5), `zone matchup: ${p.zm.tag} (${(ZONE_FALLBACK[p.zm.zone] || p.zm.zone).toLowerCase()})`]);
+      const mate = (p.wwD || []).filter((w) => Math.abs(w.pts) >= 0.8).sort((a, b2) => Math.abs(b2.pts) - Math.abs(a.pts))[0];
+      if (mate) why.push([Math.abs(mate.pts), `${shortName(mate.n)} out (${mate.pts > 0 ? "+" : ""}${f1(mate.pts)} pts in his record without him)`]);
+      const bo = p.ix?.blowout; if (bo && p.min >= 26 && bo.winBy15 + bo.loseBy15 >= 0.35) why.push([1, `blowout risk ${pct(bo.winBy15 + bo.loseBy15)}: starters may sit late`]);
+      if (p.q) why.push([2, "listed questionable"]);
+      why.sort((a, b2) => b2[0] - a[0]);
+      rows.push({ id: String(p.id), n: p.n, team: t.tid, opp: opp.tid, gid: g.id, date: g.date, home: t.isHome, proj: p, base: b, delta, pctd, why: why.map((x) => x[1]).slice(0, 4), unexplained: Math.abs(pctd) > 0.3 && !why.length });
+    }
+  }
+  return (S.outlook = { day, date: future[0].date, rows });
+}
 async function playerIndex(scout) {
   const all = (await load("players.json")).slice().sort((a, b) => (b.cur?.[2] ?? -1) - (a.cur?.[2] ?? -1));
   const zones = S.meta?.scout?.zones || FIVE.map((id) => ({ id, label: ZONE_FALLBACK[id] }));
@@ -1977,6 +2009,7 @@ async function playerIndex(scout) {
     ? `<h1>Scout</h1><p class="lead">Pick a player to see his strengths and weaknesses, his hot and cold zones on a court map, how shooters do against him, his playstyle and culture indicators, and how his zones line up against any opponent.</p>`
     : `<h1>Players</h1><p class="lead">Search any player for his matchup history, what happens to teammates when he scores more, and what changes when he sits. For hot and cold zones, strengths and weaknesses, open <a href="#/scout">Scout</a>.</p>`;
   app.insertAdjacentHTML("beforeend", `<input class="field" id="q" type="search" placeholder="Search by player or team name" aria-label="Search players" autocomplete="off" value="${esc(S.q || "")}">
+    ${scout ? `<div class="filters" role="group" aria-label="Next game outlook" style="margin-top:8px"><button class="fbtn" type="button" data-ol="" aria-pressed="${!S.ol}">All players</button><button class="fbtn" type="button" data-ol="hot" aria-pressed="${S.ol === "hot"}">🔥 Likely hot next game</button><button class="fbtn" type="button" data-ol="cold" aria-pressed="${S.ol === "cold"}">🧊 Likely cold next game</button></div>` : ""}
     ${scout ? `<select class="field" id="zf" aria-label="Filter by hot or cold zone" style="margin-top:8px">
       <option value="">Any zone profile</option>
       <optgroup label="Hot zone">${zones.map((z) => `<option value="hot:${esc(z.id)}"${S.zf === `hot:${z.id}` ? " selected" : ""}>Hot: ${esc(z.label)}</option>`).join("")}</optgroup>
@@ -1985,7 +2018,20 @@ async function playerIndex(scout) {
     <p class="small muted" id="pcount" role="status" style="margin:10px 0 8px"></p>
     <div class="tgrid" id="plist"></div>
     ${scout ? `<p class="small muted" style="margin-top:12px">HOT and COLD follow one rule for everyone: at least ${esc(S.meta?.scout?.zoneTagRule?.minAtt?.five ?? 30)} attempts in the zone, FG% at least ${esc(S.meta?.scout?.zoneTagRule?.minDiff ?? 3)} points away from the league there, and at least ${esc(S.meta?.scout?.zoneTagRule?.minZ ?? 1.5)} standard errors away. Counted over ${esc(S.meta?.scout?.window || "last season and this season")}.</p>` : ""}`);
+  const drawOutlook = async () => {
+    const O = await nextGameOutlook(), q = (S.q || "").trim().toLowerCase();
+    let rows = O.rows.filter((x) => !q || x.n.toLowerCase().includes(q) || T(x.team).name.toLowerCase().includes(q));
+    rows = S.ol === "hot" ? rows.filter((x) => x.delta > 0).sort((a, b) => b.delta - a.delta) : rows.filter((x) => x.delta < 0).sort((a, b) => a.delta - b.delta);
+    rows = rows.slice(0, 40);
+    document.getElementById("pcount").textContent = O.day ? `${S.ol === "hot" ? "Most likely to score above" : "Most likely to score below"} their season average in their next game (${day(O.date)}, PH time): our projection against this season's average, biggest gaps first.` : "No upcoming games right now.";
+    document.getElementById("plist").innerHTML = rows.map((x) => { const p = S.P?.[x.id] || { id: x.id, n: x.n, team: x.team };
+      return `<div class="ol-item">${scoutItem(p)}<div class="ol-why small"><div><b class="${x.delta > 0 ? "up" : "down"}">${x.delta > 0 ? "▲" : "▼"} ${f1(x.proj.pts)} pts projected vs his ${f1(x.base.pts)} ${esc(x.base.basis)} (${x.delta > 0 ? "+" : ""}${f1(x.delta)}, ${x.pctd > 0 ? "+" : ""}${Math.round(x.pctd * 100)}%)</b> ${x.home ? "vs" : "at"} ${esc(T(x.opp).abbr)} · ${f1(x.proj.reb)} reb · ${f1(x.proj.ast)} ast</div>
+        ${x.why.length ? `<ul class="dots">${x.why.map((w) => `<li>${w}</li>`).join("")}</ul>` : ""}
+        ${x.unexplained ? `<div style="color:var(--warn)">⚠ No injury, minutes or matchup reason explains a gap this size: treat with caution.</div>` : !x.why.length ? `<div class="muted">Small gap with no single big reason: mostly his recent form and team context.</div>` : ""}
+        <a class="go" href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`; }).join("") || `<p class="empty">No player matches.</p>`;
+  };
   const draw = () => {
+    if (scout && S.ol) return drawOutlook();
     const q = (S.q || "").trim().toLowerCase(), [zk, zid] = scout && S.zf ? S.zf.split(":") : [];
     let found = q ? all.filter((p) => p.n.toLowerCase().includes(q) || T(p.team).name.toLowerCase().includes(q)) : all;
     if (zk) found = found.filter((p) => (p[zk] || []).includes(zid));
@@ -1996,6 +2042,8 @@ async function playerIndex(scout) {
   };
   document.getElementById("q").addEventListener("input", (e) => { S.q = e.target.value; draw(); });
   document.getElementById("zf")?.addEventListener("change", (e) => { S.zf = e.target.value; draw(); });
+  app.querySelectorAll("[data-ol]").forEach((b) => b.addEventListener("click", () => { S.ol = b.dataset.ol; app.querySelectorAll("[data-ol]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); const zf = document.getElementById("zf"); if (zf) zf.hidden = !!S.ol; draw(); }));
+  if (S.ol) { const zf = document.getElementById("zf"); if (zf) zf.hidden = true; }
   draw();
 }
 const vPlayers = () => playerIndex(false);
