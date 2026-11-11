@@ -989,3 +989,22 @@ a.gtab { color: var(--ink-2); }
 .live-mini { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; padding: 10px 12px; font-size: 14px; }
 .live-mini .btn { margin-left: auto; }
 .btn.sm { min-height: 32px; padding: 4px 12px; font-size: 13px; }
+
+/* ---------- 2K-style 14-zone hot zone map ---------- */
+.hz-card { margin: 12px 0 6px; }
+.hz { margin: 6px auto; max-width: 460px; }
+.hz svg { width: 100%; height: auto; display: block; border-radius: 10px; }
+.hz-bg { fill: color-mix(in srgb, var(--ink) 4%, transparent); }
+.hz-z { stroke: none; }
+.hz-lines path, .hz-lines circle, .hz-lines rect { stroke: color-mix(in srgb, var(--ink) 55%, transparent); stroke-width: 2; }
+.hz-h2, i.hz-h2 { fill: #d7372f; background: #d7372f; }
+.hz-h1, i.hz-h1 { fill: #e9897f; background: #e9897f; }
+.hz-n, i.hz-n { fill: #8a93a6; background: #8a93a6; }
+.hz-c1, i.hz-c1 { fill: #79a7e3; background: #79a7e3; }
+.hz-c2, i.hz-c2 { fill: #2f6fd1; background: #2f6fd1; }
+.hz-low, i.hz-low { fill: #5b6476; background: #5b6476; opacity: .55; }
+.hz-z.hz-low { opacity: .35; }
+.hz-t { font: 700 22px/1 var(--sans, system-ui); fill: #fff; text-anchor: middle; dominant-baseline: middle; paint-order: stroke; stroke: rgba(0,0,0,.45); stroke-width: 3px; }
+.hz-t.sm { font-size: 17px; }
+.hz-ar { font-size: 16px; }
+.hz-ar.up { fill: #ffe08a; } .hz-ar.dn { fill: #b9f1ff; }

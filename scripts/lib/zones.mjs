@@ -286,3 +286,31 @@ export function decodeSubs(g) {
 export function scoreFlow(g) {
   return (g?.sc || []).map((r) => ({ per: r[SC.PER], sec: r[SC.SEC], t: elapsedSeconds(r[SC.PER], r[SC.SEC]), home: r[SC.HOME], away: r[SC.AWAY], margin: r[SC.HOME] - r[SC.AWAY] }));
 }
+
+// ---------- 14-zone map (2K-style hot zones) ----------
+// Display only (Scout pages): the five areas split the way NBA 2K draws its hot-zone map.
+// rim | short range left / middle / right | mid-range left baseline, left wing, top, right wing, right baseline |
+// three left corner, left wing, top, right wing, right corner. Heaves are left out.
+export const Z14 = [
+  { id: "rim", label: "At the rim", v: 2 },
+  { id: "shL", label: "Short range, left", v: 2 }, { id: "shC", label: "Short range, middle", v: 2 }, { id: "shR", label: "Short range, right", v: 2 },
+  { id: "mBL", label: "Mid-range, left baseline", v: 2 }, { id: "mWL", label: "Mid-range, left wing", v: 2 }, { id: "mT", label: "Mid-range, top", v: 2 }, { id: "mWR", label: "Mid-range, right wing", v: 2 }, { id: "mBR", label: "Mid-range, right baseline", v: 2 },
+  { id: "tCL", label: "Three, left corner", v: 3 }, { id: "tWL", label: "Three, left wing", v: 3 }, { id: "tT", label: "Three, top", v: 3 }, { id: "tWR", label: "Three, right wing", v: 3 }, { id: "tCR", label: "Three, right corner", v: 3 },
+];
+export const Z14_IDS = Z14.map((z) => z.id);
+const Z14_I = Object.fromEntries(Z14_IDS.map((z, i) => [z, i]));
+const FINE_TO_14 = { rim: "rim", paint: "shC", midL: "mWL", midC: "mT", midR: "mWR", c3L: "tCL", c3R: "tCR", atbL: "tWL", atbC: "tT", atbR: "tWR" };
+// decoded shot (with .zone / .fine from classifyShot) -> index into Z14, or -1 for heaves
+export function zone14(s, g = GEOM) {
+  if (s.zone === "heave") return -1;
+  if (s.zone === "rim") return Z14_I.rim;
+  if (!hasXY(s)) return Z14_I[FINE_TO_14[s.fine]] ?? -1;
+  const ang = shotAngle(s.x, s.y, g), side = (ang < 0) === g.lowXIsLeft ? "L" : "R";
+  if (s.zone === "c3") return Z14_I[`tC${side}`];
+  if (s.zone === "atb") return Math.abs(ang) <= 22.5 ? Z14_I.tT : Z14_I[`tW${side}`];
+  // two-pointers outside the restricted area: short range is the lane or anything inside 14 ft
+  const d = coordDist(s.x, s.y, g);
+  if (s.zone === "paint" || d < 14) return Math.abs(ang) <= 30 ? Z14_I.shC : Z14_I[`sh${side}`];
+  if (s.y <= g.cornerMaxY + 1) return Z14_I[`mB${side}`];
+  return Math.abs(ang) <= 22.5 ? Z14_I.mT : Z14_I[`mW${side}`];
+}

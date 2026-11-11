@@ -10,6 +10,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { DATA, PUBLIC_DATA, readJSON, writeJSON, isBetting } from "./lib/util.mjs";
 import { clamp, round, mean, sd, phi, posGroup, phaseOf, tsa, ew, normName, regress, etDay, gameDaysBetween } from "./lib/stats.mjs";
+// Shooting-efficiency regression (see playerBaseline). CL_EFF_K=0 turns it off for comparison runs.
+// Back-test (2026-11-11): K=400, half-life 40 games cut points MAE 4.949 -> 4.933 (2025-26) and 4.950 -> 4.922 (2026-27), game Brier unchanged.
+const EFF_K = Number(process.env.CL_EFF_K ?? 400), EFF_HL = Number(process.env.CL_EFF_HL ?? 40);
 import { teamBox, repairBlankRows, markCupFinals, scoreOnlyGames } from "./lib/boxfix.mjs";
 import { loadPbp } from "./lib/zonedata.mjs";
 import { buildContext } from "./lib/context.mjs";
@@ -242,6 +245,16 @@ function playerBaseline(p, season, date) {
     const e = ew(played, (r) => r[s], 10, wPhase);
     const pr = (s === "pts" || s === "tsa" || s === "tpm" || s === "ast") ? prior[s] * boost : prior[s];
     rates[s] = (e.v + pr * K) / (wsum.v + K);
+  }
+  // Scoring = shot volume x shooting efficiency. Volume follows recent games (role changes show up fast);
+  // efficiency is mostly noise over a few games, so it uses a long window and is shrunk hard toward his
+  // position's league rate (EFF_K pseudo shot attempts). Learned from games before this one only.
+  if (EFF_K > 0) {
+    const long = p.recs.filter((r) => r.date < date && r.min > 0).slice(-140);
+    const eP = ew(long, (r) => r.pts, EFF_HL, wPhase), eT = ew(long, (r) => r.tsa, EFF_HL, wPhase);
+    const lgEff = prior.tsa > 0 ? prior.pts / prior.tsa : 1.1;
+    const eff = (eP.v + lgEff * EFF_K) / (eT.v + EFF_K);
+    if (rates.tsa > 0 && Number.isFinite(eff)) rates.pts = rates.tsa * eff;
   }
   const startRate = ew(recs.filter((r) => r.avail), (r) => r.st, 6, wPhase).avg;
   let minutes = minE.w ? minE.avg : (r2k ? clamp((r2k.ovr - 65) * 1.3, 6, 32) : 12);
@@ -1863,7 +1876,7 @@ writeJSON(path.join(OUT, "players.json"), playerProfiles.map((p) => ({ id: p.id,
   // load); it stays false until the site reads teams/<id>.json, because the team page and the Scout
   // matchup lab still take them from teams.json.
 const TEAMS_JSON_SLIM = process.env.CL_TEAMS_SLIM === "1";
-const TEAM_SCOUT_KEYS = ["zones", "playTypes", "playstyle", "culture"];
+const TEAM_SCOUT_KEYS = ["zones", "zones14", "playTypes", "playstyle", "culture"];
 fs.rmSync(path.join(OUT, "teams"), { recursive: true, force: true });
 for (const t of teamProfiles) writeJSON(path.join(OUT, "teams", `${t.id}.json`), { id: t.id, ...Object.fromEntries(TEAM_SCOUT_KEYS.map((k) => [k, t[k] ?? null])) });
 writeJSON(path.join(OUT, "teams.json"), TEAMS_JSON_SLIM ? teamProfiles.map((t) => Object.fromEntries(Object.entries(t).filter(([k]) => !TEAM_SCOUT_KEYS.includes(k)))) : teamProfiles);
@@ -1894,6 +1907,7 @@ writeJSON(path.join(OUT, "learning.json"), {
   params: learn.history,
   factors: factorReport,
   inloop: inloopReport(),
+  efficiency: { applied: EFF_K > 0, k: EFF_K, halfLife: EFF_HL, note: "Scoring rate = shot volume (recent games, half-life 10) x shooting efficiency (points per true shot attempt over a long window, half-life " + EFF_HL + " games, shrunk toward his position average with " + EFF_K + " attempts of league shooting). A hot or cold week moves the volume, not the efficiency. Walk-forward test (2026-11-11), players projected 15+ minutes: points error 4.949 -> 4.933 (2025-26 regular season) and 4.950 -> 4.922 (2026-27); game-level Brier score unchanged." },
 });
 writeJSON(path.join(OUT, "meta.json"), {
   updated: nowISO, games: games.length, predicted, upcoming: upcoming.length, players: playerProfiles.length,

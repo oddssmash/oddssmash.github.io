@@ -449,6 +449,69 @@ function courtFigure(id, cells, label, hint = "Tap or hover a zone for the full 
     <figcaption class="court-info" aria-live="polite"><span class="muted">${esc(hint)}</span></figcaption>
   </figure>`;
 }
+// ---------------------------------------------------------------- 2K-style 14-zone hot zone map
+// Red = hot (or, for a defence, a soft spot opponents shoot well in), blue = cold (or a strong spot). Arrows: the last 10 games
+// against his/their two-season level (heating up / cooling down; for a defence leaking / tightening).
+const Z14_NAMES = { rim: "At the rim", shL: "Short range, left", shC: "Short range, middle", shR: "Short range, right", mBL: "Mid-range, left baseline", mWL: "Mid-range, left wing", mT: "Mid-range, top", mWR: "Mid-range, right wing", mBR: "Mid-range, right baseline", tCL: "Three, left corner", tWL: "Three, left wing", tT: "Three, top", tWR: "Three, right wing", tCR: "Three, right corner" };
+const HZ = (() => {
+  const K = 10, hx = 25, hy = 5.25, r3 = 23.75, yb = hy + Math.sqrt(r3 * r3 - 22 * 22), H = 33, rad = Math.PI / 180;
+  const P = (x, y) => `${(x * K).toFixed(1)} ${(y * K).toFixed(1)}`;
+  const pt = (r, a) => [hx - r * Math.sin(a * rad), hy + r * Math.cos(a * rad)]; // a > 0 = left as you face the basket
+  const sector = (r1, r2, a1, a2) => { const [p1, p2, p3, p4] = [pt(r1, a1), pt(r2, a1), pt(r2, a2), pt(r1, a2)]; return `M${P(...p1)} L${P(...p2)} A${r2 * K} ${r2 * K} 0 0 ${a2 > a1 ? 1 : 0} ${P(...p3)} L${P(...p4)} A${r1 * K} ${r1 * K} 0 0 ${a2 > a1 ? 0 : 1} ${P(...p1)}Z`; };
+  const t = Math.tan(22.5 * rad), xr = (y) => (y - hy) * t; // x offset of the 22.5 degree rays at height y
+  const poly = (pts) => `M${pts.map((p) => P(...p)).join(" L")}Z`;
+  const wingL = poly([[hx - xr(yb), yb], [-1, yb], [-1, H + 1], [hx - xr(H + 1), H + 1]]);
+  const wingR = poly([[hx + xr(yb), yb], [51, yb], [51, H + 1], [hx + xr(H + 1), H + 1]]);
+  const top = poly([[hx, hy], [hx - xr(H + 1), H + 1], [hx + xr(H + 1), H + 1]]);
+  const baseL = poly([[-1, -1], [hx, -1], [hx, yb], [-1, yb]]), baseR = poly([[hx, -1], [51, -1], [51, yb], [hx, yb]]);
+  const three = `M${P(3, -1)} V${(yb * K).toFixed(1)} A${r3 * K} ${r3 * K} 0 0 0 ${P(47, yb)} V${-K}Z`;
+  const zones = [
+    { id: "tCL", d: poly([[0, 0], [3, 0], [3, yb], [0, yb]]), m: "out", at: [1.5, 7] }, { id: "tCR", d: poly([[47, 0], [50, 0], [50, yb], [47, yb]]), m: "out", at: [48.5, 7] },
+    { id: "tWL", d: wingL, m: "out", at: [5.5, 27] }, { id: "tT", d: top, m: "out", at: [25, 31] }, { id: "tWR", d: wingR, m: "out", at: [44.5, 27] },
+    { id: "mBL", d: baseL, m: "mid", at: [7.5, 8] }, { id: "mBR", d: baseR, m: "mid", at: [42.5, 8] },
+    { id: "mWL", d: wingL, m: "mid", at: [12.5, 20.5] }, { id: "mT", d: top, m: "mid", at: [25, 24.5] }, { id: "mWR", d: wingR, m: "mid", at: [37.5, 20.5] },
+    { id: "shL", d: sector(4, 14, 30, 118), m: "in", at: [15.8, 8.5] }, { id: "shC", d: sector(4, 14, -30, 30), m: "in", at: [25, 14] }, { id: "shR", d: sector(4, 14, -118, -30), m: "in", at: [34.2, 8.5] },
+    { id: "rim", d: `M${P(hx - 4, hy)} a40 40 0 1 0 80 0 a40 40 0 1 0 -80 0Z`, m: null, at: [25, 5.6] },
+  ];
+  return { K, W: 50 * K, H: H * K, hx, hy, yb, r3, three, zones };
+})();
+function hz14Figure(rows, mode = "off", label = "") {
+  if (!rows?.length) return "";
+  const by = Object.fromEntries(rows.map((x) => [x.id, x]));
+  const uid = "hz" + Math.random().toString(36).slice(2, 8), K = HZ.K;
+  const cls = (x) => { if (!x || x.low) return "hz-low"; const d = x.diff ?? 0; if (x.tag === "hot" || x.tag === "soft") return "hz-h2"; if (x.tag === "cold" || x.tag === "strong") return "hz-c2"; return d >= 3 ? "hz-h1" : d <= -3 ? "hz-c1" : "hz-n"; };
+  const arrow = (x) => (x?.trend === "heating" || x?.trend === "leaking" ? "▲" : x?.trend === "cooling" || x?.trend === "tightening" ? "▼" : "");
+  const tip = (x) => `${Z14_NAMES[x.id]}: ${x.att ? x.pct + "%" : "no shots"} on ${x.att} (league ${x.lgPct}%)${x.rec ? `, last 10 games ${x.rec[1]}/${x.rec[0]}` : ""}${x.trend ? ` (${x.trend})` : ""}`;
+  const shapes = HZ.zones.map((z) => { const x = by[z.id]; if (!x) return ""; return `<path class="hz-z ${cls(x)}" d="${z.d}"${z.m ? ` mask="url(#${uid}-${z.m})"` : ""}><title>${esc(tip(x))}</title></path>`; }).join("");
+  const labels = HZ.zones.map((z) => { const x = by[z.id]; if (!x || !x.att) return ""; const [lx, ly] = z.at; const small = ["tCL", "tCR"].includes(z.id); const a = arrow(x);
+    return `<text class="hz-t${small ? " sm" : ""}" x="${lx * K}" y="${ly * K}">${esc(Math.round(x.pct))}${small ? "" : "%"}${a ? `<tspan class="hz-ar ${a === "▲" ? "up" : "dn"}" dx="2">${a}</tspan>` : ""}</text>`; }).join("");
+  return `<figure class="hz"><svg viewBox="0 0 ${HZ.W} ${HZ.H}" role="img" aria-label="${esc(label + ". " + rows.filter((x) => x.att).map(tip).join("; "))}">
+    <defs>
+      <mask id="${uid}-out"><rect width="${HZ.W}" height="${HZ.H}" fill="#fff"/><path d="${HZ.three}" fill="#000"/></mask>
+      <mask id="${uid}-mid"><path d="${HZ.three}" fill="#fff"/><circle cx="${HZ.hx * K}" cy="${HZ.hy * K}" r="${14 * K}" fill="#000"/></mask>
+    </defs>
+    <rect class="hz-bg" width="${HZ.W}" height="${HZ.H}"/>${shapes}
+    <g class="hz-lines"><path d="${HZ.three}" fill="none"/><circle cx="${HZ.hx * K}" cy="${HZ.hy * K}" r="${14 * K}" fill="none"/><circle cx="${HZ.hx * K}" cy="${HZ.hy * K}" r="${4 * K}" fill="none"/><rect x="0" y="0" width="${HZ.W}" height="${HZ.H}" fill="none"/></g>
+    ${labels}</svg></figure>`;
+}
+function hz14Card(z, mode, who, title) {
+  if (!z) return "";
+  const rows = mode === "def" ? z.def : mode === "toff" ? z.off : z.rows; if (!rows?.length) return "";
+  const def = mode === "def", hotW = def ? "Soft spots" : "Hot zones", coldW = def ? "Strong spots" : "Cold zones";
+  const hot = rows.filter((x) => (def ? x.tag === "soft" : x.tag === "hot")), cold = rows.filter((x) => (def ? x.tag === "strong" : x.tag === "cold"));
+  const up = rows.filter((x) => x.trend === (def ? "leaking" : "heating")), dn = rows.filter((x) => x.trend === (def ? "tightening" : "cooling"));
+  const nm = (x) => `${esc(Z14_NAMES[x.id])} (${esc(x.pct)}% on ${esc(num(x.att))}, league ${esc(x.lgPct)}%)`;
+  const nmR = (x) => `${esc(Z14_NAMES[x.id])} (${esc(x.rec[1])}/${esc(x.rec[0])} in the last ${esc(z.recentGames)} games vs ${esc(x.pct)}% usual)`;
+  return `<div class="hz-card"><h3>${esc(title || "2K-style hot zones (14 zones)")}</h3>
+    ${hz14Figure(rows, def ? "def" : "off", title || who)}
+    <div class="legend zlegend"><span><i class="hz-c2"></i>${def ? "STRONG: opponents clearly below league" : "COLD: clearly below league"}</span><span><i class="hz-c1"></i>Below</span><span><i class="hz-n"></i>Near league</span><span><i class="hz-h1"></i>Above</span><span><i class="hz-h2"></i>${def ? "SOFT: opponents clearly above league" : "HOT: clearly above league"}</span><span><i class="hz-low"></i>Too few shots</span></div>
+    <ul class="dots small">
+      ${hot.length ? `<li><b>${hotW}:</b> ${hot.map(nm).join(", ")}</li>` : ""}${cold.length ? `<li><b>${coldW}:</b> ${cold.map(nm).join(", ")}</li>` : ""}
+      ${up.length ? `<li><b>▲ ${def ? "Leaking lately" : "Heating up"}:</b> ${up.map(nmR).join(", ")}</li>` : ""}${dn.length ? `<li><b>▼ ${def ? "Tightening lately" : "Cooling down"}:</b> ${dn.map(nmR).join(", ")}</li>` : ""}
+      ${!hot.length && !cold.length && !up.length && !dn.length ? "<li>No zone clears the hot, cold or trend rule yet.</li>" : ""}
+    </ul>
+    <p class="small muted">Numbers are FG% by zone, ${esc(z.window)} (${esc(z.games)} games), as you face the basket. Hot/cold needs ${esc(z.rule?.minAtt)}+ attempts, 3+ points vs league and 1.5 standard errors. ▲/▼ = the last ${esc(z.recentGames)} games differ from the usual level by ${esc(z.rule?.trend?.minDiff)}+ points (${esc(z.rule?.trend?.minAtt)}+ attempts, 1.2 standard errors): recent form, which usually drifts back.</p></div>`;
+}
 const LEGEND = {
   off: ["COLD: clearly below league", "Below league", "Near league", "Above league", "HOT: clearly above league"],
   def: ["STRONG: opponents clearly below league", "Below league", "Near league", "Above league", "SOFT: opponents clearly above league"],
@@ -1447,6 +1510,9 @@ async function vWhy() {
       <div class="chart" id="c-acc" data-label="Cumulative share of winners called correctly by week"></div>
     </div>
 
+    ${L.efficiency?.applied ? `<div class="card"><h2>New: shooting luck is separated from skill</h2>
+      <p>After every game the model now updates a player's scoring in two parts: <b>how many shots he gets</b> (follows recent games, so role changes show up fast) and <b>how well he shoots</b> (a long window, pulled toward his position's league rate, so one hot or cold week barely moves it).</p>
+      <p class="small muted">${esc(L.efficiency.note)}</p></div>` : ""}
     <div class="card"><h2>What caused the misses each week</h2>
       <p class="small muted">Average points of error per team per game, split by cause.</p>
       <div class="legend">${WHY_KEYS.map((k, j) => `<span><i style="background:var(--s${j + 1})"></i>${WHY[k]}</span>`).join("")}</div>
@@ -1570,6 +1636,7 @@ function teamScout(t) {
     <p class="small muted">${lead}</p>
     ${courtFigure(`team-${side}`, zoneCells(z[side].fine, mode, "its"), `${t.name}: ${title}`)}
     ${courtLegend(mode)}
+    ${t.zones14 ? hz14Card(t.zones14, side === "off" ? "toff" : "def", t.name, side === "off" ? "2K-style hot zones (14) and recent form" : "Defence by 14 zones: soft and strong spots") : ""}
     <h3>Five-zone summary</h3>${zoneTable(z[side].five, mode, { rank: true })}
     <details class="more"><summary>All ten zones as a table</summary>${zoneTable(z[side].fine, mode)}</details>
     <p class="small muted" style="margin-top:8px">${esc(num(z[side].fga))} shots ${side === "off" ? "taken" : "allowed"} in ${esc(z.games)} games, ${esc(z.window)}. ${mode === "def" ? "Rank 1 = lowest FG% allowed." : "Rank 1 = best FG%."}</p></div>`;
@@ -1732,6 +1799,7 @@ function scoutMap(p) {
     <p class="small">${hot.length ? `${ztag("hot")} ${spot(hot)}. ` : ""}${cold.length ? `${ztag("cold")} ${spot(cold)}. ` : ""}${!hot.length && !cold.length ? "No zone has cleared the hot or cold rule yet. " : ""}</p>
     ${courtFigure("p-off", zoneCells(z.fine, "off", "his"), `${p.n}: field-goal percentage and attempts by court zone`)}
     ${courtLegend("off")}
+    ${hz14Card(p.zones14, "off", p.n, "2K-style hot zones (14 zones) and recent form")}
     <p class="small muted">Left and right are as you face the basket. ${esc(num(z.fga))} shots in ${esc(z.games)} games, ${esc(z.window)}. HOT and COLD need at least ${esc(r.minAtt?.fine ?? 20)} attempts in a zone (${esc(r.minAtt?.five ?? 30)} in the summary below), a gap of ${esc(r.minDiff ?? 3)} points of FG% to the league and ${esc(r.minZ ?? 1.5)} standard errors.${z.heaves?.[0] ? ` ${esc(z.heaves[0])} end-of-period heaves (${esc(z.heaves[1])} made) are left out.` : ""}</p>
     <h3>Five-zone summary</h3>${zoneTable(z.five, "off")}
     <details class="more"><summary>All ten zones as a table</summary>${zoneTable(z.fine, "off")}</details>

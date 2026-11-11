@@ -7,7 +7,8 @@
 // plain counts (zone state "raw" layer) and NBA.com tables. Nothing in this file feeds a
 // back-test projection. Every statement carries its number and its sample size.
 import { clamp, round, mean, sd, posGroup, normName } from "./stats.mjs";
-import { FINE_IDS, FINE_LABEL, ZONE_LABEL, STYLES } from "./zones.mjs";
+import { FINE_IDS, FINE_LABEL, ZONE_LABEL, STYLES, Z14 } from "./zones.mjs";
+const Z14_LABEL = Object.fromEntries(Z14.map((z) => [z.id, z.label]));
 import { Z5, ZVAL, NF, NS, F2Z, FINE_VAL } from "./zonestate.mjs";
 import { opponentInputs, playerInputs, OPP_FACTORS, FACTOR_BY_ID } from "./factors.mjs";
 
@@ -342,11 +343,20 @@ export function createScout(env) {
   function playerScout(p, blocks, prof) {
     const S = [], W = [];
     const add = (list, score, t, n, k) => list.push({ score, t, n, k });
-    const { zones, styles, defense, playstyle, culture, quarters, vsTeams } = blocks;
+    const { zones, zones14, styles, defense, playstyle, culture, quarters, vsTeams } = blocks;
     if (zones) {
       for (const r of zones.five) if (r.tag !== "neutral") add(r.tag === "hot" ? S : W, Math.abs(r.diff) * Math.sqrt(r.att) / 10, `${r.tag === "hot" ? "Hot" : "Cold"} ${Z5_TEXT[r.id]}: ${r.pct}% on ${r.att} attempts (league ${r.lgPct}%), ${r.share}% of his shots.`, r.att, "zone");
       const fiveTagged = new Set(zones.five.filter((r) => r.tag !== "neutral").map((r) => r.id));
       for (const r of zones.fine) { const parent = r.id.startsWith("mid") ? "mid" : r.id.startsWith("c3") ? "c3" : r.id.startsWith("atb") ? "atb" : r.id; if (r.tag !== "neutral" && parent !== r.id && !fiveTagged.has(parent)) add(r.tag === "hot" ? S : W, Math.abs(r.diff) * Math.sqrt(r.att) / 12, `${r.tag === "hot" ? "Hot spot" : "Cold spot"}: ${r.label.toLowerCase()}, ${r.pct}% on ${r.att} attempts (league ${r.lgPct}%).`, r.att, "zone"); }
+    }
+    // 14-zone spots the coarser tables do not already cover, and recent form (last 10 games vs his usual level)
+    if (zones14?.rows) {
+      const covered = new Set([...(zones?.five || []), ...(zones?.fine || [])].filter((r) => r.tag !== "neutral").map((r) => r.id));
+      const parent = { rim: "rim", shL: "paint", shC: "paint", shR: "paint", mBL: "mid", mWL: "mid", mT: "mid", mWR: "mid", mBR: "mid", tCL: "c3", tCR: "c3", tWL: "atb", tT: "atb", tWR: "atb" };
+      for (const r of zones14.rows) {
+        if (r.tag !== "neutral" && !covered.has(parent[r.id]) && r.share >= 4) add(r.tag === "hot" ? S : W, Math.abs(r.diff) * Math.sqrt(r.att) / 13, `${r.tag === "hot" ? "Hot spot" : "Cold spot"} (14-zone map): ${Z14_LABEL[r.id].toLowerCase()}, ${r.pct}% on ${r.att} attempts (league ${r.lgPct}%).`, r.att, "zone14");
+        if (r.trend && r.rec) add(r.trend === "heating" ? S : W, 1.2 + Math.abs(r.rec[1] / r.rec[0] * 100 - r.pct) / 10, `Recent form, ${r.trend === "heating" ? "heating up" : "cooling down"}: ${Z14_LABEL[r.id].toLowerCase()}, ${r.rec[1]} of ${r.rec[0]} in his last ${zones14.recentGames} games against ${r.pct}% usually. Streaks like this usually drift back, so the projection keeps his long-run rate.`, r.rec[0], "form");
+      }
     }
     for (const r of styles || []) if (r.tag !== "neutral" && r.share >= 8) add(r.tag === "hot" ? S : W, Math.abs(r.diff) * Math.sqrt(r.att) / 14, `${r.label}: ${r.pct}% on ${r.att} attempts (league ${r.lgPct}% on that shot type).`, r.att, "style");
     for (const r of playstyle?.playTypes?.rows || []) {
@@ -385,7 +395,7 @@ export function createScout(env) {
       if (rs.length && rs[0][4] >= 0.8) add(S, rs[0][4], `Best zone matchup on paper: ${ab(rs[0][0])}, ${sign(rs[0][4])} points${zl(rs[0])}. The learned factors add ${sign(rs[0][1], 2)} before the team-total scaling.`, null, "matchup");
       const w = rs.at(-1); if (w && w[4] <= -0.8) add(W, -w[4], `Toughest zone matchup on paper: ${ab(w[0])}, ${sign(w[4])} points${zl(w)}. The learned factors add ${sign(w[1], 2)} before the team-total scaling.`, null, "matchup");
     }
-    const CAP = { zone: 3, style: 2, playtype: 2, defense: 2, split: 2, clutch: 1, culture: 1, quarter: 1, matchup: 1 };
+    const CAP = { zone14: 1, form: 1, zone: 3, style: 2, playtype: 2, defense: 2, split: 2, clutch: 1, culture: 1, quarter: 1, matchup: 1 };
     const fin = (l) => { const c = {}; return l.sort((a, b) => b.score - a.score).filter((x) => { c[x.k] = (c[x.k] || 0) + 1; return c[x.k] <= CAP[x.k]; }).slice(0, 8).map(({ t, n, k }) => ({ t, n, k })); };
     if (!S.length && !W.length) return null;
     return { strengths: fin(S), weaknesses: fin(W) };
@@ -393,10 +403,49 @@ export function createScout(env) {
   const Z5_TEXT = { rim: "at the rim", paint: "in the paint (outside the restricted area)", mid: "from mid-range", c3: "on corner threes", atb: "on above-the-break threes" };
   const ZONE_SHORT = { rim: "rim", paint: "paint", mid: "mid-range", c3: "corner 3", atb: "above-break 3" };
 
+  // ---------------------------------------------------------------- 14-zone map (2K-style hot zones)
+  // Same window as the other zone tables (two seasons), every zone compared with the league, plus the last
+  // 10 games against that window ("heating up" / "cooling down"). Display only.
+  const N14 = Z14.length;
+  const LG14 = (() => { const o = { a: arr(N14), m: arr(N14) }; for (const y of WIN) { const L = ZS.z14?.league?.[y]; if (L) for (let i = 0; i < N14; i++) { o.a[i] += L.a[i]; o.m[i] += L.m[i]; } } return o; })();
+  const TREND = { minAtt: 8, minDiff: 8, minZ: 1.2 };
+  function rows14(a, m, ra, rm, minAtt, isDef) {
+    const tot = sum(a) || 1;
+    return Z14.map((z, i) => {
+      const lg = LG14.a[i] > 0 ? LG14.m[i] / LG14.a[i] : null;
+      let tag = tagOf(a[i], m[i], lg, minAtt); if (isDef) tag = tag === "hot" ? "soft" : tag === "cold" ? "strong" : "neutral";
+      const row = { id: z.id, att: a[i], made: m[i], pct: pc(m[i], a[i]), share: round(a[i] / tot * 100), lgPct: lg == null ? null : round(lg * 100), diff: a[i] > 0 && lg != null ? round((m[i] / a[i] - lg) * 100) : null, tag };
+      if (a[i] < minAtt) row.low = 1;
+      if (ra) {
+        row.rec = [ra[i], rm[i]];
+        const base = a[i] >= minAtt ? m[i] / a[i] : lg;
+        if (base != null && ra[i] >= TREND.minAtt) { const d = rm[i] / ra[i] - base, zz = d / Math.sqrt(Math.max(0.01, base * (1 - base)) / ra[i]); if (d * 100 >= TREND.minDiff && zz >= TREND.minZ) row.trend = isDef ? "leaking" : "heating"; else if (d * 100 <= -TREND.minDiff && zz <= -TREND.minZ) row.trend = isDef ? "tightening" : "cooling"; }
+      }
+      return row;
+    });
+  }
+  const sumRecent = (list, ka = "a", km = "m") => { const a = arr(N14), m = arr(N14); for (const g of list || []) for (let i = 0; i < N14; i++) { a[i] += g[ka][i]; m[i] += g[km][i]; } return { a, m, g: (list || []).length }; };
+  function player14(pid) {
+    const z = ZS.z14?.players?.get(String(pid)); if (!z) return null;
+    const a = arr(N14), m = arr(N14); let g = 0;
+    for (const y of WIN) { const S = z.s[y]; if (S) { for (let i = 0; i < N14; i++) { a[i] += S.a[i]; m[i] += S.m[i]; } g += S.g; } }
+    if (sum(a) < 30) return null;
+    const rec = sumRecent(z.recent);
+    return { window: windowLabel, games: g, recentGames: rec.g, rule: { minAtt: 15, trend: TREND }, rows: rows14(a, m, rec.a, rec.m, 15, false) };
+  }
+  function team14(tid) {
+    const z = ZS.z14?.teams?.get(String(tid)); if (!z) return null;
+    const oa = arr(N14), om = arr(N14), da = arr(N14), dm = arr(N14); let g = 0;
+    for (const y of WIN) { const S = z.s[y]; if (S) { for (let i = 0; i < N14; i++) { oa[i] += S.oa[i]; om[i] += S.om[i]; da[i] += S.da[i]; dm[i] += S.dm[i]; } g += S.g; } }
+    if (g < 5) return null;
+    const ro = sumRecent(z.recentO), rd = sumRecent(z.recentD);
+    return { window: windowLabel, games: g, recentGames: ro.g, rule: { minAtt: 80, trend: TREND }, off: rows14(oa, om, ro.a, ro.m, 80, false), def: rows14(da, dm, rd.a, rd.m, 80, true) };
+  }
+
   function player(p, prof) {
     const zp = ZS.players.get(p.id);
     const R = combine(zp?.raw, WIN), C = zp?.raw?.[lastSeason] || null;
-    const zones = playerZones(R, C);
+    const zones = playerZones(R, C), zones14 = player14(p.id);
     const styles = R ? styleRows(R.sa, R.sm, LG.sa, LG.sm) : null;
     const defense = playerDefense(p.n, R);
     const pt = playTypes(p.n);
@@ -404,8 +453,8 @@ export function createScout(env) {
     const culture = playerCulture(p, R, zp);
     const quarters = playerQuarters(R);
     const vsTeams = playerVsTeams(p);
-    const scout = playerScout(p, { zones, styles, defense, playstyle, culture, quarters, vsTeams }, prof);
-    return { zones, styles, defense, playstyle, culture, quarters, scout, vsTeams };
+    const scout = playerScout(p, { zones, zones14, styles, defense, playstyle, culture, quarters, vsTeams }, prof);
+    return { zones, zones14, styles, defense, playstyle, culture, quarters, scout, vsTeams };
   }
 
   // ---------------------------------------------------------------- team blocks
@@ -515,7 +564,7 @@ export function createScout(env) {
   }
   function team(tid) {
     const zones = teamZones(tid), pt = teamPlayTypes(tid);
-    return { zones, playTypes: pt, playstyle: teamPlaystyle(tid, zones, pt), culture: teamCulture(tid) };
+    return { zones, zones14: team14(tid), playTypes: pt, playstyle: teamPlaystyle(tid, zones, pt), culture: teamCulture(tid) };
   }
 
   const playerZoneWindow = (pid) => { const R = combine(ZS.players.get(pid)?.raw, WIN); return R ? { a: five(R.fa), m: five(R.fm), g: R.g } : null; };

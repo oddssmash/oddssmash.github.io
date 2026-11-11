@@ -12,7 +12,8 @@
 //        are what the website shows, so every displayed number is a real count.
 //   facts one compact record per game (period scores, zones, four factors, runs, clutch ...)
 //        for head-to-head tables and "when X happened, Y won" scenarios.
-import { decodeShots, decodeFreeThrows, decodeTech, decodePlayerCounts, FINE_IDS, FINE_TO_ZONE, STYLES, POSS, FL, elapsedSeconds, SC } from "./zones.mjs";
+import { decodeShots, decodeFreeThrows, decodeTech, decodePlayerCounts, FINE_IDS, FINE_TO_ZONE, STYLES, POSS, FL, elapsedSeconds, SC, zone14, Z14 } from "./zones.mjs";
+export const N14 = Z14.length, RECENT14 = 10; // 14-zone map (display only) and the "recent form" window in games
 import { summarizeGame, EARLY_OFFENCE_SECS, CLUTCH } from "./gameflow.mjs";
 import { loadPbp } from "./zonedata.mjs";
 import { teamBox } from "./boxfix.mjs";
@@ -52,6 +53,12 @@ export function createZoneState() {
   const league = { d: blankTD(), raw: {}, pd: { sa: arr(NS), sm: arr(NS), fas: arr(NF), q4: 0, qpts: 0 } };
   const lastResult = new Map(); // tid -> { season, won } of its last non-preseason game (for "after a loss")
   let missing = 0, recorded = 0;
+  // 14-zone counts for the Scout pages: per season and for each player's / team's last RECENT14 games.
+  // Display only: nothing reads these during the walk-forward loop.
+  const z14 = { players: new Map(), teams: new Map(), league: {} };
+  const z14P = (id) => { if (!z14.players.has(id)) z14.players.set(id, { s: {}, recent: [] }); return z14.players.get(id); };
+  const z14T = (id) => { if (!z14.teams.has(id)) z14.teams.set(id, { s: {}, recentO: [], recentD: [] }); return z14.teams.get(id); };
+  const addArr = (a, b) => { for (let i = 0; i < a.length; i++) a[i] += b[i]; };
 
   const getP = (id) => { if (!players.has(id)) players.set(id, { id, d: blankPD(), raw: {}, vs: {}, season: null }); return players.get(id); };
   const getT = (id) => { if (!teams.has(id)) teams.set(id, { id, d: blankTD(), raw: {}, season: null }); return teams.get(id); };
@@ -71,12 +78,15 @@ export function createZoneState() {
     const gp = (pid, side) => { if (!pg.has(pid)) pg.set(pid, { side, fa: arr(NF), fm: arr(NF), fas: arr(NF), sa: arr(NS), sm: arr(NS), q: arr(5), tra: 0, trm: 0, trp: 0, cl: { fga: 0, fgm: 0, tpa: 0, tpm: 0, fta: 0, ftm: 0, pts: 0 }, blkZ: arr(6), blkd: 0, astZ: arr(6), tech: 0, flag: 0, ejec: 0, sf: 0, of: 0, tovBad: 0, tovLost: 0, tovViol: 0, tovLive: 0 }); return pg.get(pid); };
     const tg = [0, 1].map(() => ({ fa: arr(NF), fm: arr(NF), fas: arr(NF), sa: arr(NS), sm: arr(NS) }));
     let sum = null, clutchGame = false;
+    const p14 = new Map(), t14 = [0, 1].map(() => ({ a: arr(N14), m: arr(N14) }));
     if (hasPlays) {
       const flowT = [], flowM = [];
       for (const r of pbp.sc || []) { flowT.push(elapsedSeconds(r[SC.PER], r[SC.SEC])); flowM.push(r[SC.HOME] - r[SC.AWAY]); }
       const marginBefore = (t) => { let m = 0; for (let i = 0; i < flowT.length && flowT[i] < t; i++) m = flowM[i]; return m; };
       for (const s of decodeShots(pbp)) {
         const fi = FI[s.fine], si = SI[s.style], zi = F2Z[fi] < 0 ? 5 : F2Z[fi];
+        const k14 = zone14(s);
+        if (k14 >= 0) { t14[s.side].a[k14]++; t14[s.side].m[k14] += s.made; if (s.pid) { if (!p14.has(s.pid)) p14.set(s.pid, { a: arr(N14), m: arr(N14) }); const q = p14.get(s.pid); q.a[k14]++; q.m[k14] += s.made; } }
         const t = tg[s.side]; t.fa[fi]++; t.fm[fi] += s.made; t.sa[si]++; t.sm[si] += s.made; if (s.made && s.ast) t.fas[fi]++;
         if (s.pid) {
           const o = gp(s.pid, s.side);
@@ -112,6 +122,21 @@ export function createZoneState() {
         o.sf += r.shootingFouls; o.of += r.offensiveFouls; o.tovBad += r.tovBadPass; o.tovLost += r.tovLostBall; o.tovViol += r.tovViolation + r.tovOffFoul; o.tovLive += r.tovStolen;
       }
       sum = summarizeGame(pbp);
+      if (rawOK) {
+        const L14 = (z14.league[g.season] ||= { a: arr(N14), m: arr(N14) });
+        for (const side of [0, 1]) {
+          addArr(L14.a, t14[side].a); addArr(L14.m, t14[side].m);
+          const T14 = z14T(tids[side]), S14 = (T14.s[g.season] ||= { oa: arr(N14), om: arr(N14), da: arr(N14), dm: arr(N14), g: 0 });
+          addArr(S14.oa, t14[side].a); addArr(S14.om, t14[side].m); addArr(S14.da, t14[1 - side].a); addArr(S14.dm, t14[1 - side].m); S14.g++;
+          T14.recentO.push({ a: t14[side].a, m: t14[side].m }); T14.recentD.push({ a: t14[1 - side].a, m: t14[1 - side].m });
+          if (T14.recentO.length > RECENT14) { T14.recentO.shift(); T14.recentD.shift(); }
+        }
+        for (const [pid, q] of p14) {
+          const P14 = z14P(pid), S14 = (P14.s[g.season] ||= { a: arr(N14), m: arr(N14), g: 0 });
+          addArr(S14.a, q.a); addArr(S14.m, q.m); S14.g++;
+          P14.recent.push({ a: q.a, m: q.m, date: g.date }); if (P14.recent.length > RECENT14) P14.recent.shift();
+        }
+      }
     }
 
     // ---- players ----
@@ -282,5 +307,5 @@ export function createZoneState() {
     };
   }
 
-  return { players, teams, league, facts, record, leagueNow, playerNow, teamNow, five, stats: () => ({ recorded, missing }) };
+  return { z14, players, teams, league, facts, record, leagueNow, playerNow, teamNow, five, stats: () => ({ recorded, missing }) };
 }
