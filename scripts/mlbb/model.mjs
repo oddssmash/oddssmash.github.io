@@ -158,6 +158,14 @@ for (const h of HERO) { const x = traitsOf(h.id); h.traits = x.t; h.lp = x.lp ? 
   const since = lastPatch ? done.filter((m) => m.date >= lastPatch.release) : []; let pn = 0, pw = 0, pb = 0; for (const m of since) for (const g of m.games) { if (g.h1.includes(h.id)) { pn++; if (g.w === 1) pw++; } if (g.h2.includes(h.id)) { pn++; if (g.w === 2) pw++; } if (g.b1.includes(h.id) || g.b2.includes(h.id)) pb++; }
   h.thisPatch = lastPatch ? { patch: lastPatch.patch, picks: pn, wins: pw, bans: pb } : null; }
 const TR = Object.fromEntries(HERO.map((h) => [h.id, h.traits]));
+// flex picks: share of pro games in each lane; ratings 0-10 (rank among heroes) from our traits (Teamfight, Pick-off, Objectives, Early-mid,
+// Late, Damage, Survival, Push, Crowd control); ranked trend from MLBBHub's week-on-week win-rate change.
+for (const h of HERO) { const tot = h.roles.reduce((a, r) => a + r.n, 0) || 1; h.laneSplit = h.roles.map((r) => ({ r: r.r, share: r3(r.n / tot) })); h.flex = h.laneSplit.length > 1 && h.laneSplit[1].share >= 0.25;
+  const t = h.traits, sc = (x) => x;
+  h.ratings = { Teamfight: sc((t.cc + t.tank * 0.6 + t.dmg * 0.4) / 1.4), "Pick-off": sc((t.burst + t.engage) / 1.3), Objectives: sc((t.push + t.dmg * 0.5 + t.tank * 0.3) / 1.0), "Early-mid": sc(0.5 + t.early - t.late * 0.5), Late: sc(0.4 + t.late - t.early * 0.4 + (h.lp?.role === "Marksman" ? 0.2 : 0)), Damage: sc(t.dmg / 1.1), Survival: sc((t.tank + t.sustain * 0.6) / 1.1), Push: sc(t.push / 0.8), "Crowd control": sc(t.cc / 1.1) };
+  if (h.ranked) h.rankedTrend = ranked[h.id]?.winRateDelta ?? null; }
+// ratings as a rank among all heroes (0 = lowest, 10 = highest), so each scale spreads out
+for (const k of Object.keys(HERO[0]?.ratings || {})) { const xs = HERO.map((h) => h.ratings[k]).sort((x, y) => x - y), n = xs.length - 1 || 1; for (const h of HERO) { const lo = xs.indexOf(h.ratings[k]), hi = xs.lastIndexOf(h.ratings[k]); h.ratings[k] = Math.round(((lo + hi) / 2 / n) * 100) / 10; } }
 // a lineup's profile: sum of its heroes' traits (5 heroes); the pro average lineup is the reference
 const profileOf = (hs) => { const p = Object.fromEntries(TRAITS.map((k) => [k, 0])); for (const h of hs) for (const k of TRAITS) p[k] += TR[h]?.[k] || 0; return p; };
 const avgLineup = (() => { const acc = Object.fromEntries(TRAITS.map((k) => [k, 0])); let n = 0; for (const m of done.slice(-600)) for (const g of m.games) for (const hs of [g.h1, g.h2]) { const p = profileOf(hs); for (const k of TRAITS) acc[k] += p[k]; n++; } for (const k of TRAITS) acc[k] = Math.round((acc[k] / Math.max(1, n)) * 100) / 100; return acc; })();
@@ -215,7 +223,13 @@ function profile(name) {
   for (const m of ms) for (const x of m.games) { const mine = m.a === name ? x.h1 : x.h2, p = profileOf(mine); for (const k of TRAITS) dp[k] += p[k]; dn++; const L = secs(x.len); if (L) { lenSum += L; lenN++; if (L < 14 * 60) sh++; else if (L >= 18 * 60) lo++; } }
   for (const k of TRAITS) dp[k] = Math.round((dp[k] / Math.max(1, dn)) * 100) / 100;
   const tempo = { short: lenN ? sh / lenN : 0, long: lenN ? lo / lenN : 0, avgMin: lenN ? Math.round((lenSum / lenN / 60) * 10) / 10 : null };
-  return { games: g, draft: dp, tempo, archetype: ARCH_T(dp, tempo), comfort: comfort.slice(0, 15), bansTheyMake: top(bansFor), bansAgainstThem: top(bansVs), side: { blue: blue[1] ? { w: blue[0], n: blue[1] } : null, red: red[1] ? { w: red[0], n: red[1] } : null }, early: { w: early[0], n: early[1] }, late: { w: late[0], n: late[1] } };
+  // SCOUTING EXTRAS
+  const maps = {}, stage = {}, firstBans = {}, phase1 = {};
+  for (const m of ms) { const sk = /Playoff|Knockout|Final/i.test(m.stage) ? "Playoffs" : m.kind === "intl" ? "International" : "Regular season"; const one = m.a === name;
+    for (const x of m.games) { const won = (x.w === 1) === one; if (x.map) { const v = (maps[x.map.trim()] ||= [0, 0]); v[1]++; if (won) v[0]++; } const st2 = (stage[sk] ||= [0, 0]); st2[1]++; if (won) st2[0]++;
+      const myB = one ? x.b1 : x.b2; if (myB[0]) firstBans[myB[0]] = (firstBans[myB[0]] || 0) + 1; myB.slice(0, 3).forEach((h) => (phase1[h] = (phase1[h] || 0) + 1)); } }
+  const topN = (o, k = 5) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, k).map(([h, n]) => ({ h, n }));
+  return { maps, stages: stage, firstBan: topN(firstBans), phase1Bans: topN(phase1), games: g, draft: dp, tempo, archetype: ARCH_T(dp, tempo), comfort: comfort.slice(0, 15), bansTheyMake: top(bansFor), bansAgainstThem: top(bansVs), side: { blue: blue[1] ? { w: blue[0], n: blue[1] } : null, red: red[1] ? { w: red[0], n: red[1] } : null }, early: { w: early[0], n: early[1] }, late: { w: late[0], n: late[1] } };
 }
 // signature hero effect: team record with vs without its most-played hero (shrunk), for "if it is banned"
 function sigEffect(name, prof) {
@@ -230,7 +244,7 @@ const offTeam = new Map(); for (const o of OFF) for (const t of o.teams) { const
 const crossOf = (a, b) => { const ra = R.T.get(a)?.region, rb = R.T.get(b)?.region; return ra && rb && ra !== rb ? P.cx : 1; };
 const ratingOf = (name) => { const t = R.T.get(name); return t ? t.r + (R.REG[t.region] || 0) * P.regW : 0; };
 const teamsOut = [...R.T.values()].filter((t) => t.n >= 3).map((t) => { const prof = profile(t.name); const lastM = [...done].reverse().find((m) => m.a === t.name || m.b === t.name);
-  return { id: safe(t.name), name: t.name, region: t.region, rating: r3(ratingOf(t.name)), elo: Math.round(1500 + ratingOf(t.name) * 173.7), series: [t.w, t.l], games: [t.gw, t.gl], last: lastM?.date || null, league: lastM?.league || null, official: offTeam.get(t.name) || null, roster: rosterFor(t.name, lastM?.page || "").map((x) => ({ player: x.player, role: x.role, id: safe(x.page || x.player) })), profile: prof, signature: sigEffect(t.name, prof) }; })
+  return { id: safe(t.name), name: t.name, region: t.region, rating: r3(ratingOf(t.name)), elo: Math.round(1500 + ratingOf(t.name) * 173.7), series: [t.w, t.l], games: [t.gw, t.gl], last: lastM?.date || null, league: lastM?.league || null, official: offTeam.get(t.name) || null, roster: rosterFor(t.name, lastM?.page || "").map((x) => { const pl = PL.get(x.page || x.player); return { player: x.player, role: x.role, id: safe(x.page || x.player), pool: pl ? Object.entries(pl.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 6) : [] }; }), profile: prof, signature: sigEffect(t.name, prof) }; })
   .sort((a, b) => b.rating - a.rating);
 // RELATIVE ARCHETYPES: a team's labels are the traits where it stands out from other teams (z-score 0.75+ among teams
 // with 10+ recent games); tempo uses its share of short and long games.
