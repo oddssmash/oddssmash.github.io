@@ -33,7 +33,9 @@ const canon = (n) => { const a = ALIAS[String(n).toLowerCase()]; return a || dis
 for (const m of all) { m.a = canon(m.a); m.b = canon(m.b); }
 // one name per hero: match every spelling ("gatot", "popol and kupa") to Liquipedia's hero names
 { const LPH = Object.keys(readJSON(path.join(MD, "heroes-lp.json"), { heroes: {} }).heroes), strip = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, ""), byStrip = new Map(LPH.map((h) => [strip(h), h])), memo = new Map();
-  const HN = (h) => { if (!h) return h; if (memo.has(h)) return memo.get(h); const k = strip(h).replace(/and/g, ""); let r = byStrip.get(strip(h)) || [...byStrip].find(([s2]) => s2.replace(/and/g, "") === k)?.[1] || (k.length >= 4 ? [...byStrip].find(([s2]) => s2.startsWith(k))?.[1] : null) || h; memo.set(h, r); return r; };
+  // short forms used on some Liquipedia match pages
+  const SHORT = { paq: "paquito", yss: "yi sun-shin", yi: "yi sun-shin", yz: "yu zhong", yu: "yu zhong", dyr: "dyrroth", kag: "kagura", khu: "khufra", xb: "x.borg", zx: "zhuxin", bea: "beatrix", leo: "leomord", luo: "luo yi", wan: "wanwan", pove: "phoveus", tig: "tigreal", hel: "helcurt", jaw: "jawhead", bal: "balmond", sil: "silvanna", vale: "valentina", "wu zetian": "zetian" };
+  const HN = (h) => { if (!h) return h; if (memo.has(h)) return memo.get(h); if (SHORT[String(h).toLowerCase()]) h = SHORT[String(h).toLowerCase()]; const k = strip(h).replace(/and/g, ""); let r = byStrip.get(strip(h)) || [...byStrip].find(([s2]) => s2.replace(/and/g, "") === k)?.[1] || (k.length >= 4 ? [...byStrip].find(([s2]) => s2.startsWith(k))?.[1] : null) || h; memo.set(h, r); return r; };
   for (const m of all) for (const g of m.games) { g.h1 = g.h1.map(HN); g.h2 = g.h2.map(HN); g.b1 = g.b1.map(HN); g.b2 = g.b2.map(HN); if (g.map) g.map = g.map.trim(); } }
 const order = Object.fromEntries(EVENTS.map((e, i) => [e.page, i]));
 const done = all.filter((m) => m.done && m.games.length && !m.walkover).sort((a, b) => (a.date || "").localeCompare(b.date || "") || order[a.page] - order[b.page]);
@@ -229,7 +231,10 @@ function profile(name) {
     for (const x of m.games) { const won = (x.w === 1) === one; if (x.map) { const v = (maps[x.map.trim()] ||= [0, 0]); v[1]++; if (won) v[0]++; } const st2 = (stage[sk] ||= [0, 0]); st2[1]++; if (won) st2[0]++;
       const myB = one ? x.b1 : x.b2; if (myB[0]) firstBans[myB[0]] = (firstBans[myB[0]] || 0) + 1; myB.slice(0, 3).forEach((h) => (phase1[h] = (phase1[h] || 0) + 1)); } }
   const topN = (o, k = 5) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, k).map(([h, n]) => ({ h, n }));
-  return { maps, stages: stage, firstBan: topN(firstBans), phase1Bans: topN(phase1), games: g, draft: dp, tempo, archetype: ARCH_T(dp, tempo), comfort: comfort.slice(0, 15), bansTheyMake: top(bansFor), bansAgainstThem: top(bansVs), side: { blue: blue[1] ? { w: blue[0], n: blue[1] } : null, red: red[1] ? { w: red[0], n: red[1] } : null }, early: { w: early[0], n: early[1] }, late: { w: late[0], n: late[1] } };
+  const reg = ms.filter((m) => !/Playoff|Knockout|Final/i.test(m.stage) && m.kind !== "intl").sort((a, b) => (a.date || "").localeCompare(b.date || "")), lastPage = reg.at(-1)?.page;
+  const season = reg.filter((m) => m.page === lastPage), half = Math.ceil(season.length / 2), halves = { first: [0, 0], second: [0, 0] };
+  season.forEach((m, i) => { const one = m.a === name, v = i < half ? halves.first : halves.second; for (const x of m.games) { v[1]++; if ((x.w === 1) === one) v[0]++; } });
+  return { halves: season.length >= 4 ? halves : null, maps, stages: stage, firstBan: topN(firstBans), phase1Bans: topN(phase1), games: g, draft: dp, tempo, archetype: ARCH_T(dp, tempo), comfort: comfort.slice(0, 15), bansTheyMake: top(bansFor), bansAgainstThem: top(bansVs), side: { blue: blue[1] ? { w: blue[0], n: blue[1] } : null, red: red[1] ? { w: red[0], n: red[1] } : null }, early: { w: early[0], n: early[1] }, late: { w: late[0], n: late[1] } };
 }
 // signature hero effect: team record with vs without its most-played hero (shrunk), for "if it is banned"
 function sigEffect(name, prof) {
@@ -319,7 +324,25 @@ writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series m
   // ban priority: share of each hero's bans that come in the first ban phase (bans 1-3) over the last 150 days
   const BP = {}; for (const m of done.filter((x) => Date.parse(x.date) > now - 150 * DAY)) for (const g of m.games) for (const bs of [g.b1, g.b2]) bs.forEach((h, i) => { const v = (BP[h] ||= [0, 0]); v[1]++; if (i < 3) v[0]++; });
   for (const h of HERO) { const v = BP[h.id]; h.firstPhaseBan = v && v[1] >= 5 ? r3(v[0] / v[1]) : null; }
+  // LEAGUE META: each league has its own meta, so hero presence and win rate per league (last 150 days), how often
+  // the first-pick (blue) side wins, and the opening bans: blue bans first, so blue's first ban is B1 and red's is B2.
+  const LG = {}, cut = now - 150 * DAY;
+  for (const m of done) { if (Date.parse(m.date) <= cut || m.kind === "intl") continue; const L = (LG[m.league] ||= { games: 0, blue: [0, 0], b1: {}, b2: {}, h: {} });
+    for (const g of m.games) { L.games++; if (g.side1 === "blue" || g.side1 === "red") { L.blue[1]++; if ((g.side1 === "blue") === (g.w === 1)) L.blue[0]++;
+        const [bb, rb] = g.side1 === "blue" ? [g.b1, g.b2] : [g.b2, g.b1]; if (bb[0]) L.b1[bb[0]] = (L.b1[bb[0]] || 0) + 1; if (rb[0]) L.b2[rb[0]] = (L.b2[rb[0]] || 0) + 1; }
+      for (const [hs, bs, w] of [[g.h1, g.b1, g.w === 1], [g.h2, g.b2, g.w === 2]]) { for (const h of hs) { const v = (L.h[h] ||= { p: 0, w: 0, b: 0 }); v.p++; if (w) v.w++; } for (const h of bs) { const v = (L.h[h] ||= { p: 0, w: 0, b: 0 }); v.b++; } } } }
+  const top5 = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([h, n]) => ({ h, n }));
+  const leagues = Object.entries(LG).filter(([, L]) => L.games >= 20).map(([lg2, L]) => ({ league: lg2, games: L.games, blue: L.blue, b1: top5(L.b1), b2: top5(L.b2),
+    top: Object.entries(L.h).map(([h, v]) => ({ h, pres: r3((v.p + v.b) / L.games), p: v.p, b: v.b, wr: v.p ? r3(v.w / v.p) : null })).sort((a, b) => b.pres - a.pres).slice(0, 12) })).sort((a, b) => b.games - a.games);
+  const allBlue = Object.values(LG).reduce((a, L) => [a[0] + L.blue[0], a[1] + L.blue[1]], [0, 0]);
+  writeJSON(path.join(OUT, "leagues.json"), { note: "Last 150 days of league games (international events left out). Blue side picks first.", blueAll: allBlue, leagues });
+  for (const h of HERO) h.byLeague = leagues.map((L) => { const v = LG[L.league].h[h.id]; return v ? { league: L.league, pres: r3((v.p + v.b) / L.games), p: v.p, b: v.b, wr: v.p ? r3(v.w / v.p) : null } : null; }).filter((x) => x && x.pres >= 0.05).sort((a, b) => b.pres - a.pres);
+  // lane matchups: the heroes in the same role on the two sides, last 365 days
+  const LM = {}; for (const m of done) { if (Date.parse(m.date) <= now - 365 * DAY) continue; for (const g of m.games) for (let i = 0; i < 5; i++) { const a = g.h1[i], b = g.h2[i]; if (!a || !b) continue;
+    for (const [x, y, w] of [[a, b, g.w === 1], [b, a, g.w === 2]]) { const v = ((LM[x] ||= {})[y] ||= [0, 0, ROLES[i]]); v[1]++; if (w) v[0]++; } } }
+  for (const h of HERO) h.laneVs = Object.entries(LM[h.id] || {}).filter(([, v]) => v[1] >= 4).map(([o, v]) => ({ vs: o, role: v[2], w: v[0], n: v[1], wr: r3((v[0] + 2) / (v[1] + 4)) })).sort((a, b) => b.n - a.n).slice(0, 10);
   writeJSON(path.join(OUT, "heroes.json"), HERO);
+  console.log(`leagues: ${leagues.length}, blue side ${allBlue[0]}-${allBlue[1] - allBlue[0]}`);
   console.log(`library: ${index.length} leagues · matrix: ${Object.values(mx).reduce((a, x) => a + Object.keys(x).length, 0)} graded pairs · maps: ${Object.keys(MAPS).length}`);
 }
 // ---------------------------------------------------------------- M8 field and Wildcard simulation
