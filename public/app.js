@@ -2236,7 +2236,7 @@ async function vScout(id, labTid) {
     <section class="card" id="s-mm" tabindex="-1" aria-labelledby="s-mm-h"><h2 id="s-mm-h">Versus: compare him against a team or player(s)</h2>
       <p class="small muted">Projected shooting by zone against the opponent you choose. Red = better than league average, blue = worse (for his defence: red = shooters do better than usual against him).</p>
       <div class="filters" role="group" aria-label="Side"><button class="fbtn" type="button" data-mm-side="off" aria-pressed="true">His offence</button><button class="fbtn" type="button" data-mm-side="def" aria-pressed="false">His defence</button></div>
-      <div class="filters" role="group" aria-label="Against"><button class="fbtn" type="button" data-mm-vs="team" aria-pressed="true">vs team</button><button class="fbtn" type="button" data-mm-vs="player" aria-pressed="false">vs player(s)</button><button class="fbtn" type="button" data-mm-vs="style" aria-pressed="false">vs playstyle</button></div>
+      <div class="filters" role="group" aria-label="Against"><button class="fbtn" type="button" data-mm-vs="team" aria-pressed="true">vs team</button><button class="fbtn" type="button" data-mm-vs="player" aria-pressed="false">vs player(s)</button><button class="fbtn" type="button" data-mm-vs="style" aria-pressed="false">vs playstyle</button><button class="fbtn" type="button" data-mm-vs="starters" aria-pressed="false">vs starting five</button><button class="fbtn" type="button" data-mm-vs="matchup" aria-pressed="false">vs his likely defender</button></div>
       <div id="mm-ctl"></div><div id="mm-out" aria-live="polite"></div>
     </section>
     <nav class="filters jumpnav" aria-label="Sections of this report">${sections.map(([k, l]) => `<button class="fbtn" type="button" data-jump="${k}">${l}</button>`).join("")}<a class="fbtn" href="#/player/${esc(p.id)}">Full profile ›</a></nav>
@@ -2279,7 +2279,7 @@ async function vScout(id, labTid) {
     const pcache = new Map(); const getP = async (pid) => { if (!pcache.has(pid)) pcache.set(pid, await load(`players/${pid}.json`).catch(() => null)); return pcache.get(pid); };
     const ctl = () => {
       const el = document.getElementById("mm-ctl"); if (!el) return;
-      if (mm.vs === "team") el.innerHTML = `<select class="field" id="mm-team">${others.map((t) => `<option value="${esc(t.id)}"${t.id === mm.team ? " selected" : ""}>${esc(t.name)}${t.id === nextOpp ? " (next game)" : ""}</option>`).join("")}</select>`;
+      if (mm.vs === "team" || mm.vs === "starters" || mm.vs === "matchup") el.innerHTML = `<select class="field" id="mm-team">${others.map((t) => `<option value="${esc(t.id)}"${t.id === mm.team ? " selected" : ""}>${esc(t.name)}${t.id === nextOpp ? " (next game)" : ""}</option>`).join("")}</select>`;
       else if (mm.vs === "style") el.innerHTML = `<select class="field" id="mm-style">${tags.map((t) => `<option${t === mm.style ? " selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
       else el.innerHTML = `<label class="small" for="mm-pin">${mm.side === "off" ? "Add up to 3 defenders" : "Choose a shooter"}</label>${pickerHTML("mm-pin")}
         <div class="chips" id="mm-chips">${mm.players.map((q) => `<button class="chip" type="button" data-mm-rm="${esc(q.id)}">${esc(q.n)} ✕</button>`).join("")}</div>`;
@@ -2288,12 +2288,28 @@ async function vScout(id, labTid) {
       bindPicker(el.querySelector("#mm-pin"), plist, (q) => { if (mm.side === "def") mm.players = [q]; else if (!mm.players.some((x) => x.id === q.id)) mm.players = [...mm.players, q].slice(-3); ctl(); draw(); });
       el.querySelectorAll("[data-mm-rm]").forEach((b) => b.addEventListener("click", () => { mm.players = mm.players.filter((x) => String(x.id) !== b.dataset.mmRm); ctl(); draw(); }));
     };
-    const teamsFor = () => (mm.vs === "team" ? [S.T[mm.team]].filter(Boolean) : (S.teams || []).filter((t) => t.style?.tags?.includes(mm.style)));
+    // A team's likely starting five: from its next projected game when there is one, else its five biggest-minute players this season.
+    const upList = await load("upcoming.json").catch(() => []);
+    const startersOf = async (tid) => {
+      const g0 = upList.filter((u) => (u.home === tid || u.away === tid) && Date.parse(u.date) > Date.now()).sort((a, b) => a.date.localeCompare(b.date))[0];
+      if (g0) { const g = await load(`upcoming/${g0.id}.json`).catch(() => null); const t = g?.teams?.find((x) => x.tid === tid);
+        if (t?.players?.length) return { src: "projected rotation for its next game", list: [...t.players].sort((a, b) => b.min - a.min).slice(0, 5).map((x) => S.P?.[String(x.id)] || { id: String(x.id), n: x.n, team: tid, pos: x.pos }) }; }
+      return { src: "its five biggest-minute players this season", list: Object.values(S.P || {}).filter((q) => q.team === tid && q.cur).sort((a, b) => (b.cur[1] || 0) - (a.cur[1] || 0)).slice(0, 5) };
+    };
+    // His likely defender: NBA.com tracking for his next opponent; otherwise the starter who plays his position.
+    const grp = (pos) => (/C/.test(pos || "") ? "C" : /F/.test(pos || "") ? "F" : "G");
+    const likelyDefender = async (tid) => {
+      if (tid === nextOpp && row?.dm?.defenders?.length) { const d = row.dm.defenders[0]; return { src: `NBA.com matchup tracking (${f0(d.share)}% of his matchups vs ${T(tid).abbr}${d.fromMeetings ? ", from their past meetings" : ""})`, list: [S.P?.[String(d.id)] || { id: String(d.id), n: d.n, team: tid, pos: d.pos }], all: row.dm.defenders.slice(0, 3) }; }
+      const st = await startersOf(tid), mine = (p.height >= 84 || defArchetypes(p)[0]?.[0] === "Rim protector") ? "C" : grp(p.pos); // 7-footers and rim protectors are guarded by centers
+      const pick = st.list.find((q) => grp(q.pos) === mine) || st.list[0];
+      return { src: `the ${T(tid).abbr} starter who plays his position (${mine === "G" ? "guard" : mine === "F" ? "forward" : "center"}); no tracked matchups yet for this pairing`, list: pick ? [pick] : [] };
+    };
+    const teamsFor = () => (mm.vs === "team" || mm.vs === "starters" || mm.vs === "matchup" ? [S.T[mm.team]].filter(Boolean) : (S.teams || []).filter((t) => t.style?.tags?.includes(mm.style)));
     const who = () => (mm.vs === "team" ? T(mm.team).name : mm.vs === "style" ? `teams tagged "${mm.style}" (${teamsFor().map((t) => t.abbr).join(", ")})` : mm.players.map((q) => q.n).join(", "));
     const drawMaps = async () => {
       const out = document.getElementById("mm-out"); if (!out) return;
       const LG = MM_LG(), hz = p.zones14?.rows;
-      if (mm.side === "off" && mm.vs !== "player") {
+      if (mm.side === "off" && !["player", "starters", "matchup"].includes(mm.vs)) {
         if (!hz?.length) { out.innerHTML = `<p class="small muted">No zone shooting on record for him yet.</p>`; return; }
         const ts = teamsFor(); if (!ts.length) { out.innerHTML = `<p class="small muted">No team matches this filter.</p>`; return; }
         const rows = hz.map((x) => {
@@ -2310,7 +2326,8 @@ async function vScout(id, labTid) {
           <p class="small muted">Projected FG% = his zone FG% (shrunk toward league with 25 attempts) + the defence's gap to league in that zone (shrunk with 150 attempts). Grey = under 10 of his attempts in the zone.</p>`;
         return;
       }
-      if (mm.side === "off" && mm.vs === "player") {
+      if (mm.side === "off" && (mm.vs === "starters" || mm.vs === "matchup")) { const got = mm.vs === "starters" ? await startersOf(mm.team) : await likelyDefender(mm.team); mm.auto = got; mm.players = got.list; }
+      if (mm.side === "off" && ["player", "starters", "matchup"].includes(mm.vs)) {
         if (!mm.players.length) { out.innerHTML = `<p class="small muted">Add one or more defenders above.</p>`; return; }
         const ds = (await Promise.all(mm.players.map((q) => getP(q.id)))).map((x) => defRingDiffs(x?.defense));
         const hr = ringsFromZ14(hz), cells = {};
@@ -2335,6 +2352,12 @@ async function vScout(id, labTid) {
       if (mm.side === "off") {
         if (mm.vs === "team") html = projCard(projVs(p.id, p.team, [mm.team], [], p.zones14?.rows), `${p.n} projected vs ${T(mm.team).name}`);
         else if (mm.vs === "style") html = projCard(projVs(p.id, p.team, teamsFor().map((t) => t.id), [], p.zones14?.rows), `${p.n} projected vs "${mm.style}" teams`);
+        else if ((mm.vs === "starters" || mm.vs === "matchup") && mm.players.length) {
+          const ds = await Promise.all(mm.players.map((q) => getP(q.id)));
+          const lab = mm.vs === "starters" ? `${p.n} projected vs the ${T(mm.team).name} starting five` : `${p.n} projected vs ${mm.players[0].n}`;
+          const list = `<div class="vs-rec small"><b>${mm.vs === "starters" ? "Their starting five" : "Likely defender"}:</b> ${mm.players.map((q, i) => { const d = defRingDiffs(ds[i]?.defense), v = Object.values(d), avg = v.length ? v.reduce((a, x) => a + x.diff * x.a, 0) / v.reduce((a, x) => a + x.a, 0) : null; return `${esc(q.n)} <span class="muted">(${esc(q.pos || "")}${avg != null ? `, shooters ${avg <= 0 ? "" : "+"}${(avg * 100).toFixed(1)} pts vs norm` : ""})</span>`; }).join(" · ")}<br><span class="muted">From ${esc(mm.auto?.src || "")}.</span>${mm.auto?.all?.length > 1 ? `<br><span class="muted">Also guards him: ${mm.auto.all.slice(1).map((d) => `${esc(d.n)} (${f0(d.share)}%)`).join(", ")}.</span>` : ""}</div>`;
+          html = list + projCard(projVs(p.id, p.team, [mm.team], ds, p.zones14?.rows), lab, mm.vs === "starters" ? "With five defenders, each guards him only part of the time, so their combined effect is averaged." : "");
+        }
         else if (mm.players.length) { const ds = await Promise.all(mm.players.map((q) => getP(q.id))); const ot = [...new Set(mm.players.map((q) => q.team))]; html = projCard(projVs(p.id, p.team, ot, ds, p.zones14?.rows), `${p.n} projected vs ${mm.players.map((q) => q.n).join(", ")}`, `Opponent: ${ot.map((x) => T(x).abbr).join(", ")}.`); }
       } else if (mm.vs === "player" && mm.players.length) {
         const q = await getP(mm.players[0].id); html = projCard(projVs(mm.players[0].id, mm.players[0].team, [p.team], [p], q?.zones14?.rows), `${mm.players[0].n} projected with ${p.n} guarding him`);
@@ -2342,7 +2365,7 @@ async function vScout(id, labTid) {
       if (html) out.insertAdjacentHTML("afterbegin", html);
     };
     app.querySelectorAll("[data-mm-side]").forEach((b) => b.addEventListener("click", () => { mm.side = b.dataset.mmSide; mm.players = mm.side === "def" ? mm.players.slice(0, 1) : mm.players; app.querySelectorAll("[data-mm-side]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); ctl(); draw(); }));
-    app.querySelectorAll("[data-mm-vs]").forEach((b) => b.addEventListener("click", () => { mm.vs = b.dataset.mmVs; app.querySelectorAll("[data-mm-vs]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); ctl(); draw(); }));
+    app.querySelectorAll("[data-mm-vs]").forEach((b) => b.addEventListener("click", () => { if (mm.auto) { mm.players = []; mm.auto = null; } mm.vs = b.dataset.mmVs; app.querySelectorAll("[data-mm-vs]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); ctl(); draw(); }));
     ctl(); draw();
   }
   // ---- other situations
