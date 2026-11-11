@@ -402,9 +402,10 @@ export function simulate(G, params, N, rng, opt = {}) {
       const lops = Math.abs(mg) >= 15;
       let rot = false;
       for (const i of T[side].idx) {
-        if (G.projMin[i] < 10) continue;
-        if (dnp[i]) { rot = true; break; }
-        if (!lops && ev[i] !== 2 && pf[i] < 5 && Math.abs(acc[i * S] - G.projMin[i]) >= 10) { rot = true; break; }
+        // a starter (24+ projected minutes) sits, or a rotation player's (15+) minutes move by 15+ (tightened from 10/10)
+        if (G.projMin[i] < 15) continue;
+        if (dnp[i]) { if (G.projMin[i] >= 24) { rot = true; break; } continue; }
+        if (!lops && ev[i] !== 2 && pf[i] < 5 && Math.abs(acc[i * S] - G.projMin[i]) >= 15) { rot = true; break; }
       }
       if (rot) f |= side ? FLAG.rotA : FLAG.rotH;
     }

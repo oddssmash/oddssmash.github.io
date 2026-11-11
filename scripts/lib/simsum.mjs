@@ -68,8 +68,8 @@ export const SCENARIOS = [
   { id: "coldA", label: "AWAY shoots cold (5+ eFG points below expectation)", test: (f) => f & FLAG.coldA },
   { id: "fast", label: "Fast pace (6%+ more possessions than projected)", test: (f) => f & FLAG.fast },
   { id: "slow", label: "Slow pace (6%+ fewer possessions than projected)", test: (f) => f & FLAG.slow },
-  { id: "rotH", label: "HOME rotation change (a 10+ minute player sits, or plays 10+ minutes more or less)", test: (f) => f & FLAG.rotH },
-  { id: "rotA", label: "AWAY rotation change (a 10+ minute player sits, or plays 10+ minutes more or less)", test: (f) => f & FLAG.rotA },
+  { id: "rotH", label: "HOME rotation change (a starter sits, or a rotation player's minutes move by 15+)", test: (f) => f & FLAG.rotH },
+  { id: "rotA", label: "AWAY rotation change (a starter sits, or a rotation player's minutes move by 15+)", test: (f) => f & FLAG.rotA },
 ];
 const FAMILY = { close: "margin", blowH: "margin", blowA: "margin", ot: "margin", injH: "inj", injA: "inj", foulH: "foul", foulA: "foul", hotH: "shootH", coldH: "shootH", hotA: "shootA", coldA: "shootA", fast: "pace", slow: "pace", rotH: "rot", rotA: "rot" };
 
@@ -286,8 +286,8 @@ function explain(id, row, c) {
     coldA: "The team makes clearly fewer of its shots than its players' percentages suggest; more misses also mean more rebounds for both teams.",
     fast: "More possessions for both teams: every counting stat rises, the margin barely moves.",
     slow: "Fewer possessions for both teams: every counting stat falls.",
-    rotH: "A regular sits or the minutes move by 10+ (coach's decision or a hunch), and the minutes go to others.",
-    rotA: "A regular sits or the minutes move by 10+ (coach's decision or a hunch), and the minutes go to others.",
+    rotH: "A starter sits or a rotation player's minutes move by 15+ (coach's decision or a hunch), and the minutes go to others.",
+    rotA: "A starter sits or a rotation player's minutes move by 15+ (coach's decision or a hunch), and the minutes go to others.",
   }[id] || "";
   const who = row.who && row.who.length ? ` Most often ${row.who.slice(0, 2).map((w) => `${w.n} (${P(w.share)})`).join(", ")}.` : "";
   return `Happens in ${P(freq)} of the simulations.${histTxt} ${winTxt}; average margin ${mTxt}, total ${row.total} (${dt >= 0 ? "+" : ""}${r1(dt)} versus all simulations). ${why}${who}${row.gains && row.gains.length ? ` Gains: ${g(row.gains)}.` : ""}${row.losses && row.losses.length ? ` Drops: ${g(row.losses)}.` : ""}`;

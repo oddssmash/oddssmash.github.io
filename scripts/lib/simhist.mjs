@@ -224,7 +224,7 @@ export function createHistory() {
           const bl = H.blow[role];
           if (lopsided) { const s = won ? bl.win : bl.lose; s.n++; s.min += dMin; s.pts += dPts; }
           else { bl.base.n++; bl.base.min += dMin; bl.base.pts += dPts; }
-          if (act <= 0) { if (proj >= 10 && !lopsided) rotation = true; continue; }
+          if (act <= 0) { if (proj >= 24 && !lopsided) rotation = true; continue; }
           if (key5.has(pid) && pf >= 5) foulTrouble = true;
           if (proj >= 15) {
             H.foul.playerGames++;
@@ -240,7 +240,7 @@ export function createHistory() {
             const rel = (act - proj) / Math.max(proj, 8);
             const m = H.minN[bk]; m.n++; m.s += rel; m.ss += rel * rel;
             m.recent.push(rel); if (m.recent.length > 3000) m.recent.shift();
-            if (proj >= 10 && Math.abs(act - proj) >= 10) rotation = true;
+            if (proj >= 15 && Math.abs(act - proj) >= 15) rotation = true;
           }
           // usage / shooting overdispersion (rates as known before this game)
           if (act >= 10 && proj >= 5) {

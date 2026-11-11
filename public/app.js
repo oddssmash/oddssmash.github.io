@@ -19,7 +19,8 @@ function plain(s) {
 const f1 = (x) => (x == null || Number.isNaN(x) ? "-" : (Math.round(x * 10) / 10).toFixed(1));
 const f0 = (x) => (x == null || Number.isNaN(x) ? "-" : String(Math.round(x)));
 const sg = (x, d = 1) => { if (x == null || x === "" || Number.isNaN(Number(x))) return "-"; x = Number(x); const a = Math.abs(x).toFixed(d); return (Number(a) === 0 ? "" : x > 0 ? "+" : "−") + a; }; // no sign on a value that rounds to zero
-const pct = (p) => (p == null ? "-" : Math.round(p * 100) + "%");
+// Exact halves round to the even number, so two sides of the same game (77.5% / 22.5%) still add up to 100%.
+const pct = (p) => { if (p == null) return "-"; const v = Math.round(p * 1e6) / 1e4, f = Math.floor(v); const r = Math.abs(v - f - 0.5) < 1e-9 ? (f % 2 === 0 ? f : f + 1) : Math.round(v); return r + "%"; };
 const cls = (x) => (x > 0 ? "up" : x < 0 ? "down" : "");
 // Every date and time on the site is shown in Philippine time (Asia/Manila), whatever the visitor's device is set to.
 // A date-only value ("2025-11-23", a US game date) is shown as written, with "US date" noted where it appears.
@@ -1174,6 +1175,8 @@ async function vGame(id) {
       <div class="tw"><table><thead><tr><th>Rating system</th><th class="n">Home margin</th><th class="n">Say</th></tr></thead><tbody>
         ${g.models.map((m) => `<tr><td>${esc(m.label)}</td><td class="n">${sg(m.margin)}</td><td class="n">${pct(m.weight / shares)}</td></tr>`).join("")}
       </tbody></table></div>
+      ${(() => { const M = Object.fromEntries((g.models || []).map((m) => [m.k, m.margin])); if (M.players == null) return ""; const teamAvg = ["efficiency", "elo", "adjusted", "luckAdjusted"].map((k) => M[k]).filter((v) => v != null); if (!teamAvg.length) return ""; const avg = teamAvg.reduce((a, b) => a + b, 0) / teamAvg.length, gap = M.players - avg;
+        return Math.abs(gap) >= 3 ? `<p class="note"><b>Roster check:</b> the player-by-player system (tonight's actual players) has the home margin at ${sg(M.players)}, ${f1(Math.abs(gap))} points ${gap < 0 ? "lower" : "higher"} than the team-level systems (${sg(avg)}). Something about the roster or rotation may differ from recent games, so lean on the player view and check the injury report. (We tested weighting it more automatically: it helped early this season but not over the full 2025-26 season, so it is a warning, not an automatic change.)</p>` : ""; })()}
       ${g.ref ? `<p class="note">Referee crew (${esc(g.ref.crew.join(", "))}): games with this crew have run ${sg(g.ref.tot)} total points versus projection.</p>` : ""}
       <p class="small muted" style="margin-top:8px">Projected pace: ${f1(g.pred.pace)} possessions.</p>
     </div>
@@ -1779,6 +1782,23 @@ function propMainRef(p, simMain) {
   if (b && k) return Math.floor(b[k]) + 0.5;
   if (b && p.fam === "pra") return Math.floor(b.pts + b.reb + b.ast) + 0.5;
   return null;
+}
+// Guard: a projection more than 30% away from the player's season average needs a named reason (questionable, a
+// minutes change, teammates out, return from absence). Without one it is flagged and kept out of the high-confidence
+// lists, parlays and gold picks: this is where data errors hide.
+function devCheck(gm, pid, fam) {
+  const row = gm?.teams?.flatMap((t) => (t.players || []).map((p) => ({ ...p, _t: t }))).find((p) => String(p.id) === String(pid));
+  const b = seasonLine(S.P?.[String(pid)]); if (!row || !b) return null;
+  const proj = fam === "pra" ? row.pts + row.reb + row.ast : row[fam], avg = fam === "pra" ? b.pts + b.reb + b.ast : b[fam];
+  if (proj == null || avg == null || avg < 4) return null;
+  const dev = (proj - avg) / avg; if (Math.abs(dev) <= 0.3) return null;
+  const reasons = [];
+  if (row.q) reasons.push("listed questionable");
+  if (b.min > 0 && Math.abs(row.min - b.min) / b.min >= 0.15) reasons.push(`minutes ${f0(row.min)} vs his usual ${f0(b.min)}`);
+  if ((row.wwD || []).some((w) => Math.abs(w.pts) >= 1) || Math.abs(row.adj?.absence || 0) >= 1) reasons.push("teammates out");
+  if ((row._t.out || []).some((o) => o.star)) reasons.push("a star teammate is out");
+  if (row.ix?.returning) reasons.push("returning from absence");
+  return { dev, proj, avg, reasons, unexplained: !reasons.length };
 }
 function tooFarBelow(p, simMain) {
   if (!p.player) return false; if (isLowLine(p)) return true;
@@ -2988,7 +3008,9 @@ async function vBoard() {
   };
   const draw = (focusSel) => {
     const safeHidden = picks.filter((p) => tooFarBelow(p)).length;
-    const rows = picks.filter((p) => (B.g === "all" || p.game === B.g) && (B.fam === "all" || p.fam === B.fam) && (B.safe || !tooFarBelow(p)))
+    if (!S.bdGames) { S.bdGames = {}; Promise.all([...new Set(picks.map((p) => p.game))].map((id) => load(`upcoming/${id}.json`).then((g) => { S.bdGames[id] = g; }).catch(() => {}))).then(() => draw()); }
+    const unexpB = (p) => p.player && devCheck(S.bdGames?.[p.game], p.player.id, p.fam)?.unexplained;
+    const rows = picks.filter((p) => (B.g === "all" || p.game === B.g) && (B.fam === "all" || p.fam === B.fam) && (B.safe || !tooFarBelow(p)) && !unexpB(p))
       .sort(B.sort === "p" ? (x, y) => y.p - x.p : (x, y) => Date.parse(x.date) - Date.parse(y.date) || y.p - x.p);
     const famCount = (k) => picks.filter((p) => (B.g === "all" || p.game === B.g) && (k === "all" || p.fam === k)).length;
     const cal = b.calibration || {};
@@ -3634,7 +3656,8 @@ const up = await load("upcoming.json").catch(() => []);
           if (po && po.line === ref.line) { x.price = over ? po.over : po.under; const bo = noVig(po.over, po.under); x.book = bo == null ? null : over ? bo : 1 - bo; x.bk = `Over ${po.line} ${decOdds(po.over)} · Under ${po.line} ${decOdds(po.under)}`; }
           x.dec = decOf(x.price); edgeOf(x);
           x.hold = propHold(gid, pl.id, fam, ref.line, over);
-          x.gold = x.qual && x.dec != null && x.dec >= GOLD.minOdds && x.p >= GOLD.minP && !x.wrong && x.hold != null && x.hold >= GOLD.minHold;
+          x.dv = devCheck(GAME[gid], pl.id, fam);
+          x.gold = x.qual && x.dec != null && x.dec >= GOLD.minOdds && x.p >= GOLD.minP && !x.wrong && x.hold != null && x.hold >= GOLD.minHold && !x.dv?.unexplained;
           out.push(x);
         }
       }
@@ -3642,7 +3665,8 @@ const up = await load("upcoming.json").catch(() => []);
     return out.sort((a, b) => b.p - a.p);
   };
   const draw = () => {
-    let list = todays.filter((p) => (S.pkKind === "top" ? true : S.pkKind === "player" ? isPlayer(p) : !isPlayer(p))).filter((p) => S.pkLow || !tooSafe(p));
+    const unexp = (p) => p.player && devCheck(GAME[p.game], p.player.id, p.fam)?.unexplained;
+    let list = todays.filter((p) => (S.pkKind === "top" ? true : S.pkKind === "player" ? isPlayer(p) : !isPlayer(p))).filter((p) => S.pkLow || !tooSafe(p)).filter((p) => !unexp(p));
     if (S.pkBand === "95") list = list.filter((p) => p.p >= 0.95); else if (S.pkBand === "85") list = list.filter((p) => p.p < 0.95);
     // Group by player and stat (or team and market): the highest line is the headline, the rest are alternatives.
     const groups = new Map();
@@ -3668,7 +3692,7 @@ const up = await load("upcoming.json").catch(() => []);
     };
     // Suggested parlays: legs from DIFFERENT games only, so they are independent and the combined chance is honest.
     const qOf = (p) => { const g = GAME[p.game]; const t = g?.teams.find((x) => x.tid === p.player?.t); return !!t?.players.find((x) => x.id === p.player?.id)?.q; };
-    const legs = todays.filter((p) => p.p >= 0.88 && !tooSafe(p) && !(p.player && qOf(p))).sort((a, b) => (b.hit?.rate ?? 0) - (a.hit?.rate ?? 0) || b.p - a.p);
+    const legs = todays.filter((p) => p.p >= 0.88 && !tooSafe(p) && !(p.player && qOf(p)) && !(p.player && devCheck(GAME[p.game], p.player.id, p.fam)?.unexplained)).sort((a, b) => (b.hit?.rate ?? 0) - (a.hit?.rate ?? 0) || b.p - a.p);
     const pickLegs = (n, minP) => { for (const mix of [true, false]) { const used = new Set(), fams = new Set(), out = []; for (const l of legs) { if (l.p < minP || used.has(l.game) || (mix && fams.has(l.fam))) continue; out.push(l); used.add(l.game); fams.add(l.fam); if (out.length === n) return out; } } return null; };
     const parlays = [["Safest 2 legs", pickLegs(2, 0.92)], ["Balanced 3 legs", pickLegs(3, 0.9)], ["Bigger 4 legs", pickLegs(4, 0.88)]].filter(([, l]) => l);
     const pr = (l) => l.reduce((s2, x) => s2 * x.p, 1), hr = (l) => l.reduce((s2, x) => s2 * ((x.hit?.rate ?? x.p * 100) / 100), 1);
@@ -3706,6 +3730,7 @@ const up = await load("upcoming.json").catch(() => []);
           ${x.hold != null ? `<div class="small">Scenario check: his average is on our side in <b>${pct(x.hold)}</b> of the game scripts (likelihood-weighted robustness check, not a probability)</div>` : ""}
           ${x.price != null ? `<div class="small ${x.qual ? "qual" : "muted"}">${x.wrong ? "⚠ Big difference (10+ points): check the latest news first." : x.qual ? "✓ Meaningful difference (3-10 points above the bookmaker)." : "No qualifying edge at this price."}</div>` : ""}
           <div class="pick-alt"><span>Our median ${esc(x.median ?? "-")}${x.mean != null ? ` · average ${f1(x.mean)}` : ""}</span>${x.thr.map(([t, q]) => `<span>${esc(t)}+: ${pct(q)}</span>`).join("")}</div>
+          ${x.dv ? `<div class="small" style="color:${x.dv.unexplained ? "var(--warn)" : "inherit"}">${x.dv.unexplained ? "⚠ Check this one:" : "Note:"} we project ${f1(x.dv.proj)} vs his season average ${f1(x.dv.avg)} (${x.dv.dev > 0 ? "+" : ""}${Math.round(x.dv.dev * 100)}%). ${x.dv.unexplained ? "No injury, minutes or role reason explains a gap this size, so it is kept out of gold picks, 85%+ lists and parlays." : `Reason: ${esc(x.dv.reasons.join(", "))}.`}</div>` : ""}
           ${propWhy(x)}
           <div class="pick-m small muted">${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}${x.date ? ` · ${esc(timePH(x.date))}` : ""} · <a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
         return `${gml.some((x) => x.gold) || ml.some((x) => x.gold) ? `<div class="gold-strip"><b>★ Gold picks</b>${gml.filter((x) => x.gold).map((x) => `<details class="gs-i"><summary><span>${esc(x.pick)}</span> <i>${esc(T(x.away).abbr)}@${esc(T(x.home).abbr)} · odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · robust in ${pct(x.hold)} of scripts</i></summary><p class="small">${goldGameSum(x)}</p><a class="go small" href="#/game/${esc(x.gid)}">Game page ›</a> <button class="btn sm" type="button" data-gs-go="g|${esc(x.gid)}|${esc(x.kind)}">Full analysis ›</button></details>`).join("")}${ml.filter((x) => x.gold).slice(0, 12).map((x) => `<details class="gs-i"><summary><span>${esc(shortName(x.pl.n))} ${x.over ? "over" : "under"} ${esc(x.line)} ${esc(x.word)}</span> <i>odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · robust in ${pct(x.hold)} of scripts</i></summary><p class="small">${goldPropSum(x)}</p><a class="go small" href="#/game/${esc(x.gid)}">Game page ›</a> <button class="btn sm" type="button" data-gs-go="p|${esc(x.gid)}|${esc(x.pl.id)}|${esc(x.fam)}">Full analysis ›</button></details>`).join("")}<span class="small muted">Gold = our chance 3-10 points above the bookmaker's main line at a price that is worth it by our numbers, decimal odds 1.60+, our chance 55%+, robust in 60%+ of the game scripts and tonight's scenario library not against it. Statistical comparison, not betting advice.</span></div>` : `<div class="note small">No gold picks on this day: nothing combines a meaningful difference (3-10 points), odds of 1.60+, a 55%+ chance and support across our scenarios.</div>`}
@@ -3836,13 +3861,14 @@ function bottomLine() {
   const home = g.teams.find((t) => t.isHome), away = g.teams.find((t) => !t.isHome);
   const fav = g.pred.pHome >= 0.5 ? home : away, favP = Math.max(g.pred.pHome, 1 - g.pred.pHome);
   const L = gameLines(g);
-  const reason = (tid) => { const k = (g.keys?.teams || []).find((x) => x.tid === tid); const w = k?.win?.[0]; return w ? briefReason(typeof w === "string" ? w : w.t || w.txt || "") : ""; };
+  const reasons = (tid) => ((g.keys?.teams || []).find((x) => x.tid === tid)?.win || []).filter((w) => typeof w !== "string").slice().sort((a, b) => (b.w || 0) - (a.w || 0)).slice(0, 3);
+  const reason = (tid) => reasons(tid).map((w) => `${briefReason(w.t || w.txt || "")}${w.w != null ? ` (${f1(w.w)} pts)` : ""}`).join("; ");
   const out = g.teams.flatMap((t) => (t.out || []).filter((o) => o.star).map((o) => o.n));
   const top = g.teams.map((t) => t.players?.[0]).filter(Boolean);
   return `<div class="card bottom-line"><h2>The bottom line</h2><div class="bl-grid"><div class="viz-slot"></div><div class="bl-side">${edgesChart(g)}${quarterChart(g)}</div></div>${takeawayCard(g)}
     <p class="bl-main"><b>${esc(T(fav.tid).name)}</b> win ${pct(favP)} of the time by our numbers. Spread ${esc(T(L.fav).abbr)} ${spreadTxt(L.spread)}, total ${L.total.toFixed(1)}.</p>
     <ul class="dots small">
-      ${[away, home].map((t) => reason(t.tid) ? `<li><b>${esc(T(t.tid).abbr)}</b> can win because: ${esc(reason(t.tid))}</li>` : "").join("")}
+      ${[fav, fav === home ? away : home].map((t) => reason(t.tid) ? `<li><b>${t === fav ? `Why ${esc(T(t.tid).abbr)} is favoured` : `How ${esc(T(t.tid).abbr)} can win`}:</b> ${esc(reason(t.tid))}</li>` : (t !== fav ? `<li><b>How ${esc(T(t.tid).abbr)} can win:</b> no edge larger than half a point; an upset would come from shooting variance or late news.</li>` : "")).join("")}
       ${top.length ? `<li>Top scorers: ${top.map((p) => `${esc(p.n)} ${f0(p.pts)} pts`).join(", ")}</li>` : ""}
       ${out.length ? `<li>Key absences: ${esc(out.join(", "))}</li>` : ""}
     </ul></div>`;
@@ -4302,8 +4328,8 @@ function lineTable(g) {
   const bm = o && Number.isFinite(o.spreadHome) ? -o.spreadHome : null;
   const rows = [
     ["Winner", `${esc(fav)} ${Math.round(fp * 100)}% · fair ${(1 / fp).toFixed(2)}`, o ? `${esc(H)} ${decOdds(o.mlHome)} / ${esc(A)} ${decOdds(o.mlAway)}` : "-"],
-    ["Spread", esc(sp(om)), bm != null ? esc(bm === 0 ? "pick'em" : sp(bm)) : "-"],
-    ["Total", f1(ot), o && Number.isFinite(o.total) ? esc(o.total) : "-"],
+    ["Spread", `${esc(sp(om))} <span class="muted small">(as a line: ${esc(om >= 0 ? H : A)} −${(Math.round(Math.abs(om) - 0.5) + 0.5).toFixed(1)})</span>`, bm != null ? esc(bm === 0 ? "pick'em" : sp(bm)) : "-"],
+    ["Total", `${f1(ot)} <span class="muted small">(as a line: ${(Math.round(ot - 0.5) + 0.5).toFixed(1)})</span>`, o && Number.isFinite(o.total) ? esc(o.total) : "-"],
   ];
   const dS = bm != null ? om - bm : null, dT = o && Number.isFinite(o.total) ? ot - o.total : null;
   const diff = [dS != null && Math.abs(dS) >= 0.1 ? `we're ${f1(Math.abs(dS))} pts higher on ${esc(dS > 0 ? H : A)}` : dS != null ? "same margin as the market" : "", dT != null && Math.abs(dT) >= 0.1 ? `${f1(Math.abs(dT))} pts ${dT > 0 ? "higher" : "lower"} on the total` : ""].filter(Boolean).join(", ");
@@ -4311,6 +4337,7 @@ function lineTable(g) {
   const asOf = o?.fetched ? new Date(o.fetched).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null;
   return `<div class="lt"><table class="lt-t"><thead><tr><th></th><th>Our line</th><th class="ref">Main line (reference)</th></tr></thead><tbody>
       ${rows.map(([k, a, b]) => `<tr><td>${k}</td><td><b>${a}</b></td><td class="ref">${b}</td></tr>`).join("")}</tbody></table>
+    <p class="small muted">Our numbers are the projected margin and total; "as a line" is the same number rounded to a half point, which is what the "Our predictions" rows and the takeaway use. The win chance here is our model's; the Simulation tab shows the 10,000-game simulation's own figure, which can differ by a point or two.</p>
     ${o ? `${diff ? `<p class="small"><b>Difference:</b> ${diff}.</p>` : ""}${rec.length ? `<p class="small muted"><i>${rec.map(esc).join(" · ")}</i></p>` : ""}
       ${(dS != null && Math.abs(dS) >= 10) || (dT != null && Math.abs(dT) >= 10) ? `<p class="small" style="color:var(--warn)">⚠ When we differ by 10+ points, check the latest injury news first.</p>` : ""}
       <p class="small muted">Main line as of ${esc(asOf || "-")} PH (${esc(o.provider || "sportsbook")}). Reference only: it never changes our projections.</p>` : `<p class="small muted">The sportsbook has not posted a line for this game yet.</p>`}</div>`;
