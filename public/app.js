@@ -1544,7 +1544,7 @@ async function vWhy() {
       <tbody>${L.models.map((m) => `<tr><td>${esc(m.label)}</td><td class="n">${pct(m.weight / totW)}</td>${reg.map((p) => { const x = m.phases.find((q) => q.pk === p.pk); return `<td class="n">${x ? pct(x.acc) : "-"}</td>`; }).join("")}</tr>`).join("")}</tbody></table></div>
     </div>
 
-    ${factorsCard(L.factors)}
+    ${factorsCard(L.factors)}${inloopCard(L.inloop)}
 
     <div class="card"><h2>What really happens to players</h2>
       <p class="small muted">How often each real-game event showed up, and the average points swing versus projection when it did.</p>
@@ -1590,6 +1590,82 @@ async function vWhy() {
 
 // The learned matchup factors (zones, defenders, glass, pace of threes ...) with the back-test verdict on each one, good or bad.
 const STAT_NAME = { pts: "points", reb: "rebounds", ast: "assists", tpa: "three-point attempts", min: "minutes" };
+// ---------------- Our own archetypes, play-type matchups and the scenario card (display; evidence-labelled)
+// Archetypes are our own labels, calculated from Synergy play types, shot locations and NBA.com defender tracking.
+const evid = (n, unit = "player-games") => { const lab = n >= 1500 ? "strong" : n >= 500 ? "medium" : n >= 150 ? "weak" : "noise"; return `<span class="ev ev-${lab}">${lab}</span> <span class="muted small">${num(Math.round(n))} ${unit}</span>`; };
+function offArchetypes(p) {
+  const pt = Object.fromEntries((p.playstyle?.playTypes?.rows || []).map((x) => [x.id, x.freq || 0]));
+  const z = Object.fromEntries((p.zones14?.rows || []).map((x) => [x.id, x.share || 0]));
+  const rimShare = (z.rim || 0) + (z.shL || 0) + (z.shC || 0) + (z.shR || 0), three = ["tCL", "tWL", "tT", "tWR", "tCR"].reduce((a, k) => a + (z[k] || 0), 0);
+  const big = /C/.test(p.pos || "") || /F-C|C-F/.test(p.pos || "");
+  const sp = S.P?.[String(p.id)]?.cur, apm = sp && sp[1] ? sp[4] / sp[1] * 36 : 0;
+  const raw = {
+    "Slasher": Math.max(0, rimShare - 35) * 0.9 + (pt.Transition || 0) * 0.3 + (big ? -15 : 0),
+    "Sharpshooter": (pt.Spotup || 0) * 0.8 + (pt.OffScreen || 0) * 1.2 + Math.max(0, three - 30) * 0.7,
+    "Shot creator": (pt.Isolation || 0) * 1.4 + (pt.PRBallHandler || 0) * 0.5,
+    "Floor general": (pt.PRBallHandler || 0) * 0.6 + Math.max(0, apm - 4) * 4,
+    "Post scorer": (pt.Postup || 0) * 1.6,
+    "Rim runner": (pt.PRRollman || 0) * 1.1 + (pt.Cut || 0) * 1.0 + (pt.OffRebound || 0) * 1.3,
+    "Stretch big": big ? Math.max(0, three - 15) * 1.2 : 0,
+  };
+  const tot = Object.values(raw).reduce((a, b) => a + Math.max(0, b), 0); if (!tot) return [];
+  return Object.entries(raw).map(([k, v]) => [k, Math.max(0, v) / tot]).filter(([, v]) => v >= 0.08).sort((a, b) => b[1] - a[1]).slice(0, 3);
+}
+function defArchetypes(p) {
+  const R = Object.fromEntries((p.defense?.rows || []).map((x) => [x.id, x])), bl = p.defense?.blocks;
+  if (!R.overall) return [];
+  const raw = {
+    "Rim protector": (() => { if (!R.rim) return 0; const share = R.rim.fga / Math.max(1, R.overall.fga), w = Math.max(0, Math.min(1, (share - 0.3) / 0.2)), bpg = (bl?.rim || 0) / Math.max(1, p.defense.games); return w * (Math.max(0, -R.rim.diff) * Math.min(1, R.rim.fga / 150) * 3 + Math.max(0, bpg - 0.6) * 6); })(),
+    "Perimeter stopper": R.three ? Math.max(0, -R.three.diff) * Math.min(1, R.three.fga / 200) * 3 : 0,
+    "Switchable": R.two && R.three && R.two.diff < 0 && R.three.diff < 0 ? 4 : 0,
+    "Defensive target": Math.max(0, R.overall.diff) * Math.min(1, R.overall.fga / 300) * 3,
+  };
+  const tot = Object.values(raw).reduce((a, b) => a + b, 0); if (!tot) return [["Neutral defender", 1]];
+  return Object.entries(raw).map(([k, v]) => [k, v / tot]).filter(([, v]) => v >= 0.15).sort((a, b) => b[1] - a[1]).slice(0, 2);
+}
+// Play-type matchup: his mix x his points per possession x how tonight's opponent defends each type (shrunk with 300
+// possessions toward the league), against his normal points per possession.
+function playTypeMatchup(p, oppTid) {
+  const mine = (p.playstyle?.playTypes?.rows || []).filter((x) => x.poss >= 25), opp = S.T?.[oppTid]?.playTypes?.def || [];
+  if (!mine.length || !opp.length) return null;
+  const lg = {}; for (const t of S.teams || []) for (const x of t.playTypes?.def || []) { (lg[x.id] ||= { p: 0, pts: 0 }); lg[x.id].p += x.poss; lg[x.id].pts += x.ppp * x.poss; }
+  let base = 0, adj = 0, possPg = 0, n = 0; const rows = [];
+  for (const x of mine) {
+    const o = opp.find((y) => y.id === x.id), L = lg[x.id]; if (!o || !L?.p) continue;
+    const lgp = L.pts / L.p, oppP = (o.ppp * o.poss + lgp * 300) / (o.poss + 300), ratio = oppP / lgp;
+    const share = x.freq / 100; base += share * x.ppp; adj += share * x.ppp * ratio; n += x.poss;
+    rows.push({ label: x.label, freq: x.freq, ppp: x.ppp, oppPpp: o.ppp, ratio, oppPoss: o.poss });
+    possPg = Math.max(possPg, x.poss / Math.max(1, x.gp || 1) / Math.max(0.01, share));
+  }
+  if (!base) return null;
+  return { delta: (adj - base) * possPg, possPg, rows: rows.sort((a, b) => b.freq - a.freq), n };
+}
+function scenarioCard(p, row, oppTid, L) {
+  if (!row) return "";
+  const items = [];
+  for (const sc of row.scen || []) items.push({ k: sc.s, v: sc.pts, unit: "pts", ev: evid(sc.n), used: true, via: /minutes|blowout|rest|back-to-back|nights/i.test(sc.s) ? "minutes" : /out|absence|teammate/i.test(sc.s) ? "usage" : "points" });
+  const ptm = playTypeMatchup(p, oppTid), ptGate = (L?.factors?.rows || []).find((x) => x.id === "ptype");
+  if (ptm && Math.abs(ptm.delta) >= 0.1) items.push({ k: `Play-type matchup vs ${T(oppTid).abbr} (his top: ${ptm.rows.slice(0, 2).map((x) => x.label.toLowerCase()).join(", ")})`, v: ptm.delta, unit: "pts", ev: evid(ptm.n, "possessions"), used: !!(ptGate && ptGate.gate > 0), via: "efficiency" });
+  const dm = row.dm; if (dm?.defenders?.length) { const v = ((dm.realPct || 0) + (dm.pairPct || 0)) / 100 * (dm.basePts || row.pts || 0); /* the model's own shrunk defender effects */ const gate = (L?.inloop?.players?.rows || []).find((x) => x.id === "defReal");
+    items.push({ k: `Likely defenders (${dm.defenders.slice(0, 2).map((d) => shortName(d.n)).join(", ")})`, v, unit: "pts", ev: evid((dm.meetings || 0) * 60, "matchup possessions (approx.)"), used: !!(gate && gate.gate > 0), via: "efficiency" }); }
+  if (row.zm) items.push({ k: `Zone matchup: ${(ZONE_FALLBACK[row.zm.zone] || row.zm.zone).toLowerCase()} (${row.zm.tag})`, v: row.zm.applied ? row.zm.applied : row.zm.paper, unit: "pts", ev: evid(row.zm.att ? row.zm.att * 20 : 0, "shots"), used: !!row.zm.applied, via: "efficiency" });
+  const bo = row.ix?.blowout; if (bo?.ifWinBig && bo?.ifLoseBig && !bo.small) { const v = bo.winBy15 * bo.ifWinBig.min + bo.loseBy15 * bo.ifLoseBig.min; items.push({ k: "Blowout risk (expected minutes)", v, unit: "min", ev: evid((bo.ifWinBig.games + bo.ifLoseBig.games) * 30, "player-games (team)"), used: false, via: "minutes" }); }
+  if (!items.length) return "";
+  const applied = items.filter((x) => x.used && x.unit === "pts").reduce((a, x) => a + x.v, 0);
+  const oa = offArchetypes(p), da = defArchetypes(p);
+  return `<div class="sc-card"><h3>Tonight's scenarios vs ${esc(T(oppTid).abbr)}</h3>
+    ${oa.length || da.length ? `<p class="small">${oa.length ? `<b>Offence:</b> ${oa.map(([k, v]) => `${esc(k)} ${Math.round(v * 100)}%`).join(" · ")}` : ""}${da.length ? ` &nbsp; <b>Defence:</b> ${da.map(([k, v]) => `${esc(k)} ${Math.round(v * 100)}%`).join(" · ")}` : ""} <span class="muted">(our own labels, from play types, shot locations and defender tracking)</span></p>` : ""}
+    <div class="tw"><table class="sc-t"><thead><tr><th>Scenario</th><th class="n">Effect</th><th>Evidence</th><th>Through</th><th>In the projection?</th></tr></thead><tbody>
+    ${items.map((x) => `<tr><td>${esc(x.k)}</td><td class="n ${x.v > 0 ? "up" : x.v < 0 ? "down" : ""}">${x.v > 0 ? "+" : ""}${f1(x.v)} ${x.unit}</td><td>${x.ev}</td><td class="small">${x.via}</td><td class="small">${x.used ? "✓ applied" : "shown only (not yet proven)"}</td></tr>`).join("")}
+    <tr class="sc-net"><td><b>Applied scenario effects</b></td><td class="n"><b>${applied > 0 ? "+" : ""}${f1(applied)} pts</b></td><td colspan="3" class="small">Projection ${f1(row.pts)} pts already includes these.</td></tr></tbody></table></div>
+    <p class="small muted">Evidence: strong 1,500+, medium 500+, weak 150+ (player-games or possessions), otherwise noise. Every player-specific effect is shrunk toward the league-wide effect for players like him. A scenario moves the projection only after a walk-forward test shows it lowers the miss on games it had not seen; the rest are shown for context. Pairings like "slasher vs rim protector" are untested hypotheses until that test is run.</p></div>`;
+}
+function inloopCard(IL) {
+  const rows = IL?.players?.rows || []; if (!rows.length) return "";
+  return `<div class="card"><h2>Scenarios tested inside the model, and dropped or kept</h2>
+    <p class="small muted">Each idea was added to the walk-forward replay using only information from before each game, and kept only if it lowered the miss on games it had not yet learned from.</p>
+    <ul class="mrows">${rows.map((x) => `<li class="mrow"><div class="mrow-h"><span class="mrow-l">${esc(x.label)} <span class="muted">on ${esc(STAT_NAME[x.stat] || x.stat)}</span></span><span class="chip ${x.gate > 0 && !/evidence only/.test(x.verdict) ? "good" : ""}">${x.gate > 0 && !/evidence only/.test(x.verdict) ? "kept" : "tested, not used"}</span></div><div class="small muted">${esc(x.what)}</div><div class="small">${esc(num(x.games))} player-games · ${esc(x.verdict)}</div></li>`).join("")}</ul></div>`;
+}
 function factorsCard(F) {
   if (!F?.rows?.length) return "";
   const vClass = (v) => (v === "helps" ? "good" : v === "small" ? "info" : /worse/.test(v) ? "bad" : "");
@@ -1959,6 +2035,7 @@ async function vScout(id, labTid) {
       <p class="small muted">${esc(dayLong(next.date))} · ${esc(timePH(next.date))}</p>
       ${row ? `<div class="statgrid sg4"><div class="stat"><b>${f1(row.pts)}</b><span>Points (${esc(row.lo)}–${esc(row.hi)})</span></div><div class="stat"><b>${f1(row.reb)}</b><span>Rebounds</span></div><div class="stat"><b>${f1(row.ast)}</b><span>Assists</span></div><div class="stat"><b>${f1(row.tpa)}</b><span>3-pt attempts</span></div></div>
         ${rowWhy(row) ? `<p class="small" style="margin-top:10px">${rowWhy(row)}</p>` : ""}
+        ${scenarioCard(p, row, nextOpp, L)}
         ${row.zm ? `<p class="small" style="margin-top:10px">${zmTags(row.zm.tag)} ${esc(row.zm.txt)} On paper ${sg(row.zm.paper, 2)} points; the model applies ${sg(row.zm.applied, 2)}.</p>` : ""}
         ${(() => { const mt = ng?.teams?.find((t) => t.tid === p.team), q = mt?.quarters?.proj; return q?.length ? `<p class="small muted">${esc(T(p.team).abbr)} projected by quarter: ${q.map((v, i) => `Q${i + 1} ${f1(v)}`).join(", ")} (display only; adds up to the team's projected ${f1(mt.quarters.total)}).</p>` : ""; })()}
         ${row.dm?.defenders?.length ? `<details class="more"><summary>Who is likely to guard him (NBA.com tracking)</summary>${dmBlock(row)}</details>` : ""}` : `<p class="small muted">He is not in the projected rotation for this game.</p>`}
