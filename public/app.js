@@ -1810,6 +1810,46 @@ function scoutMap(p) {
       <p class="small muted">Bar to the right (orange) = he makes this shot more often than the league does; to the left (blue) = less often. Full bar = 15 points of FG%.${fewStyles > 0 ? ` ${fewStyles} shot ${fewStyles === 1 ? "type" : "types"} with under 10 attempts ${fewStyles === 1 ? "is" : "are"} not listed.` : ""}</p></details>` : ""}
   </section>`;
 }
+// Player defence map: NBA.com tracks the closest defender by shot distance, so the map is drawn in distance rings.
+// Rings that NBA.com does not give directly are derived: 6-10 ft = inside 10 minus inside 6; 10-15 ft = all twos minus
+// inside 10 minus long twos. Colour = how shooters do against him versus what they normally make (blue = he holds them
+// below their norm, red = they shoot better than usual).
+function defMapFigure(d) {
+  const R = Object.fromEntries((d.rows || []).map((x) => [x.id, x]));
+  const made = (x) => (x ? (x.pct / 100) * x.fga : 0), expM = (x) => (x ? (x.exp / 100) * x.fga : 0);
+  const band = (id, label, fga, m, e) => { if (!(fga > 0)) return null; const pct = (m / fga) * 100, exp = (e / fga) * 100, diff = pct - exp, z = (diff / 100) / Math.sqrt(Math.max(0.01, (exp / 100) * (1 - exp / 100)) / fga); return { id, label, fga: Math.round(fga), pct, exp, diff, tag: fga < 25 ? "low" : diff <= -2.5 && z <= -1.5 ? "strong" : diff >= 2.5 && z >= 1.5 ? "weak" : "n" }; };
+  const rim = R.rim, sh = R.short, two = R.two, mid = R.mid, th = R.three;
+  const b = [
+    band("rim", "Inside 6 ft", rim?.fga, made(rim), expM(rim)),
+    sh && rim ? band("s610", "6-10 ft", sh.fga - rim.fga, made(sh) - made(rim), expM(sh) - expM(rim)) : null,
+    two && sh && mid ? band("s1015", "10-15 ft", two.fga - sh.fga - mid.fga, made(two) - made(sh) - made(mid), expM(two) - expM(sh) - expM(mid)) : null,
+    band("mid", "Long twos (15 ft to the arc)", mid?.fga, made(mid), expM(mid)),
+    band("three", "Threes", th?.fga, made(th), expM(th)),
+  ];
+  const by = Object.fromEntries(b.filter(Boolean).map((x) => [x.id, x]));
+  if (!Object.keys(by).length) return "";
+  const K = 10, hx = 250, hy = 52.5, r3 = 237.5, yb = hy + Math.sqrt(r3 * r3 - 220 * 220), H = 330;
+  const fill = (x) => (!x ? "hz-low" : x.tag === "low" ? "hz-low" : x.tag === "strong" ? "hz-c2" : x.tag === "weak" ? "hz-h2" : x.diff <= -1.5 ? "hz-c1" : x.diff >= 1.5 ? "hz-h1" : "hz-n");
+  const three = `M30 -10 V${yb.toFixed(1)} A${r3} ${r3} 0 0 0 470 ${yb.toFixed(1)} V-10Z`;
+  const ring = (r) => `<circle cx="${hx}" cy="${hy}" r="${r}"/>`;
+  const lab = (x, cx, cy) => (x ? `<text class="hz-t${x.tag === "low" ? " sm" : ""}" x="${cx}" y="${cy}">${Math.round(x.pct)}%<tspan class="hz-ar ${x.diff <= 0 ? "dn" : "up"}" dx="3">${x.diff > 0 ? "+" : ""}${x.diff.toFixed(1)}</tspan></text>` : "");
+  const tip = (x) => (x ? `${x.label}: shooters make ${x.pct.toFixed(1)}% against him vs ${x.exp.toFixed(1)}% normally (${x.fga} shots)` : "");
+  return `<figure class="hz"><svg viewBox="0 0 500 ${H}" role="img" aria-label="${esc(Object.values(by).map(tip).join("; "))}">
+    <defs><clipPath id="dm-in"><path d="${three}"/></clipPath><mask id="dm-out"><rect width="500" height="${H}" fill="#fff"/><path d="${three}" fill="#000"/></mask></defs>
+    <rect class="hz-bg" width="500" height="${H}"/>
+    <rect class="hz-z ${fill(by.three)}" width="500" height="${H}" mask="url(#dm-out)"><title>${esc(tip(by.three))}</title></rect>
+    <g clip-path="url(#dm-in)">
+      <rect class="hz-z ${fill(by.mid)}" width="500" height="${H}"><title>${esc(tip(by.mid))}</title></rect>
+      <circle class="hz-z ${fill(by.s1015)}" cx="${hx}" cy="${hy}" r="150"><title>${esc(tip(by.s1015))}</title></circle>
+      <circle class="hz-z ${fill(by.s610)}" cx="${hx}" cy="${hy}" r="100"><title>${esc(tip(by.s610))}</title></circle>
+      <circle class="hz-z ${fill(by.rim)}" cx="${hx}" cy="${hy}" r="60"><title>${esc(tip(by.rim))}</title></circle>
+    </g>
+    <g class="hz-lines" fill="none"><path d="${three}"/>${ring(60)}${ring(100)}${ring(150)}<rect width="500" height="${H}"/></g>
+    ${lab(by.rim, hx, hy + 8)}${lab(by.s610, hx, hy + 82)}${lab(by.s1015, hx, hy + 128)}${lab(by.mid, hx, hy + 196)}${lab(by.three, hx, H - 22)}
+  </svg></figure>
+  <div class="legend zlegend"><span><i class="hz-c2"></i>STRONG: shooters clearly below their norm</span><span><i class="hz-c1"></i>Below norm</span><span><i class="hz-n"></i>Near norm</span><span><i class="hz-h1"></i>Above norm</span><span><i class="hz-h2"></i>WEAK: shooters clearly above their norm</span><span><i class="hz-low"></i>Too few shots</span></div>
+  <p class="small muted">Rings from the basket: inside 6 ft, 6-10 ft, 10-15 ft, long twos and threes. Each shows what shooters make with him as the closest defender, and the gap to what those same shooters normally make (negative = good defence). NBA.com tracks defenders by distance, not by court side, so left and right are not split.</p>`;
+}
 function scoutDefense(p) {
   const d = p.defense;
   if (!d?.rows?.length) return `<section class="card" id="s-def" tabindex="-1"><h2>Defensive profile</h2><p class="small muted">No defender tracking on record for him.</p></section>`;
@@ -1817,6 +1857,7 @@ function scoutDefense(p) {
   const names = (rows) => rows.map((r) => esc(r.label.toLowerCase())).join(", ");
   return `<section class="card" id="s-def" tabindex="-1" aria-labelledby="s-def-h"><h2 id="s-def-h">Defensive profile</h2>
     <p class="small muted">What shooters make when he is the closest defender, against what those same shooters normally make. A negative gap is good defence.</p>
+    <h3>Defence map</h3>${defMapFigure(d)}
     <p class="small">${strong.length ? `${ztag("strong")} His defensive hot spots: ${names(strong)}. ` : ""}${weak.length ? `${ztag("weak")} His defensive cold spots (shooters do better than usual): ${names(weak)}. ` : ""}${!strong.length && !weak.length ? "No distance band has cleared the rule as clearly strong or weak. " : ""}</p>
     <ul class="mrows">${d.rows.map((r) => meterRow({ label: esc(r.label), badge: r.low ? ztag("low") : ztag(r.tag), value: sg(r.diff), x: r.low ? null : r.diff, scale: 10,
       sub: `Shooters made ${p1(r.pct)} against him, ${p1(r.exp)} normally · ${esc(num(r.fga))} shots` })).join("")}</ul>
