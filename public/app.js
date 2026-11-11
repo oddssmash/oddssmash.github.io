@@ -2845,19 +2845,75 @@ async function vPicks() {
   const [board] = await Promise.all([load("board.json")]);
   const days = [...new Set(board.picks.map((p) => dayKey(p.date)))].sort();
   S.pkDay = days.includes(S.pkDay) ? S.pkDay : days[0];
-  S.pkKind = S.pkKind || "top"; S.pkBand = S.pkBand || "all";
+  S.pkKind = S.pkKind || "main"; S.pkBand = S.pkBand || "all";
   const band95 = (board.calibration?.all || []).find((b) => b.band === "95-100%");
   S.pkLow = !!S.pkLow;
   const todays = board.picks.filter((p) => dayKey(p.date) === S.pkDay).map((p) => ({ ...p, raw: p.p, p: calP(p.p, p.fam, board) })).filter((p) => p.p >= 0.85);
-  const gids = [...new Set(todays.map((p) => p.game))];
+const up = await load("upcoming.json").catch(() => []);
+  const gids = [...new Set([...todays.map((p) => p.game), ...up.filter((u) => dayKey(u.date) === S.pkDay).map((u) => String(u.id))])];
   const [sims, games] = await Promise.all([
     Promise.all(gids.map((id) => load(`sim/${id}.json`).catch(() => null))),
     Promise.all(gids.map((id) => load(`upcoming/${id}.json`).catch(() => null))),
   ]);
   const SIM = Object.fromEntries(gids.map((id, i) => [id, sims[i]])), GAME = Object.fromEntries(gids.map((id, i) => [id, games[i]]));
   const isPlayer = (p) => !!p.player;
+  // The main line for a player prop: the sportsbook's line when there is one (used only as the line to test;
+  // our chance is our own model), otherwise our simulation's main line.
+  const refLine = (gid, pid, fam) => {
+    const sim = SIM[gid]; if (!sim) return null;
+    const cp = (sim.comparison?.props || []).find((x) => String(x.id) === String(pid) && x.stat === fam);
+    if (cp) return { line: cp.bookLine, src: "book", pOver: cp.ourProbOver, median: cp.ourMedian };
+    const pl = sim.players?.find((x) => String(x.id) === String(pid)); const m = pl?.props?.[fam];
+    return m ? { line: m.line, src: "ours", pOver: m.pOver, median: pl.dist?.[fam]?.[1] } : null;
+  };
+  // A pick far below the main line (e.g. 10+ points for a 22.5-point scorer) is near-automatic: hidden by default.
+  const teamRef = (p) => {
+    const sim = SIM[p.game]; if (!sim) return null;
+    if (p.fam === "total") return sim.comparison?.total?.bookLine ?? sim.lines?.total?.line ?? null;
+    if (p.fam === "teamTotal") { const side = String(p.team) === String(sim.home ?? GAME[p.game]?.home) ? "home" : "away"; return sim.lines?.teamTotals?.[side]?.line ?? null; }
+    if (p.fam === "spread") {
+      const isHome = String(p.team) === String(sim.home ?? GAME[p.game]?.home), c = sim.comparison?.spread;
+      if (c?.bookLine != null) return c.team === T(p.team).abbr ? c.bookLine : -c.bookLine;
+      const hl = sim.lines?.spread?.homeLine; return hl == null ? null : isHome ? hl : -hl;
+    }
+    return null;
+  };
+  const tooSafe = (p) => { if (!p.player) { const ref = teamRef(p); if (ref == null) return false; const v = p.fam === "spread" ? (p.side === "by" ? -p.line : p.line) : p.line; return Math.abs(v - ref) > (p.fam === "total" ? 12 : p.fam === "spread" ? 7 : 9); } if (isLowLine(p)) return true; const ref = refLine(p.game, p.player.id, p.fam); return !!ref && p.line < ref.line * 0.75 && ref.line - p.line >= (p.fam === "pts" ? 4 : 1.5); };
+  const FAMS_MAIN = [["pts", "points"], ["reb", "rebounds"], ["ast", "assists"], ["tpm", "threes"], ["pra", "pts+reb+ast"]];
+  const gameMain = () => {
+    const out = [];
+    for (const gid of gids) {
+      const sim = SIM[gid], c = sim?.comparison, gm = GAME[gid]; if (!sim || !gm) continue;
+      if (gm.date && Date.parse(gm.date) < Date.now()) continue;
+      const H = T(gm.home).abbr, A = T(gm.away).abbr;
+      const base = { gid, home: gm.home, away: gm.away, date: gm.date };
+      if (c?.winner?.ourProb != null) { const ph = c.winner.ourProb, home = ph >= 0.5; out.push({ ...base, kind: "Moneyline", pick: `${home ? H : A} to win`, p: Math.max(ph, 1 - ph), book: home ? c.winner.bookProb : 1 - c.winner.bookProb, ours: `our margin ${home ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}` }); }
+      if (c?.spread?.ourProb != null) { const q = c.spread.ourProb, l = c.spread.bookLine, team = c.spread.team, other = team === H ? A : H; const takeTeam = q >= 0.5;
+        out.push({ ...base, kind: "Spread", pick: takeTeam ? `${team} ${l > 0 ? "+" : ""}${l}` : `${other} ${-l > 0 ? "+" : ""}${-l}`, p: Math.max(q, 1 - q), book: takeTeam ? c.spread.bookProb : 1 - c.spread.bookProb, ours: `our margin ${gm.pred.hs >= gm.pred.as ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}` }); }
+      if (c?.total?.ourProb != null) { const q = c.total.ourProb; out.push({ ...base, kind: "Total", pick: `${q >= 0.5 ? "Over" : "Under"} ${c.total.bookLine}`, p: Math.max(q, 1 - q), book: q >= 0.5 ? c.total.bookProb : 1 - c.total.bookProb, ours: `our total ${f1(gm.pred.hs + gm.pred.as)}` }); }
+    }
+    return out.sort((a, b) => b.p - a.p);
+  };
+  const mainLines = () => {
+    const out = [];
+    for (const gid of gids) {
+      const sim = SIM[gid]; if (!sim) continue;
+      if (GAME[gid]?.date && Date.parse(GAME[gid].date) < Date.now()) continue; // started: see the game's Live tab
+      for (const pl of sim.players || []) {
+        if ((pl.proj?.min || 0) < 20 || pl.pDnp > 0.25) continue;
+        for (const [fam, word] of FAMS_MAIN) {
+          const ref = refLine(gid, pl.id, fam); if (!ref || ref.pOver == null) continue;
+          if (ref.src === "ours") continue; // our own main line sits at our median, so it is always near 50%
+          const over = ref.pOver >= 0.5, p = Math.max(ref.pOver, 1 - ref.pOver);
+          const thr = (pl.thr?.[fam] || []).filter(([x]) => Math.abs(x - ref.line) <= (fam === "pts" || fam === "pra" ? 10 : 3)).slice(0, 4);
+          out.push({ gid, pl, fam, word, line: ref.line, over, p, median: ref.median, mean: pl.dist?.[fam]?.[0], thr, src: ref.src, home: sim.home ?? GAME[gid]?.home, away: sim.away ?? GAME[gid]?.away, date: GAME[gid]?.date });
+        }
+      }
+    }
+    return out.sort((a, b) => b.p - a.p);
+  };
   const draw = () => {
-    let list = todays.filter((p) => (S.pkKind === "top" ? true : S.pkKind === "player" ? isPlayer(p) : !isPlayer(p))).filter((p) => S.pkLow || !isLowLine(p));
+    let list = todays.filter((p) => (S.pkKind === "top" ? true : S.pkKind === "player" ? isPlayer(p) : !isPlayer(p))).filter((p) => S.pkLow || !tooSafe(p));
     if (S.pkBand === "95") list = list.filter((p) => p.p >= 0.95); else if (S.pkBand === "85") list = list.filter((p) => p.p < 0.95);
     // Group by player and stat (or team and market): the highest line is the headline, the rest are alternatives.
     const groups = new Map();
@@ -2883,7 +2939,7 @@ async function vPicks() {
     };
     // Suggested parlays: legs from DIFFERENT games only, so they are independent and the combined chance is honest.
     const qOf = (p) => { const g = GAME[p.game]; const t = g?.teams.find((x) => x.tid === p.player?.t); return !!t?.players.find((x) => x.id === p.player?.id)?.q; };
-    const legs = todays.filter((p) => p.p >= 0.88 && !isLowLine(p) && !(p.player && qOf(p))).sort((a, b) => (b.hit?.rate ?? 0) - (a.hit?.rate ?? 0) || b.p - a.p);
+    const legs = todays.filter((p) => p.p >= 0.88 && !tooSafe(p) && !(p.player && qOf(p))).sort((a, b) => (b.hit?.rate ?? 0) - (a.hit?.rate ?? 0) || b.p - a.p);
     const pickLegs = (n, minP) => { for (const mix of [true, false]) { const used = new Set(), fams = new Set(), out = []; for (const l of legs) { if (l.p < minP || used.has(l.game) || (mix && fams.has(l.fam))) continue; out.push(l); used.add(l.game); fams.add(l.fam); if (out.length === n) return out; } } return null; };
     const parlays = [["Safest 2 legs", pickLegs(2, 0.92)], ["Balanced 3 legs", pickLegs(3, 0.9)], ["Bigger 4 legs", pickLegs(4, 0.88)]].filter(([, l]) => l);
     const pr = (l) => l.reduce((s2, x) => s2 * x.p, 1), hr = (l) => l.reduce((s2, x) => s2 * ((x.hit?.rate ?? x.p * 100) / 100), 1);
@@ -2893,9 +2949,28 @@ async function vPicks() {
       <p class="lead">Every player and team prop the simulation puts at 85% or more, with alternative lines and the reasons behind each: the projection, how it holds up in each simulated scenario, his strengths and weaknesses in tonight's spots, coach habits, and hot and cold zones. Times are PH time.</p>
       <div class="note"><b>Nothing here is 100%.</b> Questionable players and near-automatic low lines are left out of the suggested parlays. In the back-test, picks the simulation called 95%+ came true ${band95 ? `${esc(band95.happened)}%` : "about 94%"} of the time${band95 ? ` (${num(band95.n)} picks), so about 1 in ${Math.max(2, Math.round(100 / Math.max(0.5, 100 - band95.happened)))} still missed` : ""}. Player props came true a little less often than stated; team picks were close to stated. Statistical analysis only, not betting advice.</div>
       <div class="filters" role="group" aria-label="Day">${days.map((d) => `<button class="fbtn" type="button" data-pk-day="${esc(d)}" aria-pressed="${d === S.pkDay}">${esc(dayName(d))}</button>`).join("")}</div>
-      <div class="filters" role="group" aria-label="Prop type">${[["top", "Top picks"], ["player", "Player props"], ["team", "Team props"], ["parlay", "Parlays"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-kind="${k}" aria-pressed="${S.pkKind === k}">${l}</button>`).join("")}</div>
-      ${S.pkKind !== "parlay" ? `<div class="filters" role="group" aria-label="Confidence">${[["all", "85% and up"], ["95", "Near-certain 95%+"], ["85", "85-94%"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-band="${k}" aria-pressed="${S.pkBand === k}">${l}</button>`).join("")}</div>
-        <label class="small low-tog"><input type="checkbox" id="pk-low" ${S.pkLow ? "checked" : ""}> Include very safe low lines (under ${LOW_LINE.pts} points, ${LOW_LINE.reb} rebounds, ${LOW_LINE.ast} assists, ${LOW_LINE.tpm} threes)</label>
+      <div class="filters" role="group" aria-label="Prop type">${[["main", "Main lines"], ["top", "85%+ picks"], ["player", "Player props"], ["team", "Team props"], ["parlay", "Parlays"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-kind="${k}" aria-pressed="${S.pkKind === k}">${l}</button>`).join("")}</div>
+      ${S.pkKind === "main" ? (() => {
+        const ml = mainLines(), shown = ml.filter((x) => x.p >= 0.55).slice(0, 60);
+        const gml = gameMain();
+        const gcard = (x) => `<div class="card pick ml"><div class="pick-h">${teamLogo(x.home, { size: "sm" })}<span><b>${esc(x.kind)}</b><span class="small muted"> ${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
+          <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.6 ? "lean" : x.p >= 0.53 ? "slight lean" : "coin-flip"}</span>${meter(x.p)}
+          <div class="pick-l"><b>${esc(x.pick)}</b> <span class="small muted">sportsbook main line</span></div>
+          <div class="pick-alt"><span>${esc(x.ours)}</span>${x.book != null ? `<span>book's fair chance ${pct(x.book)}</span>` : ""}<span class="${x.book != null && x.p - x.book >= 0.05 ? "up" : ""}">gap ${x.book != null ? (x.p - x.book > 0 ? "+" : "") + Math.round((x.p - x.book) * 100) : "-"}</span></div>
+          <div class="pick-m small muted">${x.date ? esc(timePH(x.date)) + " · " : ""}<a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
+        const card = (x) => `<div class="card pick ml"><div class="pick-h">${avatar(x.pl.id, x.pl.n, { size: "sm" })}<span><b>${esc(x.pl.n)}</b><span class="small muted"> ${esc(T(x.pl.side === 0 ? x.home : x.away).abbr || "")} · ${esc(x.word)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
+          <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.62 ? "lean" : "slight lean"}</span>${meter(x.p)}
+          <div class="pick-l"><b>${x.over ? "Over" : "Under"} ${esc(x.line)} ${esc(x.word)}</b> <span class="small muted">sportsbook main line</span></div>
+          <div class="pick-alt"><span>Our median ${esc(x.median ?? "-")}${x.mean != null ? ` · average ${f1(x.mean)}` : ""}</span>${x.thr.map(([t, q]) => `<span>${esc(t)}+: ${pct(q)}</span>`).join("")}</div>
+          <div class="pick-m small muted">${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}${x.date ? ` · ${esc(timePH(x.date))}` : ""} · <a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
+        return `<h2 class="pk-sec">Game lines</h2>
+          ${gml.length ? gml.map(gcard).join("") : `<p class="empty">No sportsbook game lines for this day yet (they usually post a day or two before).</p>`}
+          <h2 class="pk-sec">Player props</h2><p class="small muted">Player props at the <b>sportsbook's main line</b> (the line you would actually see, e.g. 22.5 points), with our lean and our chance from 10,000 simulations. The book only sets which line is tested: our chance is our own model, never the odds. These sit between 55% and 75% because main lines are set close to even; that is normal. The chips show our chance at nearby lines.</p>
+          ${shown.length ? shown.map(card).join("") : `<p class="empty">No sportsbook main lines for this day: player lines usually appear on game day, and games that have started are left out (open the game's Live tab instead). Our own main line for every player is on each game page (Players tab).</p>`}
+          ${ml.length > shown.length ? `<p class="small muted">${ml.length - shown.length} more lines are close to 50/50 and left out.</p>` : ""}`;
+      })()
+      : S.pkKind !== "parlay" ? `<div class="filters" role="group" aria-label="Confidence">${[["all", "85% and up"], ["95", "Near-certain 95%+"], ["85", "85-94%"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-band="${k}" aria-pressed="${S.pkBand === k}">${l}</button>`).join("")}</div>
+        <label class="small low-tog"><input type="checkbox" id="pk-low" ${S.pkLow ? "checked" : ""}> Include very safe lines (far below the player's main line, e.g. 10+ points when his line is 22.5)</label>
         <p class="small muted">${cards.length} ${cards.length === 1 ? "pick" : "picks"}. The big number is the chance adjusted for how often the simulation's figures really came true for that market in past games (the raw simulation figure is under it; player props run a few points over-confident, so they are pulled down). Tap a pick for why. "Alt" lines are other versions of the same prop.</p>
         ${cards.slice(0, 80).map(card).join("") || `<p class="empty">No picks in this filter.</p>`}${cards.length > 80 ? `<p class="small muted">Showing the 80 strongest of ${cards.length}.</p>` : ""}`
       : `<p class="small muted">Built only from legs in different games, so the legs do not depend on each other and the combined chance is multiplied. "Using past hit rates" multiplies how often picks in each leg's band really came true, which is the more honest number. Same-game combinations are listed separately, counted directly from the simulations.</p>
@@ -3296,24 +3371,34 @@ function predictionsCard(g, sim, board) {
   const lean = (pOver) => (pOver == null ? "" : pOver >= 0.5 ? `Over ${pct(pOver)}` : `Under ${pct(1 - pOver)}`);
   const strength = (p) => (p >= 0.75 ? "strong" : p >= 0.6 ? "lean" : "coin-flip");
   // Best player props: strongest calibrated picks for this game that are not near-automatic lines.
+  const mainOf = (pid, fam) => sim?.players?.find((x) => String(x.id) === String(pid))?.props?.[fam]?.line;
   const props = (board?.picks || []).filter((p) => p.game === g.id && p.player).map((p) => ({ ...p, raw: p.p, p: calP(p.p, p.fam, board) }))
-    .filter((p) => !isLowLine(p) && p.p >= 0.8).sort((a, b) => b.p - a.p);
+    .filter((p) => !isLowLine(p) && p.p >= 0.8 && !(mainOf(p.player.id, p.fam) != null && p.line < mainOf(p.player.id, p.fam) * 0.75)).sort((a, b) => b.p - a.p);
   const seen = new Set(), best = [];
-  for (const p of props) { if (seen.has(p.player.id)) continue; seen.add(p.player.id); best.push(p); if (best.length === 3) break; }
+  // First choice: leans at the sportsbook's main line (our chance, the book only sets the line).
+  const WORD = { pts: "points", reb: "rebounds", ast: "assists", tpm: "threes", pra: "pts+reb+ast" };
+  for (const c of (sim?.comparison?.props || []).filter((x) => WORD[x.stat] && x.ourProbOver != null).map((x) => ({ ...x, q: Math.max(x.ourProbOver, 1 - x.ourProbOver) })).filter((x) => x.q >= 0.6).sort((a, b) => b.q - a.q)) {
+    if (seen.has(String(c.id))) continue; seen.add(String(c.id));
+    best.push({ label: `${c.n} ${c.ourProbOver >= 0.5 ? "over" : "under"} ${c.bookLine} ${WORD[c.stat]}`, p: c.q, player: { id: c.id, n: c.n }, mainLine: true, median: c.ourMedian });
+    if (best.length === 3) break;
+  }
+  for (const p of props) { if (best.length >= 3) break; if (seen.has(String(p.player.id))) continue; seen.add(String(p.player.id)); best.push(p); }
   // If the board has none for this game, fall back to the simulation's clearest main-line leans.
-  if (!best.length) for (const pl of (sim?.players || []).filter((x) => x.props?.pts).sort((a, b) => Math.abs(b.props.pts.pOver - 0.5) - Math.abs(a.props.pts.pOver - 0.5)).slice(0, 3)) {
+  if (!best.length) for (const pl of (sim?.players || []).filter((x) => x.props?.pts && (x.proj?.min || 0) >= 24 && (x.pDnp || 0) < 0.15 && x.props.pts.line >= 8.5).sort((a, b) => Math.abs(b.props.pts.pOver - 0.5) - Math.abs(a.props.pts.pOver - 0.5)).slice(0, 3)) {
     const o = pl.props.pts.pOver; best.push({ label: `${pl.n} ${o >= 0.5 ? "over" : "under"} ${pl.props.pts.line} points`, p: Math.max(o, 1 - o), player: { id: pl.id, n: pl.n }, lean: true });
   }
   const row = (k, main, sub, p) => `<div class="pr-row"><span class="pr-k">${k}</span><span class="pr-v"><b>${main}</b>${sub ? `<i>${sub}</i>` : ""}</span>${p != null ? `<span class="pr-p">${pct(p)}</span>` : ""}</div>`;
   return `<div class="card preds" data-tab-of="ov"><h2>Our predictions</h2>
     ${row("Moneyline", `${esc(favT)} to win`, `fair odds ${esc(T(L.fav).abbr)} ${mlTxt(pFav)} · ${esc(T(dog).abbr)} ${mlTxt(1 - pFav)} · ${strength(pFav)}`, pFav)}
-    ${coverFav != null && coverFav < 0.5 ? row("Spread", `${esc(T(dog).abbr)} +${L.spread.toFixed(1)}`, `covers in ${pct(1 - coverFav)} of simulations · our line, so close to even`, 1 - coverFav) : row("Spread", `${esc(favT)} ${spreadTxt(L.spread)}`, coverFav != null ? `covers in ${pct(coverFav)} of simulations · our line, so close to even` : "set at our projected margin", coverFav)}
-    ${row("Game total", `${L.total.toFixed(1)} · ${tot?.pOver != null ? esc(lean(tot.pOver)) : "even"}`, `projected ${f1(g.pred.hs + g.pred.as)} points`, tot?.pOver != null ? Math.max(tot.pOver, 1 - tot.pOver) : null)}
+    ${(() => { const c = sim?.comparison; if (c?.spread?.ourProb == null) return ""; const q = c.spread.ourProb, l = c.spread.bookLine, tm = c.spread.team, oth = tm === T(home).abbr ? T(away).abbr : T(home).abbr, take = q >= 0.5;
+      return row("Spread", `${esc(take ? tm : oth)} ${(take ? l : -l) > 0 ? "+" : ""}${take ? l : -l}`, `sportsbook main line · our margin ${esc(T(L.fav).abbr)} by ${f1(Math.abs(g.pred.hs - g.pred.as))} · ${strength(Math.max(q, 1 - q))}`, Math.max(q, 1 - q)); })() || `${coverFav != null && coverFav < 0.5 ? row("Spread", `${esc(T(dog).abbr)} +${L.spread.toFixed(1)}`, `covers in ${pct(1 - coverFav)} of simulations · our line, so close to even`, 1 - coverFav) : row("Spread", `${esc(favT)} ${spreadTxt(L.spread)}`, coverFav != null ? `covers in ${pct(coverFav)} of simulations · our line, so close to even` : "set at our projected margin", coverFav)}`}
+    ${(() => { const c = sim?.comparison; if (c?.total?.ourProb == null) return ""; const q = c.total.ourProb;
+      return row("Game total", `${q >= 0.5 ? "Over" : "Under"} ${c.total.bookLine}`, `sportsbook main line · our projected total ${f1(g.pred.hs + g.pred.as)}`, Math.max(q, 1 - q)); })() || `${row("Game total", `${L.total.toFixed(1)} · ${tot?.pOver != null ? esc(lean(tot.pOver)) : "even"}`, `projected ${f1(g.pred.hs + g.pred.as)} points`, tot?.pOver != null ? Math.max(tot.pOver, 1 - tot.pOver) : null)}`}
     ${row("Team totals", `${esc(T(away).abbr)} ${tt.away?.line ?? f1(g.pred.as)} · ${esc(T(home).abbr)} ${tt.home?.line ?? f1(g.pred.hs)}`, `${esc(T(away).abbr)} ${esc(lean(tt.away?.pOver))} · ${esc(T(home).abbr)} ${esc(lean(tt.home?.pOver))}`, null)}
     ${preQuarters(g)}
     <h3>Best player props</h3>
-    ${best.length ? best.map((p) => `<div class="pr-prop">${p.player ? avatar(p.player.id, p.player.n, { size: "sm" }) : ""}<span><b>${esc(p.label)}</b><i>${p.lean ? "main line, simulation lean" : `adjusted for past accuracy · picks like this came true ${p.hit?.rate != null ? esc(p.hit.rate) + "%" : "-"}`}</i></span><span class="pr-p">${pct(p.p)}</span></div>`).join("") : `<p class="small muted">No strong player prop for this game.</p>`}
-    <p class="small muted" style="margin-top:8px">All from our model and 10,000 simulations; no sportsbook numbers are used. Main lines are set at our projection, so they sit near 50%; the Picks tab has every 85%+ prop and alternative line. Not betting advice.</p>
+    ${best.length ? best.map((p) => `<div class="pr-prop">${p.player ? avatar(p.player.id, p.player.n, { size: "sm" }) : ""}<span><b>${esc(p.label)}</b><i>${p.mainLine ? `sportsbook main line · our median ${esc(p.median ?? "-")}` : p.lean ? "main line, simulation lean" : `adjusted for past accuracy · picks like this came true ${p.hit?.rate != null ? esc(p.hit.rate) + "%" : "-"}`}</i></span><span class="pr-p">${pct(p.p)}</span></div>`).join("") : `<p class="small muted">No strong player prop for this game.</p>`}
+    <p class="small muted" style="margin-top:8px">Every chance here comes only from our model and 10,000 simulations. Where the sportsbook has posted a main line, that is the line we test (so you see the number you would actually face); the odds never change our projections, simulations or learning. Without a sportsbook line, our own main line is used, which sits near 50% by design. The Picks tab has main-line leans, 85%+ props and parlays. Not betting advice.</p>
     <a class="go" href="#/picks">All picks ›</a></div>`;
 }
 
