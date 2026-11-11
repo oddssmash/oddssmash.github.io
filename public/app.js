@@ -1752,6 +1752,41 @@ function teamScout(t) {
 }
 // Team "Versus": this team against another team (both offence-vs-defence maps and head-to-head) or against a player
 // (his projected zones against this team's defence). Projected FG% = offence zone FG% (shrunk) + defence's gap to league (shrunk).
+// ---------------- Versus projections (works with no head-to-head history)
+// His per-game production (this season, blended with last while the sample is small) x the pace of the matchup
+// x the opponent's current-season defence; chosen defenders adjust his scoring by how shooters do against them
+// (NBA.com closest-defender tracking, weighted by his shot distances). Display only: the game-day model is separate.
+function seasonLine(sp) {
+  const c = sp?.cur, pv = sp?.prev; if (!c && !pv) return null;
+  const wc = c ? Math.min(1, (c[0] || 0) / 15) : 0, mix = (i) => (c && pv ? wc * c[i] + (1 - wc) * pv[i] : (c || pv)[i]);
+  return { g: c?.[0] || 0, min: mix(1), pts: mix(2), reb: mix(3), ast: mix(4) };
+}
+const lgStyle = (k) => { const ts = (S.teams || []).filter((t) => t.style?.[k]); return ts.reduce((a, t) => a + t.style[k], 0) / Math.max(1, ts.length); };
+function projVs(pid, team, oppTids, defenders = [], zoneRows = null) {
+  const b = seasonLine(S.P?.[String(pid)]); if (!b) return null;
+  const lgPace = lgStyle("pace"), lgDef = lgStyle("def"), my = S.T?.[team]?.style || {};
+  const opps = oppTids.map((t) => S.T?.[t]).filter(Boolean); if (!opps.length) return null;
+  const oPace = opps.reduce((a, t) => a + (t.style?.pace || lgPace), 0) / opps.length, oDef = opps.reduce((a, t) => a + (t.style?.def || lgDef), 0) / opps.length;
+  const fPace = ((my.pace || lgPace) + oPace) / 2 / (my.pace || lgPace), fDef = 1 + ((oDef - lgDef) / lgDef) * 0.85;
+  let pts = b.pts * fPace * fDef; const parts = [["Season average", b.pts], ["Game pace", b.pts * (fPace - 1)], [`Defence (${opps.map((t) => t.abbr).join(", ")} allow ${f1(oDef)} per 100 vs league ${f1(lgDef)})`, b.pts * fPace * (fDef - 1)]];
+  if (defenders.length && zoneRows?.length) {
+    const hr = ringsFromZ14(zoneRows), att = Object.values(hr).reduce((a, x) => a + x.a, 0), fg = att ? Object.values(hr).reduce((a, x) => a + x.m, 0) / att : 0.47;
+    let d = 0; for (const df of defenders) { const rd = defRingDiffs(df?.defense); let w = 0, v = 0; for (const [k, x] of Object.entries(hr)) if (rd[k] && x.a) { w += x.a; v += rd[k].diff * x.a; } if (w) d += v / w; }
+    const share = Math.min(0.55, 0.35 + 0.1 * (defenders.length - 1)), dPts = pts * ((d / defenders.length) / Math.max(0.3, fg)) * share;
+    pts += dPts; parts.push([`Defender${defenders.length > 1 ? "s" : ""} ${defenders.map((x) => shortName(x?.n || "")).join(", ")} (guarding about ${Math.round(share * 100)}% of his shots)`, dPts]);
+  }
+  const reb = b.reb * fPace, ast = b.ast * fPace * (1 + ((oDef - lgDef) / lgDef) * 0.5);
+  const sd = 0.3 * pts + 3;
+  return { min: b.min, pts, reb, ast, lo: Math.max(0, pts - 1.28 * sd), hi: pts + 1.28 * sd, base: b, parts, opps, oDef, oPace };
+}
+function projCard(res, title, note = "") {
+  if (!res) return `<p class="small muted">Not enough data to project this matchup.</p>`;
+  const ar = (v, base) => { const d = v - base; return Math.abs(d) < 0.15 ? "" : `<span class="${d > 0 ? "up" : "down"}"> ${d > 0 ? "▲" : "▼"}${f1(Math.abs(d))}</span>`; };
+  return `<div class="pv"><h3>${esc(title)}</h3>
+    <div class="statgrid sg4"><div class="stat"><b>${f1(res.pts)}</b><span>Points (${f0(res.lo)}-${f0(res.hi)})${ar(res.pts, res.base.pts)}</span></div><div class="stat"><b>${f1(res.reb)}</b><span>Rebounds${ar(res.reb, res.base.reb)}</span></div><div class="stat"><b>${f1(res.ast)}</b><span>Assists${ar(res.ast, res.base.ast)}</span></div><div class="stat"><b>${f1(res.min)}</b><span>Minutes</span></div></div>
+    <ul class="plain small pv-parts">${res.parts.map(([k, v], i) => `<li class="spread"><span>${esc(k)}</span><span class="num ${i && v > 0 ? "up" : i && v < 0 ? "down" : ""}">${i ? (v > 0 ? "+" : "") : ""}${f1(v)} pts</span></li>`).join("")}</ul>
+    <p class="small muted">Projected from our data even with no head-to-head games: his ${res.base.g ? "2026-27" : "2025-26"} per-game rates (blended with last season while this season is short), the matchup pace (${f1(res.oPace)}) and ${esc(res.opps.map((t) => t.abbr).join(", "))}'s current-season (2026-27) defence and roster.${note ? " " + note : ""} Arrows compare with his season average. For comparison only; game-day projections come from the full model.</p></div>`;
+}
 function projZones(offRows, defTeams, kOff) {
   return (offRows || []).map((x) => {
     const lg = (x.lgPct ?? 0) / 100, hp = ((x.made ?? 0) + kOff * lg) / ((x.att ?? 0) + kOff);
@@ -1779,7 +1814,10 @@ async function teamVersus(t) {
       const h2h = R.filter((g) => (g.home === t.id && g.away === o.id) || (g.home === o.id && g.away === t.id)).sort((a, b) => b.date.localeCompare(a.date));
       const w = h2h.filter((g) => (g.home === t.id ? g.act.hs > g.act.as : g.act.as > g.act.hs)).length;
       const best = (rows) => [...rows].filter((x) => !x.low).sort((a, b) => b.diff - a.diff);
-      box.innerHTML = `<div class="tv-cmp"><div><b>${esc(t.abbr)}</b><span>net ${sg(t.ratings?.adjNet)} · pace ${f1(t.style?.pace)}</span><span class="small muted">${esc((t.style?.tags || []).join(", ") || "-")}</span></div><div><b>${esc(o.abbr)}</b><span>net ${sg(o.ratings?.adjNet)} · pace ${f1(o.style?.pace)}</span><span class="small muted">${esc((o.style?.tags || []).join(", ") || "-")}</span></div></div>
+      const lgOff = lgStyle("off"), pace = ((t.style?.pace || 100) + (o.style?.pace || 100)) / 2;
+      const ptsT = (t.style.off * o.style.def / lgOff) * pace / 100, ptsO = (o.style.off * t.style.def / lgOff) * pace / 100, mg = ptsT - ptsO, pW = 1 - pNorm(-mg / 13);
+      const scoreCard = `<div class="pv"><h3>Projected on a neutral court</h3><div class="statgrid sg4"><div class="stat"><b>${f1(ptsT)}</b><span>${esc(t.abbr)} points</span></div><div class="stat"><b>${f1(ptsO)}</b><span>${esc(o.abbr)} points</span></div><div class="stat"><b>${pct(pW)}</b><span>${esc(t.abbr)} wins</span></div><div class="stat"><b>${f1(pace)}</b><span>pace</span></div></div><p class="small muted">From both teams' current-season (2026-27) offence and defence per 100 possessions and their pace; works even if they have not met. Home court adds about 2 points. The game page has the full-model projection when they actually play.</p></div>`;
+      box.innerHTML = scoreCard + `<div class="tv-cmp"><div><b>${esc(t.abbr)}</b><span>net ${sg(t.ratings?.adjNet)} · pace ${f1(t.style?.pace)}</span><span class="small muted">${esc((t.style?.tags || []).join(", ") || "-")}</span></div><div><b>${esc(o.abbr)}</b><span>net ${sg(o.ratings?.adjNet)} · pace ${f1(o.style?.pace)}</span><span class="small muted">${esc((o.style?.tags || []).join(", ") || "-")}</span></div></div>
         <p class="small vs-rec"><b>Head-to-head since October 2025:</b> ${h2h.length ? `${esc(t.abbr)} ${w}-${h2h.length - w}. ${h2h.slice(0, 4).map((g) => `${esc(new Date(g.date).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric", year: "2-digit" }))}: ${esc(T(g.away).abbr)} ${g.act.as}-${g.act.hs} ${esc(T(g.home).abbr)}`).join(" · ")}` : "no meetings yet."}</p>
         <div class="grid two"><div><h3>${esc(t.abbr)} offence vs ${esc(o.abbr)} defence</h3>${hz14Figure(mine, "off", `${t.name} offence projected vs ${o.name}`)}<p class="small">Best: ${best(mine).slice(0, 2).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}. Toughest: ${best(mine).slice(-2).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}.</p></div>
         <div><h3>${esc(o.abbr)} offence vs ${esc(t.abbr)} defence</h3>${hz14Figure(theirs, "off", `${o.name} offence projected vs ${t.name}`)}<p class="small">Best for them: ${best(theirs).slice(0, 2).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}. Toughest: ${best(theirs).slice(-2).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}.</p></div></div>
@@ -1789,7 +1827,7 @@ async function teamVersus(t) {
       const q = await load(`players/${st.pl.id}.json`).catch(() => null);
       if (!q?.zones14?.rows?.length) { box.innerHTML = `<p class="small muted">No zone shooting on record for ${esc(st.pl.n)}.</p>`; return; }
       const rows = projZones(q.zones14.rows, [t], 25), ptm = playTypeMatchup(q, t.id), sp = (q.splits?.best || []).concat(q.splits?.worst || []).find((x) => x.key === `opp:${t.id}`);
-      box.innerHTML = `<p class="small vs-rec"><b>${esc(q.n)} vs ${esc(t.abbr)}:</b> ${sp ? `${sp.n} games, ${sp.pts > 0 ? "+" : ""}${f1(sp.pts)} pts against his usual gap to our projections${sp.n < 10 ? " (small sample)" : ""}. ` : "No head-to-head split yet (needs 5+ games). "}${ptm ? `Play-type matchup: ${ptm.delta > 0 ? "+" : ""}${f1(ptm.delta)} pts (${num(ptm.n)} possessions, shown only).` : ""}</p>
+      box.innerHTML = projCard(projVs(q.id, q.team, [t.id], [], q.zones14.rows), `${q.n} projected vs the ${t.name}`) + `<p class="small vs-rec"><b>${esc(q.n)} vs ${esc(t.abbr)}:</b> ${sp ? `${sp.n} games, ${sp.pts > 0 ? "+" : ""}${f1(sp.pts)} pts against his usual gap to our projections${sp.n < 10 ? " (small sample)" : ""}. ` : "No head-to-head split yet (needs 5+ games). "}${ptm ? `Play-type matchup: ${ptm.delta > 0 ? "+" : ""}${f1(ptm.delta)} pts (${num(ptm.n)} possessions, shown only).` : ""}</p>
         <h3>${esc(q.n)} vs the ${esc(t.name)} defence</h3>${hz14Figure(rows, "off", `${q.n} projected vs ${t.name}`)}
         <p class="small muted">His zone FG% (shrunk with 25 attempts) plus this defence's gap to league in each zone. <a href="#/scout/${esc(q.id)}">His full scouting report ›</a></p>`;
     }
@@ -2150,7 +2188,7 @@ async function vScout(id, labTid) {
     };
     const teamsFor = () => (mm.vs === "team" ? [S.T[mm.team]].filter(Boolean) : (S.teams || []).filter((t) => t.style?.tags?.includes(mm.style)));
     const who = () => (mm.vs === "team" ? T(mm.team).name : mm.vs === "style" ? `teams tagged "${mm.style}" (${teamsFor().map((t) => t.abbr).join(", ")})` : mm.players.map((q) => q.n).join(", "));
-    const draw = async () => {
+    const drawMaps = async () => {
       const out = document.getElementById("mm-out"); if (!out) return;
       const LG = MM_LG(), hz = p.zones14?.rows;
       if (mm.side === "off" && mm.vs !== "player") {
@@ -2187,6 +2225,19 @@ async function vScout(id, labTid) {
       const cells = {};
       for (const [k] of RINGS) { const lg = LG.ring[k]; if (lg == null) { cells[k] = null; continue; } const b = base?.[k]?.a ? (base[k].m + 40 * lg) / (base[k].a + 40) : lg; const proj = b + (mine[k]?.diff || 0); cells[k] = { pct: proj * 100, d: (proj - b) * 100, low: !mine[k] }; }
       out.innerHTML = `<h3>His defence vs ${esc(label)}</h3>${ringFigure(cells, "def")}<p class="small muted">Projected FG% of ${esc(label)} with him as the closest defender: their usual shooting at each distance, plus how much he moves shooters away from their norm. The small number is the change he makes (blue = he holds them down).</p>`;
+    };
+    const draw = async () => {
+      await drawMaps();
+      const out = document.getElementById("mm-out"); if (!out) return;
+      let html = "";
+      if (mm.side === "off") {
+        if (mm.vs === "team") html = projCard(projVs(p.id, p.team, [mm.team], [], p.zones14?.rows), `${p.n} projected vs ${T(mm.team).name}`);
+        else if (mm.vs === "style") html = projCard(projVs(p.id, p.team, teamsFor().map((t) => t.id), [], p.zones14?.rows), `${p.n} projected vs "${mm.style}" teams`);
+        else if (mm.players.length) { const ds = await Promise.all(mm.players.map((q) => getP(q.id))); const ot = [...new Set(mm.players.map((q) => q.team))]; html = projCard(projVs(p.id, p.team, ot, ds, p.zones14?.rows), `${p.n} projected vs ${mm.players.map((q) => q.n).join(", ")}`, `Opponent: ${ot.map((x) => T(x).abbr).join(", ")}.`); }
+      } else if (mm.vs === "player" && mm.players.length) {
+        const q = await getP(mm.players[0].id); html = projCard(projVs(mm.players[0].id, mm.players[0].team, [p.team], [p], q?.zones14?.rows), `${mm.players[0].n} projected with ${p.n} guarding him`);
+      }
+      if (html) out.insertAdjacentHTML("afterbegin", html);
     };
     app.querySelectorAll("[data-mm-side]").forEach((b) => b.addEventListener("click", () => { mm.side = b.dataset.mmSide; mm.players = mm.side === "def" ? mm.players.slice(0, 1) : mm.players; app.querySelectorAll("[data-mm-side]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); ctl(); draw(); }));
     app.querySelectorAll("[data-mm-vs]").forEach((b) => b.addEventListener("click", () => { mm.vs = b.dataset.mmVs; app.querySelectorAll("[data-mm-vs]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); ctl(); draw(); }));
@@ -3798,6 +3849,21 @@ const slot = app.querySelector(".bottom-line .viz-slot"); if (slot) slot.innerHT
       if (glance) { glance.insertAdjacentHTML("afterend", insightCard(g, sim)); const ins = glance.nextElementSibling; if (ins) ins.hidden = (S.gTab || "ov") !== "pl"; }
     }, () => {});
     const keys = app.querySelector("#g-keys");
+    if (keys && !app.querySelector("#mx")) {
+      const opts = (t) => (t.players || []).filter((x) => x.min >= 10).map((x) => `<option value="${esc(x.id)}">${esc(x.n)} (${esc(T(t.tid).abbr)})</option>`).join("");
+      keys.insertAdjacentHTML("beforebegin", `<section class="card" id="mx" data-tab-of="mu"><h2>Matchup explorer</h2><p class="small muted">Pick a player and the opponent guarding him: his projected line updates for that matchup.</p>
+        <label class="small">Player</label><select class="field" id="mx-p">${g.teams.map(opts).join("")}</select>
+        <label class="small">Guarded by</label><select class="field" id="mx-d"></select><div id="mx-out"></div></section>`);
+      const mx = app.querySelector("#mx"); mx.hidden = (S.gTab || "ov") !== "mu";
+      const fill = () => { const pid = app.querySelector("#mx-p").value, own = g.teams.find((t) => (t.players || []).some((x) => String(x.id) === pid)), opp = g.teams.find((t) => t !== own); app.querySelector("#mx-d").innerHTML = `<option value="">Team defence only</option>` + (opp.players || []).filter((x) => x.min >= 10).map((x) => `<option value="${esc(x.id)}">${esc(x.n)}</option>`).join(""); };
+      const run = async () => {
+        const pid = app.querySelector("#mx-p").value, did = app.querySelector("#mx-d").value, own = g.teams.find((t) => (t.players || []).some((x) => String(x.id) === pid)), opp = g.teams.find((t) => t !== own), me = own.players.find((x) => String(x.id) === pid);
+        const [pf, df] = await Promise.all([load(`players/${pid}.json`).catch(() => null), did ? load(`players/${did}.json`).catch(() => null) : null]);
+        const res = projVs(pid, own.tid, [opp.tid], df ? [df] : [], pf?.zones14?.rows);
+        app.querySelector("#mx-out").innerHTML = projCard(res, `${me.n} vs ${df ? df.n : T(opp.tid).name}`) + `<p class="small"><b>Full-model projection for tonight:</b> ${f1(me.pts)} pts, ${f1(me.reb)} reb, ${f1(me.ast)} ast in ${f0(me.min)} minutes (includes rotation, absences and scenarios). <a href="#/scout/${esc(pid)}">Open his Versus page ›</a></p>`;
+      };
+      app.querySelector("#mx-p").addEventListener("change", () => { fill(); run(); }); app.querySelector("#mx-d").addEventListener("change", run); fill(); run();
+    }
     if (keys) { keys.insertAdjacentHTML("beforebegin", matchupSummary(g)); const ms = keys.previousElementSibling; if (ms) ms.hidden = (S.gTab || "ov") !== "mu"; }
     const firstPlayers = [...app.children].find((el) => /player projections/i.test((el.querySelector?.("h2") || {}).innerText || ""));
     if (firstPlayers) {

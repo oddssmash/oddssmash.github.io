@@ -1100,3 +1100,6 @@ a.gtab { color: var(--ink-2); }
 .tv-cmp { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin: 8px 0; }
 .tv-cmp > div { display: grid; gap: 2px; padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
 .tv-cmp b { font-size: 16px; }
+.pv { margin: 6px 0 12px; padding: 10px; border: 1.5px solid #2fbf71; border-radius: 12px; background: color-mix(in srgb, #2fbf71 6%, transparent); }
+.pv h3 { margin-top: 0; }
+.pv-parts li { padding: 3px 0; }
