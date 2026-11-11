@@ -54,3 +54,6 @@ table.tb2 td:nth-child(3) { width: 45%; }
 .mx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; margin: 10px 0; }
 .mx-h { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; } .mx-h.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-wash); } .mx-h .himg { margin: 0; }
 .mx2 { color: var(--good-ink); font-weight: 800; } .mx1 { color: var(--good-ink); } .mxm1 { color: var(--crit-ink); } .mxm2 { color: var(--crit-ink); font-weight: 800; }
+
+.tdp { display: grid; gap: 6px; margin: 6px 0 10px; } .btn.sm { min-height: 36px; font-size: 13px; } .pchips { margin: -2px 0 6px 64px; display: flex; flex-wrap: wrap; gap: 2px; align-items: center; } .pchips .hchip { cursor: pointer; border: 0; font: inherit; font-size: 12px; }
+

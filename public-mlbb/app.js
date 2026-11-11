@@ -195,7 +195,16 @@ async function vSim() {
     for (let i = 0; i < N; i++) { const len = Math.max(8, 16 + (rnd() + rnd() + rnd() - 1.5) * 6 + (el - es) * 2); sumLen += len; if (len >= 20) long++; if (rnd() < at(len)) wins++; }
     return { p, base, edge, at, sim: { win: wins / N, avgLen: sumLen / N, long: long / N }, pA: prof(h1), pB: prof(h2), h1, h2 };
   };
-  const slot = (side, i, kind) => { const v = st[`${kind}${side}`][i]; return `<div class="dl-slot"><span class="muted small">${kind === "h" ? ROLES[i] : `Ban ${i + 1}`}</span>${pickBox(`s${kind}${side}${i}`, kind === "h" ? "Hero" : "Ban", cap(v))}</div>`; };
+  // TEAM DRAFT PICKER: a team's likely draft (comfort hero per role), any of its recent pro drafts, and each
+  // role's player pool as quick picks under the slot.
+  const pastGames = async (t) => { if (!t?.league) return []; const rows = await load(`library/${sid(t.league)}.json`).catch(() => []); return rows.filter((r) => r[2] === t.name || r[3] === t.name).slice(0, 25); };
+  const [pgA, pgB] = await Promise.all([pastGames(st.a), pastGames(st.b)]);
+  const teamCtl = (side) => { const t = side === 1 ? st.a : st.b, pg = side === 1 ? pgA : pgB; if (!t) return "";
+    return `<div class="tdp"><button class="btn sm" type="button" data-fill="${side}">Fill likely draft</button>
+      <select class="field" data-past="${side}" aria-label="Load one of ${esc(t.name)}'s past drafts"><option value="">Load a past draft of ${esc(t.name)}…</option>${pg.map((r, i) => `<option value="${i}">${esc(r[0] || "")} · vs ${esc(r[2] === t.name ? r[3] : r[2])} · ${esc(r[1] || "")} G${r[5]} · ${(r[2] === t.name ? r[6] === 1 : r[6] === 2) ? "won" : "lost"}</option>`).join("")}</select></div>`; };
+  const poolChips = (side, i) => { const det = side === 1 ? dA : dB; if (!det) return ""; const pl = det.pl.find((p) => p && p.role === ["EXP", "Jungle", "Mid", "Gold", "Roam"][i]); if (!pl) return "";
+    return `<div class="pchips"><span class="muted small">${esc(pl.name)}:</span>${pl.pool.slice(0, 6).map((x) => `<button class="hchip" type="button" data-pool="${side},${i},${esc(x.h)}" title="${x.n} games, ${pct(x.wr)} won">${heroImg(x.h, 16)}${esc(cap(x.h))} <span class="muted">${x.n}</span></button>`).join("")}</div>`; };
+  const slot = (side, i, kind) => { const v = st[`${kind}${side}`][i]; return `<div class="dl-slot"><span class="muted small">${kind === "h" ? ROLES[i] : `Ban ${i + 1}`}</span>${pickBox(`s${kind}${side}${i}`, kind === "h" ? "Hero" : "Ban", cap(v))}</div>${kind === "h" ? poolChips(side, i) : ""}`; };
   const sugBox = (side) => { const arr = (side === 1 ? st.h1 : st.h2), i = arr.findIndex((x) => !x); if (i < 0) return ""; const sg = suggest(side, i);
     return `<div class="sug"><b class="small">Suggested ${ROLES[i]} for ${esc((side === 1 ? st.a : st.b)?.name || `side ${side === 1 ? "A" : "B"}`)}</b>${sg.map((x) => `<button class="hchip" type="button" data-sug="${side},${i},${esc(x.h)}" title="${esc(x.why.join("; "))}">${esc(cap(x.h))}</button>`).join("")}<span class="small muted" style="display:block">${esc(sg[0]?.why.join(" · ") || "")}</span></div>`; };
   const draw = () => { const r = compute(), A = st.a?.name || "Side A", B = st.b?.name || "Side B", wa = draftWarnings(r.pA, D.avgLineup, r.h1.length), wb = draftWarnings(r.pB, D.avgLineup, r.h2.length);
@@ -212,12 +221,18 @@ async function vSim() {
         <p class="small muted">Traits per hero come from its role, specialties and the crowd control in its skills (Liquipedia), and early/late from its pro record in games under 14 minutes vs 18+ minutes. Current patch: ${esc(D.patch?.patch || "-")}.</p></div>`; };
   app.innerHTML = `<h1>Match simulator</h1><p class="lead">Set up a live draft: teams, bans and picks by role. Get counter-pick suggestions for the next open slot (counters to their picks, combos with yours, the meta, the team's comfort picks and the player's own record on the hero), then see the draft profile and the win chance by game time.</p>
     <label class="small"><input type="checkbox" id="sim-series" ${st.series ? "checked" : ""}> Series mode: heroes a team already used in this series are locked for that team (global ban)</label>
-    <div class="grid two"><div class="card"><h2>Side A</h2>${pickBox("sta", "Team (optional)", st.a?.name || "")}<h3>Bans</h3>${[0, 1, 2, 3, 4].map((i) => slot(1, i, "b")).join("")}<h3>Picks</h3>${[0, 1, 2, 3, 4].map((i) => slot(1, i, "h")).join("")}</div>
-      <div class="card"><h2>Side B</h2>${pickBox("stb", "Team (optional)", st.b?.name || "")}<h3>Bans</h3>${[0, 1, 2, 3, 4].map((i) => slot(2, i, "b")).join("")}<h3>Picks</h3>${[0, 1, 2, 3, 4].map((i) => slot(2, i, "h")).join("")}</div></div>
+    <div class="grid two"><div class="card"><h2>Side A</h2>${pickBox("sta", "Team (optional)", st.a?.name || "")}${teamCtl(1)}<h3>Bans</h3>${[0, 1, 2, 3, 4].map((i) => slot(1, i, "b")).join("")}<h3>Picks</h3>${[0, 1, 2, 3, 4].map((i) => slot(1, i, "h")).join("")}</div>
+      <div class="card"><h2>Side B</h2>${pickBox("stb", "Team (optional)", st.b?.name || "")}${teamCtl(2)}<h3>Bans</h3>${[0, 1, 2, 3, 4].map((i) => slot(2, i, "b")).join("")}<h3>Picks</h3>${[0, 1, 2, 3, 4].map((i) => slot(2, i, "h")).join("")}</div></div>
     <div class="card"><label class="small" for="sim-map">Battlefield (annual map event)</label><select class="field" id="sim-map"><option value="">Not set</option>${Object.keys(MAPS).map((k) => `<option${st.map === k ? " selected" : ""}>${esc(k)}</option>`).join("")}</select><div id="sim-mapinfo" class="small" style="margin-top:6px"></div></div>
     <div id="sim-plan"></div><div id="sim-sug" class="card"></div><div id="sim-out"></div>
     <p><button class="btn" type="button" id="sim-next">Next game in the series (lock these picks, clear the board)</button> <button class="btn" type="button" id="sim-reset">Reset</button></p>`;
   document.getElementById("sim-map").addEventListener("change", (e) => { st.map = e.target.value; draw(); });
+  const setSide = (side, picks, bans) => { if (picks) st[`h${side}`] = picks.map((h) => h || ""); if (bans) st[`b${side}`] = [0, 1, 2, 3, 4].map((i) => bans[i] || ""); vSim(); };
+  app.querySelectorAll("[data-fill]").forEach((b) => b.addEventListener("click", () => { const side = +b.dataset.fill, det = side === 1 ? dA : dB, used = new Set([...st.h1, ...st.h2].filter(Boolean));
+    const picks = ["EXP", "Jungle", "Mid", "Gold", "Roam"].map((r) => { const c = (det?.d.profile.comfort || []).filter((x) => x.role === r && !used.has(x.h))[0] || null; if (c) used.add(c.h); return c?.h || ""; }); setSide(side, picks, null); }));
+  app.querySelectorAll("[data-past]").forEach((sel) => sel.addEventListener("change", () => { if (sel.value === "") return; const side = +sel.dataset.past, t = side === 1 ? st.a : st.b, r = (side === 1 ? pgA : pgB)[+sel.value]; if (!r) return;
+    const mine = r[2] === t.name; setSide(side, mine ? r[10] : r[11], mine ? r[12] : r[13]); }));
+  app.querySelectorAll("[data-pool]").forEach((b) => b.addEventListener("click", () => { const [side, i, h] = b.dataset.pool.split(","); st[`h${side}`][+i] = h; vSim(); }));
   bindPick(document.getElementById("sta"), teams, (t) => `${t.name} (${t.region})`, (t) => { st.a = t; vSim(); });
   bindPick(document.getElementById("stb"), teams, (t) => `${t.name} (${t.region})`, (t) => { st.b = t; vSim(); });
   for (const side of [1, 2]) for (const kind of ["h", "b"]) for (let i = 0; i < 5; i++) { const inp = document.getElementById(`s${kind}${side}${i}`); bindPick(inp, names, (h) => cap(h), (h) => { st[`${kind}${side}`][i] = h; draw(); }); inp.addEventListener("change", () => { if (!inp.value) { st[`${kind}${side}`][i] = ""; draw(); } }); }
