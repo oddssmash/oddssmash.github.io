@@ -1,4 +1,4 @@
-# BEAT THE ODDS
+# AGAINST ALL ODDS
 
 A scenario-based NBA game analyzer and predictor. It projects every game from data, then grades itself against what really happened and learns from the gap.
 
