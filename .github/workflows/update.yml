@@ -53,17 +53,26 @@ jobs:
           node scripts/insights.mjs
           node scripts/live.mjs
 
-      # Make phones load the new code right after a deploy (the version tag changes on every run).
-      - name: Cache-bust the site code
+      # FIBA section: schedules, box scores and shot locations from fiba.basketball, then the walk-forward model.
+      # A FIBA hiccup must not stop the NBA update, so these steps may fail without failing the run.
+      - name: FIBA fetch and model
+        continue-on-error: true
+        run: |
+          node scripts/fiba/fetch.mjs
+          node scripts/fiba/model.mjs
+
+      # One site: homepage at the root, NBA under /nba/, FIBA under /fiba/. The version tag makes phones
+      # load the new code right after a deploy.
+      - name: Assemble the site
         run: |
           v="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
-          sed -i "s#src=\"app.js\"#src=\"app.js?v=$v\"#; s#href=\"styles.css\"#href=\"styles.css?v=$v\"#" public/index.html
-          grep -o 'app.js?v=[^"]*' public/index.html
+          node scripts/site.mjs "$v"
+          grep -o 'app.js?v=[^"]*' site/nba/index.html
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: public
+          path: site
 
   deploy:
     needs: build

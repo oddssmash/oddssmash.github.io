@@ -1126,3 +1126,9 @@ a.gtab { color: var(--ink-2); }
 /* zone-based projection under each Scout player */
 .zp > div + div { margin-top: 3px; }
 
+
+/* NBA / FIBA league switch in the header (shared by both apps) */
+.lg-switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface); flex: none; }
+.lg-switch a { min-height: 34px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 650; color: var(--ink-2); text-decoration: none; }
+.lg-switch a:hover { text-decoration: none; color: var(--ink); }
+.lg-switch a[aria-current="page"] { background: var(--silver-metal); color: #0b0b0b; }

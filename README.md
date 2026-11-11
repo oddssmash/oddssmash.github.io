@@ -65,3 +65,13 @@ config/sources.json      commentary sources
 - Starting lineups and late scratches are only known near tip-off.
 - Matchup records built on a handful of games are hints. The number of games is always shown.
 - This is for analysis and entertainment. It is not betting advice.
+
+## FIBA section
+
+The site has one homepage (`web/home`) with two sections: NBA at `/nba/` (source `./public`) and FIBA at `/fiba/` (source `./public-fiba`). `node scripts/site.mjs` assembles both into `./site`, which is what GitHub Pages publishes. Old NBA links (`/#/game/...`) are redirected to `/nba/`.
+
+FIBA pipeline (same workflow as NBA, no betting data):
+
+- `node scripts/fiba/fetch.mjs`: schedules, box scores and play-by-play shot locations from the public fiba.basketball event and game pages. Competitions are listed in `scripts/fiba/events.mjs`.
+- `node scripts/fiba/model.mjs`: walk-forward team ratings (offence, defence, pace, home court) with the learning settings re-chosen by replay each run, per-minute player rates, hot/cold zones, 10,000-run simulations, our own lines and picks, and the accuracy report. Writes `public-fiba/data/`.
+- Preview locally: `node scripts/site.mjs`, then `DIR=site PORT=4180 node scripts/serve.mjs`.

@@ -8,3 +8,5 @@ progress-shots/
 .DS_Store
 .build-in-progress
 .workflow-running
+site/
+public-fiba/data/

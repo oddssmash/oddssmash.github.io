@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ODDSSMASH FIBA - FIBA game analyzer</title>
+  <meta name="apple-mobile-web-app-title" content="ODDSSMASH FIBA">
+  <meta name="application-name" content="ODDSSMASH FIBA">
+  <meta name="description" content="Scenario-based FIBA projections (World Cup qualifiers, continental cups, FIBA club competitions) that grade themselves against every real result. Betting odds never feed the projections.">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" id="theme-color" content="#0b0c0d">
+  <script>
+    try { if (localStorage.getItem("theme") === "light") { document.documentElement.dataset.theme = "light"; document.getElementById("theme-color").setAttribute("content", "#f4f5f6"); } } catch (e) { /* storage blocked */ }
+  </script>
+  <link rel="icon" type="image/png" sizes="32x32" href="../brand/icon-32.png">
+  <link rel="apple-touch-icon" href="../brand/icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="fiba.css">
+</head>
+<body>
+  <button class="skip" id="skip" type="button">Skip to content</button>
+  <header class="top">
+    <a class="brand" href="../" aria-label="ODDSSMASH home: choose NBA or FIBA">
+      <img class="brand-full on-dark" src="../brand/stack-silver.png" alt="" height="46"><img class="brand-full on-light" src="../brand/stack-black.png" alt="" height="46">
+    </a>
+    <span class="lg-switch" role="group" aria-label="League"><a href="../nba/">NBA</a><a href="#/games" aria-current="page">FIBA</a></span>
+    <nav class="nav" id="nav" aria-label="Sections"></nav>
+    <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark theme" title="Switch light or dark theme">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 0 18V3z"/><circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+  </header>
+  <main id="app" tabindex="-1"><p class="loading">Loading the latest data...</p></main>
+  <footer class="foot">
+    <p id="updated"></p>
+    <p>Statistical projections for analysis and entertainment. Not betting advice. Sportsbook odds and lines are not used.</p>
+    <p>All dates and times are Philippine time (Asia/Manila). Data from FIBA's public game pages; flags from FIBA's image server.</p>
+  </footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
