@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>ODDSSMASH MLBB - MLBB esports analyzer</title>
+  <meta name="apple-mobile-web-app-title" content="ODDSSMASH MLBB">
+  <meta name="application-name" content="ODDSSMASH MLBB">
+  <meta name="description" content="MLBB esports projections (MPL PH, ID, MY and international events) with drafts, meta heroes, combos, counters and scenarios, graded against every real result. Betting odds never feed the projections.">
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" id="theme-color" content="#0b0c0d">
+  <script>
+    try { if (localStorage.getItem("theme") === "light") { document.documentElement.dataset.theme = "light"; document.getElementById("theme-color").setAttribute("content", "#f4f5f6"); } } catch (e) { /* storage blocked */ }
+  </script>
+  <link rel="icon" type="image/png" sizes="32x32" href="../brand/icon-32.png">
+  <link rel="apple-touch-icon" href="../brand/icon-180.png">
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="mlbb.css">
+</head>
+<body>
+  <button class="skip" id="skip" type="button">Skip to content</button>
+  <header class="top">
+    <a class="brand" href="../" aria-label="ODDSSMASH home: choose NBA, FIBA or MLBB">
+      <img class="brand-full on-dark" src="../brand/stack-silver.png" alt="" height="46"><img class="brand-full on-light" src="../brand/stack-black.png" alt="" height="46">
+    </a>
+    <span class="lg-switch" role="group" aria-label="Section"><a href="../nba/">NBA</a><a href="../fiba/">FIBA</a><a href="#/matches" aria-current="page">MLBB</a></span>
+    <nav class="nav" id="nav" aria-label="Sections"></nav>
+    <button class="icon-btn" id="theme" type="button" aria-label="Switch light or dark theme" title="Switch light or dark theme">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 0 18V3z"/><circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+  </header>
+  <main id="app" tabindex="-1"><p class="loading">Loading the latest data...</p></main>
+  <footer class="foot">
+    <p id="updated"></p>
+    <p>Statistical projections for analysis and entertainment. Not betting advice. Sportsbook odds and lines are not used.</p>
+    <p>All dates and times are Philippine time (Asia/Manila). Match, draft and roster data from <a href="https://liquipedia.net/mobilelegends/" target="_blank" rel="noopener">Liquipedia</a> (CC-BY-SA 3.0); official league statistics from MPL PH and MPL ID; ranked hero rates from MLBBHub.</p>
+  </footer>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

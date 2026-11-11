@@ -33,7 +33,7 @@
     .on-light { display: none; } :root[data-theme="light"] .on-light { display: block; } :root[data-theme="light"] .on-dark { display: none; }
     h1 { font-size: 15px; font-weight: 600; text-align: center; color: var(--ink-2); margin: 0 0 26px; letter-spacing: .01em; }
     .pick { display: grid; gap: 14px; }
-    @media (min-width: 620px) { .pick { grid-template-columns: 1fr 1fr; } }
+    @media (min-width: 620px) { .pick { grid-template-columns: 1fr 1fr; } } @media (min-width: 900px) { .pick { grid-template-columns: 1fr 1fr 1fr; } } main { max-width: 980px; }
     .lg { position: relative; display: flex; flex-direction: column; gap: 8px; padding: 22px 20px 20px; border-radius: 18px; background: var(--surface); border: 1px solid var(--line); color: inherit; text-decoration: none; overflow: hidden; transition: transform .15s ease, border-color .15s ease; }
     .lg::before { content: ""; position: absolute; left: 0; right: 0; top: 0; height: 3px; background: var(--silver-metal); }
     .lg:hover { border-color: #6b7279; } .lg:active { transform: scale(.985); }
@@ -52,10 +52,11 @@
   <main>
     <img class="logo on-dark" src="brand/stack-silver.png" alt="ODDSSMASH">
     <img class="logo on-light" src="brand/stack-black.png" alt="ODDSSMASH">
-    <h1>Basketball projections that grade themselves against every real result</h1>
+    <h1>Projections that grade themselves against every real result</h1>
     <div class="pick">
       <a class="lg" href="nba/"><b>NBA</b><span class="sub">Every game, player props, live predictions, Scout, simulations and the accuracy record.</span><span class="nx" id="nx-nba"></span><span class="go">Open NBA ›</span></a>
       <a class="lg" href="fiba/"><b>FIBA</b><span class="sub">World Cup qualifiers, continental cups and FIBA club competitions: projections, players, zones and results.</span><span class="nx" id="nx-fiba"></span><span class="go">Open FIBA ›</span></a>
+      <a class="lg" href="mlbb/"><b>MLBB</b><span class="sub">MPL and international MLBB esports: series predictions, drafts, meta heroes, combos, counters and scenarios.</span><span class="nx" id="nx-mlbb"></span><span class="go">Open MLBB ›</span></a>
     </div>
     <p class="foot">Statistical projections for analysis and entertainment. Not betting advice. Sportsbook odds and lines never feed the projections. Times are Philippine time (Asia/Manila).</p>
   </main>
@@ -64,6 +65,7 @@
     T.addEventListener("click", () => { const l = document.documentElement.dataset.theme !== "light"; document.documentElement.dataset.theme = l ? "light" : "dark"; document.getElementById("theme-color").setAttribute("content", l ? "#f4f5f6" : "#0b0c0d"); try { localStorage.setItem("theme", l ? "light" : "dark"); } catch (e) {} });
     const when = (d) => new Date(d).toLocaleString("en-US", { timeZone: "Asia/Manila", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     fetch("nba/data/upcoming.json").then((r) => r.json()).then((u) => { const f = u.filter((g) => Date.parse(g.date) > Date.now()).sort((a, b) => a.date.localeCompare(b.date)); if (f.length) document.getElementById("nx-nba").textContent = `Next tip-off: ${when(f[0].date)} PH · ${f.length} upcoming games`; }).catch(() => {});
+    fetch("mlbb/data/meta.json").then((r) => r.json()).then((m) => { document.getElementById("nx-mlbb").textContent = m.upcoming ? `${m.upcoming} upcoming matches` : `${m.series} series graded · next: MCT SEA and M8`; }).catch(() => {});
     fetch("fiba/data/upcoming.json").then((r) => r.json()).then((u) => { const f = (u.games || u).filter((g) => Date.parse(g.date) > Date.now()); if (f.length) document.getElementById("nx-fiba").textContent = `Next tip-off: ${when(f[0].date)} PH · ${f.length} upcoming games`; }).catch(() => {});
   </script>
 </body>

@@ -1,0 +1,31 @@
+/* MLBB app: additions on top of the shared ODDSSMASH styles.css (same tokens, both themes). */
+.brand .on-light { display: none; }
+:root[data-theme="light"] .brand .on-dark { display: none; }
+:root[data-theme="light"] .brand .brand-full.on-light { display: block; }
+.top .icon-btn { margin-left: auto; }
+.nav { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.lg-switch a { padding: 0 10px; }
+.grid.two { display: grid; gap: 12px; } @media (min-width: 760px) { .grid.two { grid-template-columns: 1fr 1fr; } }
+.fgc { display: flex; flex-direction: column; gap: 8px; color: inherit; margin-bottom: 10px; } .fgc:hover { text-decoration: none; }
+.tb { display: inline-grid; place-items: center; border-radius: 12px; background: var(--surface-2); color: var(--ink-2); font-weight: 700; box-shadow: 0 0 0 1px var(--line); flex: none; vertical-align: middle; }
+.gp-h { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; } .gp-h > span { display: flex; align-items: center; gap: 10px; } .gp-h b { font-size: 28px; font-variant-numeric: tabular-nums; }
+.ehead { display: flex; align-items: center; gap: 14px; margin: 4px 0 8px; }
+.tw { overflow-x: auto; margin: 0 calc(var(--pad) * -1); padding: 0 var(--pad); }
+table.ft { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.ft th { text-align: left; font-size: 12px; font-weight: 600; color: var(--muted); padding: 6px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.ft td { padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; } table.ft tr:last-child td { border-bottom: 0; }
+table.ft .n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tn { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; }
+.hchip { display: inline-block; padding: 2px 8px; margin: 2px 2px 2px 0; border-radius: 999px; background: var(--surface-2); color: var(--ink); font-size: 13px; font-weight: 600; box-shadow: inset 0 0 0 1px var(--line); }
+.hchip:hover { text-decoration: none; box-shadow: inset 0 0 0 1px var(--line-2); }
+.tier { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; font-weight: 800; background: var(--surface-2); vertical-align: middle; font-size: 15px; }
+.tier.tS { background: var(--silver-metal); color: #0b0b0b; } .tier.tA { background: var(--accent-wash); color: var(--accent-ink); }
+.menu-i { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; color: inherit; margin-bottom: 8px; } .menu-i:hover { text-decoration: none; } .menu-ic { font-size: 22px; } .menu-c { color: var(--muted); font-size: 20px; }
+.vs-pick { position: relative; margin: 6px 0 8px; }
+.vs-list { position: absolute; left: 0; right: 0; top: 100%; z-index: 25; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; overflow: hidden; box-shadow: var(--shadow); } .vs-list:empty { display: none; }
+.vs-hit { display: block; width: 100%; text-align: left; min-height: 44px; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; font: inherit; } .vs-hit:hover, .vs-hit:focus-visible { background: var(--surface-2); }
+.dl-slot { display: grid; grid-template-columns: 56px 1fr; align-items: center; gap: 8px; } .dl-slot .vs-pick { margin: 4px 0; }
+.callout { border-left: 3px solid var(--accent); background: var(--surface); border-radius: 10px; padding: 10px 12px; margin: 0 0 12px; }
+.pk-p { display: inline-grid; place-items: center; min-width: 52px; height: 36px; border-radius: 10px; background: var(--surface-2); font-weight: 700; } .pk-p.hi { background: var(--silver-metal); color: #0b0b0b; }
+.rs-c { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--surface-2); font-weight: 700; } .rs-c.ok { color: var(--good-ink); } .rs-c.no { color: var(--crit-ink); }
+.statgrid.sg4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } .stat b { display: block; font-size: 18px; } .stat span { font-size: 12px; color: var(--muted); }

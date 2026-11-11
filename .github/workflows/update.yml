@@ -63,6 +63,14 @@ jobs:
           node scripts/fiba/model.mjs
           node scripts/fiba/news.mjs
 
+      # MLBB section: matches, drafts and season lineups from Liquipedia (API, one request every 2 seconds, only
+      # changed pages), official stats from the MPL PH and MPL ID sites, then the walk-forward model.
+      - name: MLBB fetch and model
+        continue-on-error: true
+        run: |
+          node scripts/mlbb/fetch.mjs
+          node scripts/mlbb/model.mjs
+
       # One site: homepage at the root, NBA under /nba/, FIBA under /fiba/. The version tag makes phones
       # load the new code right after a deploy.
       - name: Assemble the site
