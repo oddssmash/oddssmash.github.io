@@ -3458,4 +3458,43 @@ async function startLive(g) {
     const c = app.querySelector("#live-engine, .live-card"); if (c) { c.id = "live-engine"; c.hidden = (S.gTab || "ov") !== "ov"; }
   };
   await draw();
-  S.liveTimer = setInterval(draw, 
+  S.liveTimer = setInterval(draw, LIVE_POLL_MS);
+}
+
+// Games list: refresh live scores in place every 8 s while any game is in progress (paused when the screen is off).
+const SCORE_POLL_MS = 8000;
+function startScoreTicker() {
+  if (S.sbTimer) return;
+  S.sbTimer = setInterval(async () => {
+    const strips = app.querySelectorAll(".lv-strip[data-lv]");
+    if (!strips.length) { if (!["", "#", "#/", "#/games", "#games"].includes(location.hash)) { clearInterval(S.sbTimer); S.sbTimer = null; } return; }
+    if (document.hidden || !(S.liveData?.games || []).some((x) => x.state === "in")) return;
+    await liveScoreboard();
+    for (const el of app.querySelectorAll(".lv-strip[data-lv]")) {
+      const lv = (S.liveData?.games || []).find((x) => x.id === el.dataset.lv);
+      if (lv) el.outerHTML = liveBadge(lv);
+    }
+  }, SCORE_POLL_MS);
+}
+// Games list: today's live scores straight from ESPN (falls back silently to the saved snapshot).
+async function liveScoreboard() {
+  try {
+    const up = await load("upcoming.json");
+    const pre = new Map(up.map((u) => [u.id, u]));
+    const day = (o) => { const d = new Date(Date.now() + o * 864e5); return new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(d).replace(/-/g, ""); };
+    const games = [];
+    for (const d of [day(-1), day(0)]) {
+      const sb = await espnJSON(`scoreboard?dates=${d}`);
+      for (const ev of sb.events || []) {
+        const st = ev.status?.type?.state; if (st === "pre") continue;
+        const c = ev.competitions[0], h = c.competitors.find((x) => x.homeAway === "home"), a = c.competitors.find((x) => x.homeAway === "away");
+        const row = { id: ev.id, state: st, detail: ev.status?.type?.shortDetail || "", home: h.team.id, away: a.team.id, hs: n0(h.score), as: n0(a.score), period: ev.status?.period, clock: ev.status?.displayClock };
+        const p = pre.get(ev.id);
+        if (p && st === "in") { const rem = remShare(row.period, row.clock); const m = row.hs - row.as + (p.pred.hs - p.pred.as) * rem; row.pHome = 1 - pNorm(-m / (1.5 + 13.5 * Math.sqrt(rem))); }
+        if (p && st === "post") row.called = (row.hs > row.as) === (p.pred.hs > p.pred.as);
+        games.push(row);
+      }
+    }
+    S.liveData = { fetched: new Date().toISOString(), games, src: "live" };
+  } catch { /* host blocks outside requests: keep the snapshot */ }
+}
