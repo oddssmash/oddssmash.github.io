@@ -1008,3 +1008,4 @@ a.gtab { color: var(--ink-2); }
 .hz-t.sm { font-size: 17px; }
 .hz-ar { font-size: 16px; }
 .hz-ar.up { fill: #ffe08a; } .hz-ar.dn { fill: #b9f1ff; }
+.lv-chg { margin: 6px 0 2px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); }

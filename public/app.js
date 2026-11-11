@@ -155,7 +155,7 @@ function drawNav(active) {
   }
   for (const a of nav.children) { if (a.dataset.tab === active) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current"); }
 }
-const ROUTE_TAB = { games: "games", game: "games", sim: "games", insights: "games", picks: "picks", board: "picks", results: "more", result: "more", why: "more", teams: "teams", team: "teams", scout: "scout", players: "scout", player: "scout", more: "more", lab: "more", season: "more", breakout: "more", today: "more", compare: "more" };
+const ROUTE_TAB = { games: "games", game: "games", sim: "games", insights: "games", picks: "picks", board: "picks", results: "more", result: "more", why: "more", accuracy: "more", teams: "teams", team: "teams", scout: "scout", players: "scout", player: "scout", more: "more", lab: "more", season: "more", breakout: "more", today: "more", compare: "more" };
 
 async function route() {
   // Each navigation gets a number. A slow page that finishes after the visitor has moved on may
@@ -170,7 +170,7 @@ async function route() {
   const before = app.firstElementChild;
   const slow = setTimeout(() => { if (seq === S.seq && app.firstElementChild === before) app.innerHTML = `<p class="loading" role="status"><span class="spin" aria-hidden="true"></span>Loading...</p>`; }, 180);
   try {
-    const fn = { games: vGames, game: vGame, results: vResults, result: vResult, why: vWhy, teams: vTeams, team: vTeam, scout: vScout, players: vPlayers, player: vPlayer, more: vMore, lab: vMoreMenu, sim: vSim, board: vBoard, picks: vPicks, season: vSeason, insights: vInsights, breakout: vBreakout, today: vToday, compare: vCompare }[view] || vGames;
+    const fn = { accuracy: vAccuracy, games: vGames, game: vGame, results: vResults, result: vResult, why: vWhy, teams: vTeams, team: vTeam, scout: vScout, players: vPlayers, player: vPlayer, more: vMore, lab: vMoreMenu, sim: vSim, board: vBoard, picks: vPicks, season: vSeason, insights: vInsights, breakout: vBreakout, today: vToday, compare: vCompare }[view] || vGames;
     await fn(arg, arg2, location.hash.split("/").slice(2));
     if (view === "game" && seq === S.seq) { gameTabs(); const g0 = S.curGame; const t0 = Date.parse(g0?.date || ""); if (g0 && Date.now() > t0 - 10 * 60000 && Date.now() < t0 + 6 * 3600000) startLive(g0); else clearInterval(S.liveTimer); }
     if (view !== "game") clearInterval(S.liveTimer);
@@ -2112,6 +2112,7 @@ function takeRow(t) {
 }
 const MORE_MENU = [
   ["results", "Results", "Every past game: projected vs what really happened, and why it missed."],
+  ["accuracy", "Accuracy report", "Calibration, Brier score, log loss, accuracy by prediction type and the biggest misses."],
   ["why", "How accurate is it?", "Accuracy week by week, what causes misses, and what the model learned."],
   ["sim", "Simulation lab", "Each upcoming game played 10,000 times, with what-if scenarios."],
   ["board", "High-confidence board", "Every 85%+ market in one long list, with past hit rates."],
@@ -2123,6 +2124,46 @@ const MORE_MENU = [
   ["more/sources", "Data sources", "Where every number comes from and how it is cross-checked."],
   ["more/method", "How it works", "How projections are made and how the model learns."],
 ];
+async function vAccuracy() {
+  const [R, L, board] = await Promise.all([load("results.json"), load("learning.json").catch(() => null), load("board.json").catch(() => null)]);
+  const games = R.filter((r) => r.pred && r.act && r.pk && !r.pk.endsWith("-1")); // preseason left out
+  const stat = (rows) => { let b = 0, ll = 0, w = 0, m = 0, t = 0, tn = 0; for (const r of rows) { const y = r.act.hs > r.act.as ? 1 : 0, p = Math.min(0.99, Math.max(0.01, r.pred.pHome)); b += (p - y) ** 2; ll += -(y * Math.log(p) + (1 - y) * Math.log(1 - p)); w += r.correct ? 1 : 0; m += Math.abs(r.err ?? (r.act.hs - r.act.as - (r.pred.hs - r.pred.as))); if (r.totErr != null) { t += Math.abs(r.totErr); tn++; } } const n = rows.length || 1; return { n: rows.length, brier: b / n, ll: ll / n, acc: w / n, mae: m / n, tot: tn ? t / tn : null }; };
+  const all = stat(games), coin = { brier: 0.25, ll: Math.log(2) };
+  const phases = [...new Set(games.map((r) => r.pk))].map((pk) => ({ pk, label: games.find((r) => r.pk === pk).phase, ...stat(games.filter((r) => r.pk === pk)) }));
+  const months = [...new Set(games.map((r) => r.date.slice(0, 7)))].map((mo) => ({ mo, ...stat(games.filter((r) => r.date.startsWith(mo))) })).filter((x) => x.n >= 10);
+  const buckets = [[0.5, 0.6], [0.6, 0.7], [0.7, 0.8], [0.8, 0.9], [0.9, 1.01]].map(([lo, hi]) => { const rows = games.filter((r) => { const p = Math.max(r.pred.pHome, 1 - r.pred.pHome); return p >= lo && p < hi; }); const said = rows.reduce((z, r) => z + Math.max(r.pred.pHome, 1 - r.pred.pHome), 0) / (rows.length || 1); return { lab: `${Math.round(lo * 100)}-${Math.min(100, Math.round(hi * 100))}%`, n: rows.length, said, hap: rows.length ? rows.filter((r) => r.correct).length / rows.length : null }; });
+  const miss = games.filter((r) => r.date >= "2026-10").sort((a, b) => Math.abs(b.err) - Math.abs(a.err)).slice(0, 10);
+  const heads = await Promise.all(miss.map((r) => load(`games/${r.id}.json`).then((g) => g.headline).catch(() => null)));
+  const fam = board?.calibration?.byFamily || {};
+  const FAMW = { pts: "Player points", reb: "Player rebounds", ast: "Player assists", tpm: "Player threes", total: "Game total", teamTotal: "Team total", spread: "Spread", winner: "Winner" };
+  const famRows = Object.entries(fam).map(([k, rows]) => { const ok = (rows || []).filter((x) => x.n > 0); const n = ok.reduce((z, x) => z + x.n, 0); const said = n ? ok.reduce((z, x) => z + x.said * x.n, 0) / n : null, hap = n ? ok.reduce((z, x) => z + x.happened * x.n, 0) / n : null; return { k, n, said, hap }; }).filter((x) => x.n >= 30);
+  const ps = L?.phaseSummary || [];
+  const bar = (said, hap) => `<span class="acc-cal" aria-hidden="true"><i class="s" style="left:${said}%"></i><i class="h" style="left:${hap}%"></i></span>`;
+  app.innerHTML = `${labBack}<h1>Accuracy report</h1>
+    <p class="lead">Every game since October 2025, projected walk-forward: each prediction used only what was known before that game. Preseason is left out. Lower Brier score and log loss are better; a coin flip scores 0.250 and 0.693.</p>
+    <div class="tiles">
+      <div class="tile"><div class="l">Winner called</div><div class="v">${pct(all.acc)}</div><div class="s">${num(all.n)} games</div></div>
+      <div class="tile"><div class="l">Brier score</div><div class="v">${all.brier.toFixed(3)}</div><div class="s">coin flip ${coin.brier.toFixed(3)}</div></div>
+      <div class="tile"><div class="l">Log loss</div><div class="v">${all.ll.toFixed(3)}</div><div class="s">coin flip ${coin.ll.toFixed(3)}</div></div>
+      <div class="tile"><div class="l">Margin miss</div><div class="v">${f1(all.mae)}</div><div class="s">points per game${all.tot != null ? ` · total ${f1(all.tot)}` : ""}</div></div>
+    </div>
+    <div class="card"><h2>Calibration: when we say X%, does it happen X% of the time?</h2>
+      <div class="tw"><table><thead><tr><th>We said</th><th class="n">Games</th><th class="n">Average said</th><th class="n">Happened</th><th></th></tr></thead><tbody>
+      ${buckets.filter((b) => b.n).map((b) => `<tr><td>${b.lab}</td><td class="n">${num(b.n)}</td><td class="n">${pct(b.said)}</td><td class="n"><b>${pct(b.hap)}</b></td><td>${bar(b.said * 100, b.hap * 100)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">Chance given to the favourite. On each bar the ring is what we said and the dot is what happened; close together means honest probabilities.</p></div>
+    <div class="card"><h2>By season and phase</h2><div class="tw"><table><thead><tr><th>Phase</th><th class="n">Games</th><th class="n">Winner</th><th class="n">Brier</th><th class="n">Log loss</th><th class="n">Margin miss</th></tr></thead><tbody>
+      ${phases.map((x) => `<tr><td>${esc(x.label)}</td><td class="n">${num(x.n)}</td><td class="n">${pct(x.acc)}</td><td class="n">${x.brier.toFixed(3)}</td><td class="n">${x.ll.toFixed(3)}</td><td class="n">${f1(x.mae)}</td></tr>`).join("")}</tbody></table></div></div>
+    <div class="card"><h2>Month by month</h2><div class="tw"><table><thead><tr><th>Month</th><th class="n">Games</th><th class="n">Winner</th><th class="n">Brier</th><th class="n">Margin miss</th></tr></thead><tbody>
+      ${months.map((x) => `<tr><td>${esc(new Date(x.mo + "-15").toLocaleString("en-US", { month: "short", year: "numeric" }))}</td><td class="n">${num(x.n)}</td><td class="n">${pct(x.acc)}</td><td class="n">${x.brier.toFixed(3)}</td><td class="n">${f1(x.mae)}</td></tr>`).join("")}</tbody></table></div></div>
+    ${famRows.length ? `<div class="card"><h2>By prediction type (85%+ picks)</h2><div class="tw"><table><thead><tr><th>Type</th><th class="n">Picks</th><th class="n">We said</th><th class="n">Came true</th></tr></thead><tbody>
+      ${famRows.map((x) => `<tr><td>${esc(FAMW[x.k] || x.k)}</td><td class="n">${num(x.n)}</td><td class="n">${esc(f1(x.said))}%</td><td class="n"><b class="${x.hap >= x.said - 1.5 ? "up" : "down"}">${esc(f1(x.hap))}%</b></td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">Every market the simulation put at 85% or more, graded walk-forward. Player props ran a few points over-confident, which is why the Picks page shows a corrected chance next to the raw one.</p></div>` : ""}
+    ${ps.length ? `<div class="card"><h2>Player and team misses by cause</h2><div class="tw"><table><thead><tr><th>Phase</th><th class="n">Team pts miss</th><th class="n">Shooting</th><th class="n">Pace</th><th class="n">Who played</th><th class="n">Player: minutes</th><th class="n">usage</th><th class="n">efficiency</th></tr></thead><tbody>
+      ${ps.map((x) => `<tr><td>${esc(x.label)}</td><td class="n">${f1(x.teamPtsMAE)}</td><td class="n">${f1(x.teamErrorSources?.shooting)}</td><td class="n">${f1(x.teamErrorSources?.pace)}</td><td class="n">${f1(x.teamErrorSources?.lineup)}</td><td class="n">${f1(x.playerErrorSources?.minutes)}</td><td class="n">${f1(x.playerErrorSources?.usage)}</td><td class="n">${f1(x.playerErrorSources?.efficiency)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">Average points of miss traced to each cause. Shooting luck is the biggest and least predictable source; it is why the model now separates shot volume from shooting efficiency.</p></div>` : ""}
+    <div class="card"><h2>Biggest misses this season, and why</h2><ul class="plain">${miss.map((r, i) => `<li><a href="#/result/${esc(r.id)}"><b>${esc(T(r.away).abbr)} @ ${esc(T(r.home).abbr)}</b> · ${esc(new Date(r.date).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric" }))} · missed the margin by ${f1(Math.abs(r.err))}</a><div class="small muted">${esc(heads[i] || "")}</div></li>`).join("")}</ul></div>
+    <p class="small muted">Live predictions are not graded here yet. The pre-game projection for every game is saved before tip-off in the project's history folder, so it can be checked later. Statistical analysis only, not betting advice.</p>`;
+}
 async function vMoreMenu() {
   app.innerHTML = `<h1>More</h1>
     <div class="menu-list">${MORE_MENU.map(([k, l, d]) => `<a class="menu-i" href="#/${k}"><span class="menu-ic" aria-hidden="true" style="background:${(MENU_IC[k] || ["", "#223"])[1]}">${(MENU_IC[k] || ["›"])[0]}</span><span><b>${esc(l)}</b><span class="small muted">${esc(d)}</span></span><span class="menu-c" aria-hidden="true">›</span></a>`).join("")}</div>`;
@@ -2948,6 +2989,12 @@ const up = await load("upcoming.json").catch(() => []);
   };
   const tooSafe = (p) => { if (!p.player) { const ref = teamRef(p); if (ref == null) return false; const v = p.fam === "spread" ? (p.side === "by" ? -p.line : p.line) : p.line; return Math.abs(v - ref) > (p.fam === "total" ? 12 : p.fam === "spread" ? 7 : 9); } if (isLowLine(p)) return true; const ref = refLine(p.game, p.player.id, p.fam); return !!ref && p.line < ref.line * 0.75 && ref.line - p.line >= (p.fam === "pts" ? 4 : 1.5); };
   const FAMS_MAIN = [["pts", "points"], ["reb", "rebounds"], ["ast", "assists"], ["tpm", "threes"], ["pra", "pts+reb+ast"]];
+  // Expected value at the sportsbook's price, from OUR chance. Display only: odds never feed the model.
+  const decOf = (a) => { const v = Number(a); return !v ? null : v > 0 ? 1 + v / 100 : 1 + 100 / -v; };
+  const evOf = (p, price) => { const d = decOf(price); return d == null || p == null ? null : p * d - 1; };
+  const QUAL = { gap: 0.05, ev: 0.03 }; // both needed to call it a qualifying edge
+  const ODDS = await load("odds.json").catch(() => null);
+  const priceFor = (gid, kind, pick, H) => { const o = ODDS?.games?.[gid]; if (!o) return null; if (kind === "Moneyline") return pick.startsWith(H) ? o.mlHome : o.mlAway; if (kind === "Spread") return pick.startsWith(H) ? o.spreadOddsHome : o.spreadOddsAway; if (kind === "Total") return pick.startsWith("Over") ? o.overOdds : o.underOdds; return null; };
   const gameMain = () => {
     const out = [];
     for (const gid of gids) {
@@ -2960,6 +3007,7 @@ const up = await load("upcoming.json").catch(() => []);
         out.push({ ...base, kind: "Spread", pick: takeTeam ? `${team} ${l > 0 ? "+" : ""}${l}` : `${other} ${-l > 0 ? "+" : ""}${-l}`, p: Math.max(q, 1 - q), book: takeTeam ? c.spread.bookProb : 1 - c.spread.bookProb, ours: `our margin ${gm.pred.hs >= gm.pred.as ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}` }); }
       if (c?.total?.ourProb != null) { const q = c.total.ourProb; out.push({ ...base, kind: "Total", pick: `${q >= 0.5 ? "Over" : "Under"} ${c.total.bookLine}`, p: Math.max(q, 1 - q), book: q >= 0.5 ? c.total.bookProb : 1 - c.total.bookProb, ours: `our total ${f1(gm.pred.hs + gm.pred.as)}` }); }
     }
+    for (const x of out) { x.price = priceFor(x.gid, x.kind, x.pick, T(x.home).abbr); x.ev = evOf(x.p, x.price); x.qual = x.book != null && x.ev != null && x.p - x.book >= QUAL.gap && x.ev >= QUAL.ev; }
     return out.sort((a, b) => b.p - a.p);
   };
   const mainLines = () => {
@@ -3024,7 +3072,9 @@ const up = await load("upcoming.json").catch(() => []);
         const gcard = (x) => `<div class="card pick ml"><div class="pick-h">${teamLogo(x.home, { size: "sm" })}<span><b>${esc(x.kind)}</b><span class="small muted"> ${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.6 ? "lean" : x.p >= 0.53 ? "slight lean" : "coin-flip"}</span>${meter(x.p)}
           <div class="pick-l"><b>${esc(x.pick)}</b> <span class="small muted">sportsbook main line</span></div>
-          <div class="pick-alt"><span>${esc(x.ours)}</span>${x.book != null ? `<span>book's fair chance ${pct(x.book)}</span>` : ""}<span class="${x.book != null && x.p - x.book >= 0.05 ? "up" : ""}">gap ${x.book != null ? (x.p - x.book > 0 ? "+" : "") + Math.round((x.p - x.book) * 100) : "-"}</span></div>
+          <div class="pick-alt"><span>${esc(x.ours)}</span>${x.book != null ? `<span>book's fair chance ${pct(x.book)}</span>` : ""}<span class="${x.book != null && x.p - x.book >= 0.05 ? "up" : ""}">gap ${x.book != null ? (x.p - x.book > 0 ? "+" : "") + Math.round((x.p - x.book) * 100) : "-"}</span>${x.price != null ? `<span>price ${esc(Number(x.price) > 0 ? "+" + x.price : x.price)}</span>` : ""}${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}</div>
+          <div class="small ${x.qual ? "qual" : "muted"}">${x.qual ? "✓ Statistical edge: our chance beats the book's by 5+ points and EV is +3% or more." : "No qualifying edge: our chance and the price are too close (we need a 5-point gap and +3% EV)."}</div>
+          ${x.book != null && Math.abs(x.p - x.book) >= 0.12 ? `<div class="small" style="color:var(--warn)">⚠ Big disagreement (${Math.round(Math.abs(x.p - x.book) * 100)} points). Gaps this large often mean the bookmaker has late news we do not (injury, rest, lineup). Check the latest news before trusting it; our game totals miss by about 15 points on average.</div>` : ""}
           <div class="pick-m small muted">${x.date ? esc(timePH(x.date)) + " · " : ""}<a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
         const card = (x) => `<div class="card pick ml"><div class="pick-h">${avatar(x.pl.id, x.pl.n, { size: "sm" })}<span><b>${esc(x.pl.n)}</b><span class="small muted"> ${esc(T(x.pl.side === 0 ? x.home : x.away).abbr || "")} · ${esc(x.word)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.62 ? "lean" : "slight lean"}</span>${meter(x.p)}
@@ -3032,8 +3082,10 @@ const up = await load("upcoming.json").catch(() => []);
           <div class="pick-alt"><span>Our median ${esc(x.median ?? "-")}${x.mean != null ? ` · average ${f1(x.mean)}` : ""}</span>${x.thr.map(([t, q]) => `<span>${esc(t)}+: ${pct(q)}</span>`).join("")}</div>
           <div class="pick-m small muted">${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}${x.date ? ` · ${esc(timePH(x.date))}` : ""} · <a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
         return `<h2 class="pk-sec">Game lines</h2>
+          ${gml.length && !gml.some((x) => x.qual) ? `<div class="note"><b>No qualifying edge today.</b> On every game line our chance is within 5 points of the bookmaker's fair chance or the expected value is under +3%. A high chance alone is not an edge.</div>` : ""}
           ${gml.length ? gml.map(gcard).join("") : `<p class="empty">No sportsbook game lines for this day yet (they usually post a day or two before).</p>`}
-          <h2 class="pk-sec">Player props</h2><p class="small muted">Player props at the <b>sportsbook's main line</b> (the line you would actually see, e.g. 22.5 points), with our lean and our chance from 10,000 simulations. The book only sets which line is tested: our chance is our own model, never the odds. These sit between 55% and 75% because main lines are set close to even; that is normal. The chips show our chance at nearby lines.</p>
+          <h2 class="pk-sec">Player props</h2><p class="small muted">EV (expected value) = our chance × the decimal price − 1, per unit staked: it uses our chance, never the book's. Player prop prices are not published in the free feed, so props show our chance only. Statistical comparison, not betting advice.</p>
+          <p class="small muted">Player props at the <b>sportsbook's main line</b> (the line you would actually see, e.g. 22.5 points), with our lean and our chance from 10,000 simulations. The book only sets which line is tested: our chance is our own model, never the odds. These sit between 55% and 75% because main lines are set close to even; that is normal. The chips show our chance at nearby lines.</p>
           ${shown.length ? shown.map(card).join("") : `<p class="empty">No sportsbook main lines for this day: player lines usually appear on game day, and games that have started are left out (open the game's Live tab instead). Our own main line for every player is on each game page (Players tab).</p>`}
           ${ml.length > shown.length ? `<p class="small muted">${ml.length - shown.length} more lines are close to 50/50 and left out.</p>` : ""}`;
       })()
@@ -3193,9 +3245,10 @@ hero?.insertAdjacentHTML("afterend", bottomLine());
       if (S.curGame !== g) return;
       sim = simAdjust(sim, g, S.curRaw);
       load("board.json").catch(() => null).then((board) => { if (S.curGame !== g || app.querySelector(".preds")) return; const bl = app.querySelector(".bottom-line"); if (!bl) return; bl.insertAdjacentHTML("beforebegin", predictionsCard(g, sim, board)); const pc = bl.previousElementSibling; if (pc) pc.hidden = (S.gTab || "ov") !== "ov"; });
-      const slot = app.querySelector(".bottom-line .viz-slot"); if (slot) slot.innerHTML = marginChart(g, sim);
+const slot = app.querySelector(".bottom-line .viz-slot"); if (slot) slot.innerHTML = marginChart(g, sim);
+      flipCard(g, sim, S.curRaw).then((html) => { if (!html || S.curGame !== g || app.querySelector(".flip")) return; const bl = app.querySelector(".bottom-line"); if (!bl) return; bl.insertAdjacentHTML("afterend", html); const fc = bl.nextElementSibling; if (fc) fc.hidden = (S.gTab || "ov") !== "ov"; });
       const glance = [...app.children].find((el) => el.dataset?.tabOf === "pl");
-      if (!app.querySelector("[data-tab-of=si]")) { app.insertAdjacentHTML("beforeend", `<div data-tab-of="si">${sim.adjusted ? `<div class="note"><b>Adjusted for: ${esc(sim.adjusted.join(", "))} out.</b> The 10,000 simulated games are shifted by the change in projected margin (${sg(sim.shift)} for the home team) and players' chances follow their new minutes. The full scenario lab updates at the next data refresh.</div>` : ""}${donutCard(sim)}${simPlayersCard(sim, g)}${playingCard(S.curRaw, g, outsFor(g.id)).replace('id="g-who"', 'id="g-who-sim"')}<a class="btn block explore" href="#/sim/${esc(g.id)}">Explore all scenarios ›</a></div>`); const si = app.lastElementChild; si.hidden = (S.gTab || "ov") !== "si"; }
+      if (!app.querySelector("[data-tab-of=si]")) { app.insertAdjacentHTML("beforeend", `<div data-tab-of="si">${sim.adjusted ? `<div class="note"><b>Adjusted for: ${esc(sim.adjusted.join(", "))} out.</b> The 10,000 simulated games are shifted by the change in projected margin (${sg(sim.shift)} for the home team) and players' chances follow their new minutes. The full scenario lab updates at the next data refresh.</div>` : ""}${universeCard(sim, g)}${donutCard(sim)}${simPlayersCard(sim, g)}${playingCard(S.curRaw, g, outsFor(g.id)).replace('id="g-who"', 'id="g-who-sim"')}<a class="btn block explore" href="#/sim/${esc(g.id)}">Explore all scenarios ›</a></div>`); const si = app.lastElementChild; si.hidden = (S.gTab || "ov") !== "si"; }
       if (glance) { glance.insertAdjacentHTML("afterend", insightCard(g, sim)); const ins = glance.nextElementSibling; if (ins) ins.hidden = (S.gTab || "ov") !== "pl"; }
     }, () => {});
     const keys = app.querySelector("#g-keys");
@@ -3279,8 +3332,56 @@ function gameCardNew(g) {
     <div class="gc-bar" aria-hidden="true"><span style="flex:${1 - ph};background:var(--s1)"></span><span style="flex:${ph};background:var(--s2)"></span></div>
     <div class="gc-f"><span>O/U ${L.total.toFixed(1)}</span><span>${esc(T(L.fav).abbr)} ${spreadTxt(L.spread)}</span><span>Proj ${f0(g.pred.as)}-${f0(g.pred.hs)}</span><span aria-hidden="true">›</span></div>
     ${liveBadge(lv)}
-    ${top ? `<div class="gc-x">Top scorers: ${top}${out.length ? ` · Out: ${esc(out.join(", "))}` : ""}</div>` : ""}${flag}
+    <div class="gc-x gc-ess"><span class="chip ${Math.max(ph, 1 - ph) >= 0.7 ? "good" : Math.max(ph, 1 - ph) >= 0.58 ? "" : "warn"}">Confidence: ${Math.max(ph, 1 - ph) >= 0.7 ? "high" : Math.max(ph, 1 - ph) >= 0.58 ? "medium" : "low (near coin-flip)"}</span>${out.length ? `<span class="gc-out">🚑 Out: ${esc(out.slice(0, 4).join(", "))}${out.length > 4 ? ` +${out.length - 4}` : ""}</span>` : `<span class="muted">No key absences listed</span>`}</div>
+    ${top ? `<div class="gc-x">Top scorers: ${top}</div>` : ""}${flag}
   </a>`;
+}
+// What could change the prediction: every line comes from the model or the 10,000 simulations.
+async function flipCard(g, sim, raw) {
+  const H = T(g.home).abbr, A = T(g.away).abbr, fav = g.pred.pHome >= 0.5 ? "h" : "a", favT = fav === "h" ? H : A, dogT = fav === "h" ? A : H;
+  const pFav = (ph) => (fav === "h" ? ph : 1 - ph), now = pFav(g.pred.pHome);
+  const items = [];
+  // late scratches: re-run the projection without each team's two biggest scorers
+  for (const t of g.teams) {
+    for (const p of (t.players || []).filter((x) => x.min >= 24 && !x.q).sort((a, b) => b.pts - a.pts).slice(0, 2)) {
+      try { const g2 = await adjustGame(raw, new Set([String(p.id)])); const p2 = pFav(g2.pred.pHome);
+        if (Math.abs(p2 - now) >= 0.03) items.push({ k: "scratch", w: Math.abs(p2 - now), t: `If <b>${esc(p.n)}</b> (${esc(T(t.tid).abbr)}) is a late scratch: ${esc(favT)} ${pct(now)} → <b>${pct(p2)}</b>` }); } catch { /* skip */ }
+    }
+  }
+  // questionable players: projected as if they play
+  for (const t of g.teams) for (const p of (t.players || []).filter((x) => x.q && x.min >= 15)) {
+    try { const g2 = await adjustGame(raw, new Set([String(p.id)])); const p2 = pFav(g2.pred.pHome);
+      items.push({ k: "q", w: 0.5 + Math.abs(p2 - now), t: `<b>${esc(p.n)}</b> (${esc(T(t.tid).abbr)}) is questionable and projected to play; if he sits, ${esc(favT)} ${pct(now)} → <b>${pct(p2)}</b>` }); } catch { /* skip */ }
+  }
+  // game scripts straight from the simulations
+  const sc = Object.fromEntries((sim?.scenarios || []).map((x) => [x.id, x]));
+  const dogK = fav === "h" ? "A" : "H", favK = fav === "h" ? "H" : "A";
+  const scen = (id, text) => { const x = sc[id]; if (!x || x.freq < 0.02 || x.pHome == null) return; const p2 = pFav(x.pHome); if (Math.abs(p2 - now) < 0.05) return; items.push({ k: "sim", w: Math.abs(p2 - now) * Math.sqrt(x.freq), t: `${text} (happens in ${pct(x.freq)} of simulations): ${esc(favT)} wins <b>${pct(p2)}</b>${x.margin != null ? `, average margin ${x.margin >= 0 ? esc(H) : esc(A)} by ${f1(Math.abs(x.margin))}` : ""}${x.total != null ? `, total ${f0(x.total)}` : ""}` }); };
+  scen(`hot${dogK}`, `${esc(dogT)} shoots well above expectation`);
+  scen(`cold${favK}`, `${esc(favT)} shoots well below expectation`);
+  scen(`inj${favK}`, `A ${esc(favT)} key player leaves injured`);
+  scen(`foul${favK}`, `${esc(favT)} foul trouble (a top-5 player reaches 5 fouls)`);
+  scen(`rot${favK}`, `${esc(favT)} rotation surprise (a 10+ minute player sits or plays 10+ more)`);
+  if (!items.length) return "";
+  items.sort((a, b) => b.w - a.w);
+  return `<div class="card flip" data-tab-of="ov"><h2>What could change this prediction?</h2>
+    <ul class="dots">${items.slice(0, 6).map((x) => `<li>${x.t}</li>`).join("")}</ul>
+    <p class="small muted">Scratches re-run our projection without that player (minutes and shots go to his teammates). Game scripts are counted from the 10,000 simulated games. Nothing here uses betting odds.</p></div>`;
+}
+// Every version of the game the simulations produced, with how likely it is and who gains or loses.
+function universeCard(sim, g) {
+  const list = (sim?.scenarios || []).filter((x) => x.freq >= 0.01).sort((a, b) => b.freq - a.freq);
+  if (!list.length) return "";
+  const H = T(g.home).abbr, A = T(g.away).abbr, F = sim.forecast || {};
+  const who = (arr, sign) => (arr || []).slice(0, 2).map((p) => `${esc(shortName(p.n))} ${sign}${f1(Math.abs(p.pts))}`).join(", ");
+  const row = (x) => `<details class="uv"><summary><span class="uv-n">${esc(x.label.replace(/\s*\(.*\)\s*$/, ""))}</span><span class="uv-f">${pct(x.freq)}</span><span class="uv-bar" aria-hidden="true"><i style="width:${Math.min(100, x.freq * 100 / Math.max(...list.map((y) => y.freq)) )}%"></i></span></summary>
+    <div class="uv-b small"><div>${esc(x.label)}</div><div>In these games: <b>${esc(H)} wins ${pct(x.pHome)}</b> · average margin ${x.margin >= 0 ? esc(H) : esc(A)} by ${f1(Math.abs(x.margin))} · total ${f1(x.total)} (${esc(A)} ${f1(x.away)}, ${esc(H)} ${f1(x.home)})</div>
+      ${x.gains?.length ? `<div>⬆ Gains: ${who(x.gains, "+")} pts vs his average</div>` : ""}${x.losses?.length ? `<div>⬇ Loses: ${who(x.losses, "−")} pts</div>` : ""}</div></details>`;
+  return `<div class="card"><h2>The game universe</h2>
+    <div class="uv-main"><span class="chip good">Main forecast</span> All ${num(sim.sims || 10000)} simulations, weighted by how likely each is: ${esc(H)} wins <b>${pct(F.pHome ?? sim.pHome)}</b>, median margin ${(F.margin?.median ?? 0) >= 0 ? esc(H) : esc(A)} by ${f1(Math.abs(F.margin?.median ?? 0))}, total ${f1(F.total?.median ?? sim.total)}.</div>
+    <p class="small muted">Each version below is a slice of those same simulations, with its real likelihood. They overlap (a game can be close and go to overtime), so they do not add up to 100%. Tap one for its score and the players who gain or lose.</p>
+    ${list.map(row).join("")}
+    <div class="uv-main" style="margin-top:10px"><span class="chip warn">What-if</span> Your own choices (marking players out below) shift this forecast; they are not weighted by likelihood.</div></div>`;
 }
 function takeawayCard(g) {
   const fav = g.pred.pHome >= 0.5 ? g.home : g.away, p = Math.max(g.pred.pHome, 1 - g.pred.pHome), L = gameLines(g);
@@ -3338,7 +3439,7 @@ function rankingsCard() {
     ${rows.map((t, i) => `<tr class="${isFav("t", t.id) ? "fav" : ""}"><td>${i + 1}</td><td class="tm"><a href="#/team/${esc(t.id)}" style="display:flex;align-items:center;gap:8px;color:inherit">${teamLogo(t.id, { size: "xs" })}${esc(t.abbr)}</a></td><td class="n">${f1(t.style?.off)}</td><td class="n">${f1(t.style?.def)}</td><td class="n ${(t.ratings?.adjNet ?? 0) >= 0 ? "pos" : "neg"}">${sg(t.ratings?.adjNet)}</td></tr>`).join("")}
   </tbody></table></div><p class="small muted">Net is points per 100 possessions after adjusting for who they have played. Tap a team for its full page.</p></div>`;
 }
-const MENU_IC = { results: ["📊", "#3b2b80"], why: ["🎯", "#123d7a"], sim: ["🧪", "#164a3a"], board: ["⭐", "#5a3a10"], season: ["🏆", "#4a2b10"], breakout: ["🚀", "#5a1d3a"], today: ["🔔", "#1d3d5a"], compare: ["⚖️", "#3a2a5a"], "more/takes": ["🗞️", "#2a3a4a"], "more/sources": ["🗂️", "#2a3a2a"], "more/method": ["⚙️", "#33334a"] };
+const MENU_IC = { accuracy: ["✅", "#1d4a2a"], results: ["📊", "#3b2b80"], why: ["🎯", "#123d7a"], sim: ["🧪", "#164a3a"], board: ["⭐", "#5a3a10"], season: ["🏆", "#4a2b10"], breakout: ["🚀", "#5a1d3a"], today: ["🔔", "#1d3d5a"], compare: ["⚖️", "#3a2a5a"], "more/takes": ["🗞️", "#2a3a4a"], "more/sources": ["🗂️", "#2a3a2a"], "more/method": ["⚙️", "#33334a"] };
 
 // Scout: profile numbers and a trust meter right under the player header.
 function scoutTop(p) {
@@ -3738,6 +3839,7 @@ function liveEngineCard(g, L, M) {
   return `<div class="card live-card" data-tab-of="lv" id="live-engine">
     <div class="lv-h">${liveTag}<h2 style="margin:0">In-game prediction</h2><span class="small muted">${esc(L.detail)} · ${L.src === "live" ? `live · updates every 5 s · ${esc(new Date(L.fetched).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit", second: "2-digit" }))}` : `from the last refresh, ${esc(ago2(L.fetched))} (live updates need the public site)`}</span></div>
     <div class="lv-score"><div><small>${esc(T(away).abbr)}</small><strong>${esc(L.as)}</strong></div><div class="lv-mid">${Math.round((1 - M.rem) * 48)} of 48 min</div><div class="r"><small>${esc(T(home).abbr)}</small><strong>${esc(L.hs)}</strong></div></div>
+    ${M.chg ? `<div class="small lv-chg">${M.chg}</div>` : `<div class="small muted lv-chg">Watching for the next score change…</div>`}
     <div class="h2-wc"><div><small>Live win chance</small><strong>${pct(1 - ph)}</strong></div><div class="wp" aria-hidden="true"><span style="flex:${1 - ph}"></span><span style="flex:${ph}"></span></div><div class="r"><small>${esc(T(home).abbr)}</small><strong>${pct(ph)}</strong></div></div>
     <div class="pr-row"><span class="pr-k">Live moneyline</span><span class="pr-v"><b>${esc(T(ph >= 0.5 ? home : away).abbr)} to win</b><i>${Math.max(ph, 1 - ph) >= 0.98 ? "game is nearly decided: no meaningful price" : `fair odds ${esc(T(home).abbr)} ${mlTxt(ph)} · ${esc(T(away).abbr)} ${mlTxt(1 - ph)}`}</i></span><span class="pr-p">${pct(Math.max(ph, 1 - ph))}</span></div>
     <div class="pr-row"><span class="pr-k">Live spread</span><span class="pr-v"><b>${esc(T(favLive).abbr)} ${spreadTxt(spread)}</b><i>projected final margin ${esc(T(favLive).abbr)} by ${f1(Math.abs(M.margin))}</i></span></div>
@@ -3915,6 +4017,17 @@ async function liveQuick(id) {
   }
   return null;
 }
+// What changed since the last score change: time, score, and how the live win chance and total moved.
+function liveChange(g, L, M) {
+  S.lvPrev ||= {};
+  const p = S.lvPrev[g.id], snap = { t: L.fetched, hs: L.hs, as: L.as, ph: M.pHome, tot: M.projTot, chg: p?.chg || "" };
+  if (p && (p.hs !== L.hs || p.as !== L.as)) {
+    const H = T(g.home).abbr, A = T(g.away).abbr, fav = M.pHome >= 0.5 ? "h" : "a", fp = (x) => (fav === "h" ? x : 1 - x), d = Math.round((fp(M.pHome) - fp(p.ph)) * 100);
+    const who = [L.as - p.as > 0 ? `${A} +${L.as - p.as}` : "", L.hs - p.hs > 0 ? `${H} +${L.hs - p.hs}` : ""].filter(Boolean).join(", ");
+    snap.chg = `<b>Last change</b> ${esc(new Date(L.fetched).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit", second: "2-digit" }))} (${esc(who)}): ${esc(fav === "h" ? H : A)} win chance ${pct(fp(p.ph))} → <b>${pct(fp(M.pHome))}</b> (${d >= 0 ? "+" : ""}${d}), projected total ${f1(p.tot)} → <b>${f1(M.projTot)}</b>`;
+  }
+  S.lvPrev[g.id] = snap; M.chg = snap.chg; return M;
+}
 async function startLive(g) {
   clearInterval(S.liveTimer);
   let tick = 0, last = null;
@@ -3928,7 +4041,7 @@ async function startLive(g) {
     if (L && L.state === "in" && (tick % LIVE_BOX_EVERY === 1 || !S.mkt || S.mkt.id !== g.id)) { try { S.mkt = await marketFetch(g.id, !S.mkt || S.mkt.id !== g.id ? null : { props: tick % (LIVE_BOX_EVERY * 2) === 1 ? null : S.mkt.props, preProps: S.mkt.preProps }); } catch { /* market feed is optional */ } }
     if (!L || L.state === "pre" || !L.state) return;
     if (L.state === "post") { clearInterval(S.liveTimer); }
-    const html = L.state === "post" ? liveCard({ ...(await liveOf(g.id) || {}), state: "post", hs: L.hs, as: L.as, home: g.home, away: g.away, preH: g.pred.hs, preA: g.pred.as, called: (L.hs > L.as) === (g.pred.hs > g.pred.as) }) : liveEngineCard(g, L, liveModel(g, L));
+    const html = L.state === "post" ? liveCard({ ...(await liveOf(g.id) || {}), state: "post", hs: L.hs, as: L.as, home: g.home, away: g.away, preH: g.pred.hs, preA: g.pred.as, called: (L.hs > L.as) === (g.pred.hs > g.pred.as) }) : liveEngineCard(g, L, liveChange(g, L, liveModel(g, L)));
 const old = app.querySelector("#live-engine, .live-card");
     if (old) old.outerHTML = html; else app.querySelector(".hero")?.insertAdjacentHTML("afterend", html);
     const c = app.querySelector("#live-engine, .live-card"); if (c) { c.id = "live-engine"; c.dataset.tabOf = "lv"; c.hidden = (S.gTab || "ov") !== "lv"; }
