@@ -172,7 +172,7 @@ async function route() {
   try {
     const fn = { games: vGames, game: vGame, results: vResults, result: vResult, why: vWhy, teams: vTeams, team: vTeam, scout: vScout, players: vPlayers, player: vPlayer, more: vMore, lab: vMoreMenu, sim: vSim, board: vBoard, picks: vPicks, season: vSeason, insights: vInsights, breakout: vBreakout, today: vToday, compare: vCompare }[view] || vGames;
     await fn(arg, arg2, location.hash.split("/").slice(2));
-    if (view === "game" && seq === S.seq) { gameTabs(); const g0 = S.curGame; const t0 = Date.parse(g0?.date || ""); if (g0 && Date.now() > t0 - 10 * 60000 && Date.now() < t0 + 4.5 * 3600000) startLive(g0); else clearInterval(S.liveTimer); }
+    if (view === "game" && seq === S.seq) { gameTabs(); const g0 = S.curGame; const t0 = Date.parse(g0?.date || ""); if (g0 && Date.now() > t0 - 10 * 60000 && Date.now() < t0 + 6 * 3600000) startLive(g0); else clearInterval(S.liveTimer); }
     if (view !== "game") clearInterval(S.liveTimer);
     if (view === "sim" && arg && seq === S.seq) { try { const sm = await load(`sim/${arg}.json`); const h = app.querySelector("h1"); const anchor = h?.nextElementSibling?.matches?.("p") ? h.nextElementSibling.nextElementSibling || h.nextElementSibling : h; if (anchor && !app.querySelector(".donut-wrap")) anchor.insertAdjacentHTML("afterend", donutCard(sm) + `<a class="card menu-i" href="#/game/${esc(arg)}" data-open-si="1"><span class="menu-ic" aria-hidden="true" style="background:#5a1d3a">🩹</span><span><b>Mark injured or resting players</b><span class="small muted">Open the game's Simulation tab, tap who is out, and the simulation recalculates.</span></span><span class="menu-c" aria-hidden="true">›</span></a>`); } catch { /* no sim */ } }
     if (view === "scout" && arg && seq === S.seq && !app.querySelector(".trust-card")) { try { const pp = await load(`players/${arg}.json`); app.querySelector(".ehead")?.insertAdjacentHTML("afterend", scoutTop(pp)); } catch { /* no profile */ } }
@@ -2754,6 +2754,7 @@ boot();
 
 // "Who's playing tonight?" toggles on the game page (delegated, so it survives re-renders).
 app.addEventListener("click", (e) => { if (e.target.closest?.("[data-open-si]")) S.gTab = "si"; }, true);
+app.addEventListener("click", (e) => { const b = e.target.closest?.("[data-gt-go]"); if (!b) return; app.querySelector(`.gtabs [data-gt="${b.dataset.gtGo}"]`)?.click(); });
 app.addEventListener("click", (e) => {
   const b = e.target.closest?.("[data-out], [data-out-reset]");
   if (!b) return;
@@ -2986,7 +2987,16 @@ app.addEventListener("toggle", async (e) => {
 
 
 // ---- Game page tabs: the page is long, so it is split the way sports apps do it.
-const GAME_TABS = [["ov", "Overview"], ["pl", "Players"], ["mu", "Matchup"], ["si", "Simulation"]];
+const GAME_TABS = [["ov", "Overview"], ["lv", "Live"], ["pl", "Players"], ["mu", "Matchup"], ["si", "Simulation"]];
+// Live tab state for the current game: "pre" (not started), "in" (in progress) or "post" (finished).
+function liveStateOf(g) { const t0 = Date.parse(g?.date || ""); if (!g || !t0) return "pre"; const lv = (S.liveData?.games || []).find((x) => x.id === g.id); if (lv) return lv.state === "in" ? "in" : lv.state === "post" ? "post" : "pre"; return Date.now() < t0 ? "pre" : Date.now() < t0 + 3.5 * 3600000 ? "in" : "post"; }
+function livePlaceholder(g) {
+  const st = liveStateOf(g);
+  const tip = new Date(g.date).toLocaleString("en-US", { timeZone: TZ, weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  return `<div class="card live-ph" id="live-engine" data-tab-of="lv">${st === "pre" ? `<h2>Live predictions start at tip-off</h2><p>Tip-off: <b>${esc(tip)}</b> (${PHT}). Once the game starts this tab updates every 5 seconds with:</p>
+    <ul class="dots small"><li>Live win chance, moneyline and handicap (spread)</li><li>Quarter-by-quarter and half predictions, with who wins each quarter</li><li>Live game total and team totals, with over/under chances</li><li>Every player's live stat line and projected finish (points, rebounds, assists, threes, PRA)</li><li>Tonight's scenarios checked against what is happening, plus live situation reads</li><li>Live sportsbook odds next to our numbers, with the pre-game baselines</li></ul>
+    <p class="small muted">Everything starts from our pre-game analysis (scenario library, matchups, absences, coach and blowout habits) and then updates from the live score, clock, pace and box score.</p>` : `<h2>Loading live data…</h2><p class="small muted">Getting the latest score and box score from ESPN.</p>`}</div>`;
+}
 function gameTabOf(el) {
   const id = el.id || "", h = ((el.querySelector && el.querySelector("h2")) || {}).innerText || "";
   if (el.matches?.(".hero")) return "ov";
@@ -3019,9 +3029,12 @@ function gameTabs() {
   const bar = document.createElement("div");
   bar.className = "gtabs"; bar.setAttribute("role", "tablist"); bar.setAttribute("aria-label", "Game sections");
   const gid = S.curGame?.id;
-  bar.innerHTML = GAME_TABS.map(([k, l]) => `<button class="gtab" type="button" role="tab" data-gt="${k}">${l}</button>`).join("") ;
+const lst = liveStateOf(S.curGame);
+  bar.innerHTML = GAME_TABS.map(([k, l]) => `<button class="gtab${k === "lv" ? " gtab-live " + lst : ""}" type="button" role="tab" data-gt="${k}">${k === "lv" && lst === "in" ? '<span class="lv-dot" aria-hidden="true"></span>' : ""}${l}</button>`).join("") ;
+  if (lst === "in" && S.liveTabFor !== gid) { S.gTab = "lv"; S.liveTabFor = gid; }
   (app.querySelector(".gbar") || hero)?.insertAdjacentElement("afterend", bar);
-  hero?.insertAdjacentHTML("afterend", bottomLine());
+hero?.insertAdjacentHTML("afterend", bottomLine());
+  if (S.curGame && !app.querySelector("#live-engine")) hero?.insertAdjacentHTML("afterend", livePlaceholder(S.curGame));
   const jn = app.querySelector(".jumpnav"); if (jn) jn.hidden = true;
   const show = (k) => {
     S.gTab = k;
@@ -3318,10 +3331,10 @@ function liveBadge(lv) {
   return `<div class="lv-strip" data-lv="${esc(lv.id)}"><span class="lv-dot" aria-hidden="true"></span><b>LIVE</b> ${esc(lv.detail)} · ${esc(T(lv.away).abbr)} ${esc(lv.as)} - ${esc(lv.hs)} ${esc(T(lv.home).abbr)}${lv.pHome != null ? ` · <b>${esc(T(fav).abbr)} ${pct(Math.max(lv.pHome, 1 - lv.pHome))}</b> live` : ""}</div>`;
 }
 function liveCard(lv) {
-  if (!lv || lv.state !== "in") return lv?.state === "post" ? `<div class="card live-card" data-tab-of="ov">${liveBadge(lv)}<p class="small muted" style="margin:6px 0 0">Pre-game projection ${esc(T(lv.away).abbr)} ${f1(lv.preA)} - ${f1(lv.preH)} ${esc(T(lv.home).abbr)}. Full breakdown in Results after the next refresh.</p></div>` : "";
+  if (!lv || lv.state !== "in") return lv?.state === "post" ? `<div class="card live-card" data-tab-of="lv">${liveBadge(lv)}<p class="small muted" style="margin:6px 0 0">Pre-game projection ${esc(T(lv.away).abbr)} ${f1(lv.preA)} - ${f1(lv.preH)} ${esc(T(lv.home).abbr)}. Full breakdown in Results after the next refresh.</p></div>` : "";
   const ph = lv.pHome ?? 0.5;
   const rows = (lv.players || []).filter((p) => !p.out).sort((a, b) => b.live.pts - a.live.pts).slice(0, 8);
-  return `<div class="card live-card" data-tab-of="ov"><div class="lv-h"><span class="lv-dot" aria-hidden="true"></span><h2 style="margin:0">In-game prediction</h2><span class="small muted">${esc(lv.detail)} · updated ${esc(ago2(S.liveData.fetched))}</span></div>
+  return `<div class="card live-card" data-tab-of="lv"><div class="lv-h"><span class="lv-dot" aria-hidden="true"></span><h2 style="margin:0">In-game prediction</h2><span class="small muted">${esc(lv.detail)} · updated ${esc(ago2(S.liveData.fetched))}</span></div>
     <div class="lv-score"><div><small>${esc(T(lv.away).abbr)}</small><strong>${esc(lv.as)}</strong></div><div class="lv-mid">Now</div><div class="r"><small>${esc(T(lv.home).abbr)}</small><strong>${esc(lv.hs)}</strong></div></div>
     <div class="h2-wc"><div><small>Live win chance</small><strong>${pct(1 - ph)}</strong></div><div class="wp" aria-hidden="true"><span style="flex:${1 - ph}"></span><span style="flex:${ph}"></span></div><div class="r"><small>${esc(T(lv.home).abbr)}</small><strong>${pct(ph)}</strong></div></div>
     <div class="statgrid" style="grid-template-columns:repeat(3,1fr);margin-top:10px"><div class="stat"><b>${f0(lv.projA)}-${f0(lv.projH)}</b><span>Projected final</span></div><div class="stat"><b>${f1(lv.projTotal)}</b><span>Projected total (pre-game ${f1((lv.preH || 0) + (lv.preA || 0))})</span></div><div class="stat"><b>${pct(lv.prePHome >= 0.5 ? lv.prePHome : 1 - lv.prePHome)}</b><span>Pre-game ${esc(T(lv.prePHome >= 0.5 ? lv.home : lv.away).abbr)}</span></div></div>
@@ -3363,7 +3376,9 @@ async function liveFetch(id) {
       const k = t.keys || [];
       for (const a of t.athletes || []) {
         const v = a.stats || [], g = (key) => v[k.indexOf(key)];
-        box.set(String(a.athlete.id), { t: side.team.id, min: n0(g("minutes")), pts: n0(g("points")), reb: n0(g("rebounds")), ast: n0(g("assists")), tpm: n0(String(g("threePointFieldGoalsMade-threePointFieldGoalsAttempted") || "0-0").split("-")[0]), pf: n0(g("fouls")), dnp: a.didNotPlay ? 1 : 0, ej: a.ejected ? 1 : 0 });
+        const pair = (key) => String(g(key) || "0-0").split("-").map(n0);
+        const [fgm, fga] = pair("fieldGoalsMade-fieldGoalsAttempted"), [tpm, tpa] = pair("threePointFieldGoalsMade-threePointFieldGoalsAttempted"), [ftm, fta] = pair("freeThrowsMade-freeThrowsAttempted");
+        box.set(String(a.athlete.id), { t: side.team.id, min: n0(g("minutes")), pts: n0(g("points")), reb: n0(g("rebounds")), ast: n0(g("assists")), tpm, tpa, fgm, fga, ftm, fta, stl: n0(g("steals")), blk: n0(g("blocks")), to: n0(g("turnovers")), pm: n0(g("plusMinus")), pf: n0(g("fouls")), dnp: a.didNotPlay ? 1 : 0, ej: a.ejected ? 1 : 0, starter: !!a.starter });
       }
     }
     const lsOf = (side) => (comp(side)?.linescores || []).map((x) => n0(x.displayValue ?? x.value));
@@ -3398,6 +3413,8 @@ function liveModel(g, L) {
   if (w > 0.05 && Math.abs(live48 - preTot) > 8) whyTeam.push(`Pace so far points to ${f0(live48)} total points over 48 minutes versus ${f0(preTot)} projected; the rest of the game leans ${Math.round(w * 100)}% on the live pace.`);
   // Players
   const players = [];
+  const goneLive = new Set([...L.box.entries()].filter(([, b]) => b.pf >= 6 || b.ej).map(([id]) => id));
+  const lateQ = L.period >= 4 || (L.period === 3 && rem < 0.3);
   for (const t of [away, home]) {
     const myLead = t.isHome ? lead : -lead;
     for (const p of (t.players || []).filter((x) => x.min >= 8)) {
@@ -3414,19 +3431,42 @@ function liveModel(g, L) {
       else {
         if (c.pf >= 5 && rem > 0.1) { restMin *= 0.55; why.push(`${c.pf} fouls: minutes cut`); }
         else if (c.pf >= 4 && L.period <= 3) { restMin *= 0.8; why.push(`${c.pf} fouls before the 4th: minutes trimmed`); }
-        if (blowout) { if (p.min >= 26) { restMin *= 0.45; why.push(myLead > 0 ? "blowout lead: likely rests" : "blowout deficit: may be pulled"); } else { restMin *= 1.6; why.push("blowout: extra garbage-time minutes"); } }
-        if (closeLate && p.min >= 26) { restMin *= 1.2; why.push("close finish: plays more"); }
+        // Game script from his own history (our scenario library), falling back to general rules.
+        const bo = p.ix?.blowout, fl = p.ix?.flow;
+        const bigLead = myLead >= 15 && lateQ, bigDef = myLead <= -15 && lateQ, tight = L.period >= 4 && Math.abs(lead) <= 6;
+        const lateShare = Math.min(1, rem / 0.25); // blowout minutes are lost in the last quarter
+        if (bigLead || bigDef) {
+          const rec = bigLead ? bo?.ifWinBig : bo?.ifLoseBig;
+          if (rec && !bo.small && rec.games >= 5) {
+            restMin = Math.max(0, restMin + rec.min * lateShare * (blowout ? 1 : 0.6));
+            why.push(`${bigLead ? "big lead" : "big deficit"}: in his ${rec.games} games like this he played ${rec.min > 0 ? "+" : ""}${f1(rec.min)} min`);
+          } else if (blowout) { if (p.min >= 26) { restMin *= 0.45; why.push(bigLead ? "blowout lead: likely rests" : "blowout deficit: may be pulled"); } else { restMin *= 1.6; why.push("blowout: extra garbage-time minutes"); } }
+        } else if (blowout && p.min < 26) { restMin *= 1.6; why.push("blowout: extra garbage-time minutes"); }
+        if (tight) {
+          const tf = fl?.tight4th;
+          if (tf && !tf.small && tf.games >= 8 && p.min >= 26) { restMin *= 1.15; why.push(`tight 4th: closes games for his team (${tf.games} close 4th quarters on record)`); }
+          else if (closeLate && p.min >= 26) { restMin *= 1.2; why.push("close finish: plays more"); }
+        }
         if (ot && p.min >= 26) { restMin += 4; why.push("overtime minutes"); }
       }
-      const rate = (k) => (p[k] || 0) / Math.max(1, p.min);
-      const proj = (k) => c[k] + rate(k) * restMin;
+      // Scoring rate: his normal per-minute rate, nudged by his record in tonight's live game script.
+      let ptsAdj36 = 0;
+      { const fl = p.ix?.flow, st = myLead >= 12 ? fl?.ahead : myLead <= -12 ? fl?.behind : (L.period >= 4 && Math.abs(lead) <= 6) ? fl?.tight4th : null;
+        if (st && !st.small && st.games >= 8 && Math.abs(st.vsUsual36) >= 1.5) { ptsAdj36 = st.vsUsual36 * Math.min(1, elapsed * 1.5); why.push(`${myLead >= 12 ? "when ahead" : myLead <= -12 ? "when behind" : "in tight 4th quarters"} he scores ${st.vsUsual36 > 0 ? "+" : ""}${f1(st.vsUsual36)} per 36 min (${st.games} games)`); } }
+      // Live absences: a teammate or a key defender who has fouled out or been ejected.
+      let absAdj = 0;
+      for (const w of p.wwD || []) if (goneLive.has(String(w.id)) && Math.abs(w.pts) >= 0.8) { absAdj += w.pts * rem; why.push(`${shortName(w.n)} out of the game: he averages ${w.without?.ppg ?? "-"} without vs ${w.with?.ppg ?? "-"} with`); }
+      for (const d of p.dm?.defenders || []) if (goneLive.has(String(d.id)) && d.share >= 10 && d.vsExpPct < -3) { absAdj += (p.pts || 0) * (-d.vsExpPct / 100) * (d.share / 100) * rem; why.push(`main defender ${shortName(d.n)} is out of the game`); }
+      const rate = (k) => (p[k] || 0) / Math.max(1, p.min) + (k === "pts" ? ptsAdj36 / 36 : 0);
+      const proj = (k) => Math.max(c[k] || 0, (c[k] || 0) + rate(k) * restMin + (k === "pts" ? absAdj : 0));
       const line = Math.round((p.pts || 0) - 0.5) + 0.5;
       const sdP = Math.max(0.6, (((p.hi ?? p.pts + 7) - (p.lo ?? p.pts - 7)) / 2.56) * Math.sqrt(Math.max(0.01, restMin / Math.max(1, p.min))));
       const pOver = c.pts > line ? 1 : restMin === 0 ? 0 : 1 - pNorm((line - proj("pts")) / sdP);
-      players.push({ id: p.id, n: p.n, t: t.tid, cur: c, restMin, pre: p, live: { pts: proj("pts"), reb: proj("reb"), ast: proj("ast"), tpm: proj("tpm") }, line, pOver, why });
+      if ((c.tpa || 0) >= 5 && p.tpa > 0.5) { const norm = (p.tpm || 0) / p.tpa, now = c.tpm / c.tpa; if (Math.abs(now - norm) >= 0.2) why.push(`${now > norm ? "hot" : "cold"} from three (${c.tpm}/${c.tpa} vs his usual ${pct(norm)}): rest of game assumes normal shooting`); }
+      players.push({ id: p.id, n: p.n, t: t.tid, cur: c, restMin, pre: p, scen: p.scen || [], trust: p.trust, live: { pts: proj("pts"), reb: proj("reb"), ast: proj("ast"), tpm: proj("tpm") }, line, pOver, why });
     }
   }
-  const ex = liveExtras(g, L, { home, away, rem, elapsed, lead, preM, preTot, restH, restA, projH, projA, margin, sd, pHome, live48, blowout, closeLate, ot });
+  const ex = liveExtras(g, L, { players, home, away, rem, elapsed, lead, preM, preTot, restH, restA, projH, projA, margin, sd, pHome, live48, blowout, closeLate, ot });
   for (const p of players) { p.props = livePlayerProps(p); p.restOut = p.restMin === 0; }
   return { rem, lead, projH, projA, projTot: projH + projA, margin, sd, pHome, whyTeam, players, blowout, closeLate, ...ex };
 }
@@ -3527,14 +3567,22 @@ function liveExtras(g, L, c) {
   }
   if (false && elapsed > 0.15 && Math.abs(live48 - preTot) >= 12) reads.push({ ic: "⏱️", t: `Pace: scoring is running at ${f0(live48)} points per 48 minutes against our ${f0(preTot)}. The live total leans partly on the pace seen so far.` });
   if (pOT >= 0.06) reads.push({ ic: "➕", t: `Overtime chance ${pct(pOT)}: close enough that a tie at the end of regulation is a real outcome.` });
-  return { quarters, halves, totals: { projTot, preLine, pOverPre: overAt(preLine), liveLine, alts: totAlts, sdTot }, teamTot: { h: tH, a: tA }, spread: { preFav, preLineS, coverPre, liveFav, liveS, alts: spreadAlts }, pOT, bands, reads };
+  const scenTrack = (g.scenarios?.list || []).slice(0, 6).map((sc) => {
+    let status = "context";
+    const am = String(sc.t || "").match(/^(.+?) has averaged ([\d.]+) points in the \d+ games/);
+    const pl = am && (c.players || []).find((x) => x.n === am[1]);
+    if (pl && elapsed > 0.12) { const d = pl.live.pts - Number(am[2]); status = d >= 1.5 ? "playing out" : d <= -1.5 ? "not so far" : "too close to tell"; return { t: sc.t + ` Tonight's live projection: ${f1(pl.live.pts)}.`, kind: sc.kind, n: sc.n, sample: sc.sample, status }; }
+    if (sc.fav && elapsed > 0.12) { const fh = String(sc.fav) === String(g.home); const vsExp = (lead - expLead) * (fh ? 1 : -1); status = vsExp >= 3 ? "playing out" : vsExp <= -3 ? "not so far" : "too close to tell"; }
+    return { t: sc.t, kind: sc.kind, n: sc.n, sample: sc.sample, status };
+  });
+  return { scenTrack, quarters, halves, totals: { projTot, preLine, pOverPre: overAt(preLine), liveLine, alts: totAlts, sdTot }, teamTot: { h: tH, a: tA }, spread: { preFav, preLineS, coverPre, liveFav, liveS, alts: spreadAlts }, pOT, bands, reads };
 }
 function liveEngineCard(g, L, M) {
   const home = g.home, away = g.away, ph = M.pHome;
   const spread = Math.round(Math.abs(M.margin) - 0.5) + 0.5, favLive = M.margin >= 0 ? home : away;
   const rows = M.players.filter((p) => p.restMin > 0 || p.cur.min > 0).sort((a, b) => b.live.pts - a.live.pts).slice(0, 10);
   const liveTag = L.src === "live" ? `<span class="lv-dot" aria-hidden="true"></span><b>LIVE</b>` : `<b>Snapshot</b>`;
-  return `<div class="card live-card" data-tab-of="ov" id="live-engine">
+  return `<div class="card live-card" data-tab-of="lv" id="live-engine">
     <div class="lv-h">${liveTag}<h2 style="margin:0">In-game prediction</h2><span class="small muted">${esc(L.detail)} · ${L.src === "live" ? `live · updates every 5 s · ${esc(new Date(L.fetched).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit", second: "2-digit" }))}` : `from the last refresh, ${esc(ago2(L.fetched))} (live updates need the public site)`}</span></div>
     <div class="lv-score"><div><small>${esc(T(away).abbr)}</small><strong>${esc(L.as)}</strong></div><div class="lv-mid">${Math.round((1 - M.rem) * 48)} of 48 min</div><div class="r"><small>${esc(T(home).abbr)}</small><strong>${esc(L.hs)}</strong></div></div>
     <div class="h2-wc"><div><small>Live win chance</small><strong>${pct(1 - ph)}</strong></div><div class="wp" aria-hidden="true"><span style="flex:${1 - ph}"></span><span style="flex:${ph}"></span></div><div class="r"><small>${esc(T(home).abbr)}</small><strong>${pct(ph)}</strong></div></div>
@@ -3578,10 +3626,13 @@ function liveMarkets(g, L, M) {
 
     ${M.whyTeam.length || M.reads.length ? `<h3>Live scenarios</h3><ul class="lvreads">${M.whyTeam.map((t) => `<li><span aria-hidden="true">⚡</span><span>${esc(t)}</span></li>`).join("")}${M.reads.map((r) => `<li><span aria-hidden="true">${r.ic}</span><span>${esc(r.t)}</span></li>`).join("")}</ul>` : ""}
 
-    ${rows.length ? `<h3>Live player props</h3><div class="lvp">${rows.map((p) => `<div class="lvp-r"><div class="lvp-h"><b>${esc(shortName(p.n))}</b> <span class="muted">${esc(T(p.t).abbr)}</span><span class="small muted"> · now ${esc(p.cur.pts)}p ${esc(p.cur.reb)}r ${esc(p.cur.ast)}a · ${esc(p.cur.min)}m${p.cur.pf ? ` · ${esc(p.cur.pf)}f` : ""} · ~${f0(p.restMin)} min left</span></div>
+    ${(M.scenTrack || []).length ? `<h3>Tonight's scenarios, live check</h3><ul class="lvreads">${M.scenTrack.map((x) => `<li><span aria-hidden="true">${x.status === "playing out" ? "✅" : x.status === "not so far" ? "❌" : x.status === "too close to tell" ? "➖" : "📌"}</span><span>${esc(x.t)} <b class="lvs ${x.status.replace(/ /g, "-")}">${esc(x.status)}</b>${x.sample ? ` <span class="muted small">(${esc(x.sample)} sample)</span>` : ""}</span></li>`).join("")}</ul><p class="small muted">From our pre-game scenario library. "Playing out" means the favoured side is beating our projection for this stage of the game.</p>` : ""}
+    ${rows.length ? `<h3>Live player props</h3><div class="lvp">${rows.map((p) => `<div class="lvp-r"><div class="lvp-h"><b>${esc(shortName(p.n))}</b> <span class="muted">${esc(T(p.t).abbr)}</span><span class="small muted"> · ~${f0(p.restMin)} min left</span></div>
+      <div class="lvline small"><span><b>${esc(p.cur.pts)}</b> pts</span><span><b>${esc(p.cur.reb)}</b> reb</span><span><b>${esc(p.cur.ast)}</b> ast</span>${p.cur.fga != null ? `<span>FG ${esc(p.cur.fgm)}/${esc(p.cur.fga)}</span><span>3P ${esc(p.cur.tpm)}/${esc(p.cur.tpa)}</span><span>FT ${esc(p.cur.ftm)}/${esc(p.cur.fta)}</span>` : ""}<span>${esc(p.cur.min)} min</span>${p.cur.pf ? `<span>${esc(p.cur.pf)} fouls</span>` : ""}${p.cur.pm != null ? `<span class="${p.cur.pm > 0 ? "up" : p.cur.pm < 0 ? "down" : ""}">${p.cur.pm > 0 ? "+" : ""}${esc(p.cur.pm)}</span>` : ""}</div>
+      ${(p.scen || []).filter((x) => Math.abs(x.pts) >= 0.3).length ? `<div class="small muted">Pre-game scenarios: ${p.scen.filter((x) => Math.abs(x.pts) >= 0.3).map((x) => `${esc(x.s)} ${x.pts > 0 ? "+" : ""}${f1(x.pts)} pts`).join(" · ")}</div>` : ""}
       <div class="lvchips">${propChip("pts", "PTS", p.props.pts)}${propChip("reb", "REB", p.props.reb)}${propChip("ast", "AST", p.props.ast)}${propChip("tpm", "3PM", p.props.tpm)}${propChip("pra", "PRA", p.props.pra)}</div>
       ${p.why.length ? `<div class="small" style="color:var(--warn)">${esc(p.why.join("; "))}</div>` : ""}</div>`).join("")}</div>
-      <p class="small muted">Each chip: projected final, our pre-game line, and the chance he goes over it.</p>` : ""}`;
+      <p class="small muted">Each chip: projected final, our pre-game line, and the chance he goes over it. Minutes and scoring for the rest of the game use his own record in the live game script (big lead, big deficit, tight 4th quarter), teammates or defenders leaving the game, foul trouble and tonight's rotation.</p>` : ""}`;
 }
 // ---------------- Betting market comparison (display only: never used by our projections or learning)
 const ESPN_CORE = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba";
@@ -3725,9 +3776,15 @@ async function startLive(g) {
     if (!L || L.state === "pre" || !L.state) return;
     if (L.state === "post") { clearInterval(S.liveTimer); }
     const html = L.state === "post" ? liveCard({ ...(await liveOf(g.id) || {}), state: "post", hs: L.hs, as: L.as, home: g.home, away: g.away, preH: g.pred.hs, preA: g.pred.as, called: (L.hs > L.as) === (g.pred.hs > g.pred.as) }) : liveEngineCard(g, L, liveModel(g, L));
-    const old = app.querySelector("#live-engine, .live-card");
+const old = app.querySelector("#live-engine, .live-card");
     if (old) old.outerHTML = html; else app.querySelector(".hero")?.insertAdjacentHTML("afterend", html);
-    const c = app.querySelector("#live-engine, .live-card"); if (c) { c.id = "live-engine"; c.hidden = (S.gTab || "ov") !== "ov"; }
+    const c = app.querySelector("#live-engine, .live-card"); if (c) { c.id = "live-engine"; c.dataset.tabOf = "lv"; c.hidden = (S.gTab || "ov") !== "lv"; }
+    // Overview: a one-line live strip that opens the Live tab
+    const mini = `<div class="card live-mini" id="live-mini" data-tab-of="ov">${L.state === "post" ? "<b>Final</b>" : '<span class="lv-dot" aria-hidden="true"></span><b>LIVE</b>'} <span>${esc(L.detail)} · ${esc(T(g.away).abbr)} ${esc(L.as)} - ${esc(L.hs)} ${esc(T(g.home).abbr)}</span>${L.state === "in" ? (() => { const ph = liveModel(g, L).pHome; return ` <span class="muted">· ${esc(T(ph >= 0.5 ? g.home : g.away).abbr)} ${pct(Math.max(ph, 1 - ph))}</span>`; })() : ""}<button type="button" class="btn sm" data-gt-go="lv">Open Live tab ›</button></div>`;
+    const om = app.querySelector("#live-mini");
+    if (om) om.outerHTML = mini; else app.querySelector(".gtabs")?.insertAdjacentHTML("afterend", mini);
+    const nm = app.querySelector("#live-mini"); if (nm) nm.hidden = (S.gTab || "ov") !== "ov";
+    const lt = app.querySelector(".gtab-live"); if (lt && L.state === "in" && !lt.querySelector(".lv-dot")) lt.insertAdjacentHTML("afterbegin", '<span class="lv-dot" aria-hidden="true"></span>');
   };
   await draw();
   S.liveTimer = setInterval(draw, LIVE_POLL_MS);
