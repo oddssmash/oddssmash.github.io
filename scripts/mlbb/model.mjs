@@ -128,6 +128,35 @@ for (const [name, v] of raw) {
   HERO.push({ id: name, games: v.n, wins: v.w, wr: r3(v.w / Math.max(1, v.n)), bans: v.b, presence: r3((v.n + v.b) / totalGames), recent: { picks: rc.n, wr: rc.n ? r3(rc.w / rc.n) : null, bans: rc.b, presence: r3((rc.n + rc.b) / recentGames) }, strength: r3(str),
     roles: Object.entries(v.roles).sort((a, b) => b[1] - a[1]).map(([r, n]) => ({ r, n })), combos: syn.slice(0, 6), combosBad: syn.slice(-3).reverse(), counters: cnt.slice(0, 6), counteredBy: cnt.slice(-6).reverse(), ranked: rk ? { wr: rk.winRate, pick: rk.pickRate, ban: rk.banRate, tier: rk.tier } : null });
 }
+// ---------------------------------------------------------------- HERO TRAITS, early/late, patch
+// Traits from Liquipedia's hero pages (role, specialties, crowd control counted from the skill text, base toughness);
+// early and late from pro results: the hero's record in games under 14 minutes vs 18+ minutes (pulled toward 50%).
+const LP = readJSON(path.join(MD, "heroes-lp.json"), { heroes: {}, patches: [] });
+const secs = (x) => { const [a, b] = String(x || "").split(":").map(Number); return a * 60 + (b || 0); };
+const sl = new Map(); // hero -> {s:[w,n], l:[w,n]}
+for (const m of done) for (const g of m.games) { const L = secs(g.len); if (!L) continue; const k = L < 14 * 60 ? "s" : L >= 18 * 60 ? "l" : null; if (!k) continue;
+  for (const [hs, w] of [[g.h1, g.w === 1], [g.h2, g.w === 2]]) for (const h of hs) { const v = sl.get(h) || { s: [0, 0], l: [0, 0] }; v[k][0] += w ? 1 : 0; v[k][1]++; sl.set(h, v); } }
+const shr = (w, n, k = 8) => (w + k / 2) / (n + k);
+const ROLE_T = { Tank: { tank: 1, cc: 0.35, dmg: 0.15, engage: 0.5, sustain: 0.3 }, Fighter: { tank: 0.6, dmg: 0.6, engage: 0.4, sustain: 0.35 }, Assassin: { burst: 0.7, dmg: 0.75, engage: 0.5, tank: 0.1 }, Mage: { burst: 0.55, dmg: 0.85, cc: 0.2, tank: 0.1 }, Marksman: { dmg: 1, push: 0.45, tank: 0.1, late: 0.15 }, Support: { sustain: 0.8, cc: 0.25, tank: 0.35, dmg: 0.25 } };
+const SPEC_T = { "Crowd Control": { cc: 0.45 }, Control: { cc: 0.35 }, Initiator: { engage: 0.5, cc: 0.2 }, Charge: { engage: 0.4 }, Chase: { engage: 0.35, burst: 0.1 }, Burst: { burst: 0.45 }, Finisher: { burst: 0.35 }, Reap: { burst: 0.25, dmg: 0.15 }, Damage: { dmg: 0.25 }, "Magic Damage": { dmg: 0.2 }, "Mixed Damage": { dmg: 0.2 }, Push: { push: 0.6 }, Poke: { dmg: 0.15, push: 0.15 }, Regen: { sustain: 0.45, tank: 0.1 }, Guard: { sustain: 0.35, tank: 0.2 }, Support: { sustain: 0.35 } };
+const TRAITS = ["cc", "burst", "tank", "dmg", "push", "engage", "sustain", "early", "late"];
+function traitsOf(id) {
+  const lp = LP.heroes[id] || LP.heroes[id.replace(/ & /g, " and ")] || null, t = Object.fromEntries(TRAITS.map((k) => [k, 0]));
+  if (lp) { for (const [k, v] of Object.entries(ROLE_T[lp.role] || {})) t[k] += v; for (const [k, v] of Object.entries(ROLE_T[lp.role2] || {})) t[k] += v * 0.4; for (const sp of lp.spec) for (const [k, v] of Object.entries(SPEC_T[sp] || {})) t[k] += v;
+    const c = lp.cc || {}, hard = (c.stun || 0) + (c.airborne || 0) + (c.knockback || 0) + (c.suppress || 0) * 1.5 + (c.immobilize || 0) + (c.taunt || 0) + (c.freeze || 0) + (c.petrify || 0) + (c.silence || 0) * 0.7 + (c.pull || 0) + (c.charm || 0); t.cc += Math.min(0.8, hard * 0.2 + (c.slow || 0) * 0.05); }
+  const v = sl.get(id); if (v) { const ws = shr(...v.s), wl = shr(...v.l); t.early += Math.max(0, (ws - wl) * 4); t.late += Math.max(0, (wl - ws) * 4); }
+  for (const k of TRAITS) t[k] = Math.round(Math.min(1.5, t[k]) * 100) / 100;
+  return { t, lp, sl: v ? { short: v.s, long: v.l } : null };
+}
+const lastPatch = [...LP.patches].reverse().find((p) => Date.parse(p.release) <= now) || null;
+const patchHist = (id) => LP.patches.flatMap((p) => p.changes.filter((c) => c.hero === id).map((c) => ({ patch: p.patch, release: p.release, type: c.type }))).slice(-4).reverse();
+for (const h of HERO) { const x = traitsOf(h.id); h.traits = x.t; h.lp = x.lp ? { role: x.lp.role, role2: x.lp.role2, lane: x.lp.lane, spec: x.lp.spec, cc: x.lp.cc } : null; h.shortLong = x.sl; h.patches = patchHist(h.id);
+  const since = lastPatch ? done.filter((m) => m.date >= lastPatch.release) : []; let pn = 0, pw = 0, pb = 0; for (const m of since) for (const g of m.games) { if (g.h1.includes(h.id)) { pn++; if (g.w === 1) pw++; } if (g.h2.includes(h.id)) { pn++; if (g.w === 2) pw++; } if (g.b1.includes(h.id) || g.b2.includes(h.id)) pb++; }
+  h.thisPatch = lastPatch ? { patch: lastPatch.patch, picks: pn, wins: pw, bans: pb } : null; }
+const TR = Object.fromEntries(HERO.map((h) => [h.id, h.traits]));
+// a lineup's profile: sum of its heroes' traits (5 heroes); the pro average lineup is the reference
+const profileOf = (hs) => { const p = Object.fromEntries(TRAITS.map((k) => [k, 0])); for (const h of hs) for (const k of TRAITS) p[k] += TR[h]?.[k] || 0; return p; };
+const avgLineup = (() => { const acc = Object.fromEntries(TRAITS.map((k) => [k, 0])); let n = 0; for (const m of done.slice(-600)) for (const g of m.games) for (const hs of [g.h1, g.h2]) { const p = profileOf(hs); for (const k of TRAITS) acc[k] += p[k]; n++; } for (const k of TRAITS) acc[k] = Math.round((acc[k] / Math.max(1, n)) * 100) / 100; return acc; })();
 HERO.sort((a, b) => b.recent.presence - a.recent.presence);
 const tier = (h) => (h.recent.presence >= 0.4 ? "S" : h.recent.presence >= 0.2 ? "A" : h.recent.presence >= 0.08 ? "B" : "C");
 HERO.forEach((h) => (h.tier = tier(h)));
@@ -147,13 +176,26 @@ const nk = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const OFF = fs.readdirSync(MD).filter((f) => f.startsWith("official-")).map((f) => readJSON(path.join(MD, f)));
 const offPlayer = new Map(), abbr = {};
 for (const o of OFF) for (const p of o.players) offPlayer.set(nk(p.player), { ...p, league: o.league, season: o.season });
-const playersOut = [...PL.values()].map((s) => ({ official: offPlayer.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
+// player archetype: his role plus what his heroes bring, his pool depth and (where published) his KDA profile
+function playerArch(s) {
+  const tot = Object.values(s.heroes).reduce((a, v) => a + v.n, 0) || 1, p = Object.fromEntries(TRAITS.map((k) => [k, 0]));
+  for (const [h, v] of Object.entries(s.heroes)) for (const k of TRAITS) p[k] += (TR[h]?.[k] || 0) * v.n / tot;
+  const A = { EXP: p.tank > 0.75 ? "Tank EXP laner" : p.push > 0.35 ? "Split-push EXP laner" : "Fighter EXP laner", Jungle: p.burst > 0.7 ? "Assassin jungler" : p.tank > 0.55 ? "Tank / fighter jungler" : "Carry jungler", Mid: p.cc > 0.55 ? "Control mage" : p.burst > 0.6 ? "Burst mage" : "Utility mid", Gold: p.late > 0.15 ? "Hypercarry marksman" : p.burst > 0.45 ? "Burst gold laner" : p.tank > 0.4 ? "Fighter gold laner" : "Damage marksman", Roam: p.tank > 0.8 && p.cc > 0.6 ? "Engage roamer" : p.sustain > 0.55 ? "Support roamer" : p.burst > 0.5 ? "Assassin roamer" : "Flex roamer" };
+  const out = [A[s.role] || "Flex"]; const pool = Object.values(s.heroes).filter((v) => v.n >= 2).length, top = Math.max(...Object.values(s.heroes).map((v) => v.n)) / tot;
+  if (pool >= 10) out.push("Deep hero pool"); else if (top >= 0.3 && tot >= 10) out.push("Specialist");
+  return { labels: out, profile: Object.fromEntries(TRAITS.map((k) => [k, Math.round(p[k] * 100) / 100])) };
+}
+const playersOut = [...PL.values()].map((s) => ({ arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
   pool: Object.entries(s.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 12),
   signature: Object.entries(s.heroes).filter(([, v]) => v.n >= 4).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n), score: (v.w + 2) / (v.n + 4) * Math.log(1 + v.n) })).sort((a, b) => b.score - a.score).slice(0, 3).map(({ score, ...x }) => x),
   teams: Object.entries(s.teams).map(([t, n]) => ({ t, n })) })).sort((a, b) => b.games - a.games);
 
 // teams: profile from recent games (last 150 days, else all)
 const teamGames = (name) => { const ms = done.filter((m) => m.a === name || m.b === name); const rec = ms.filter((m) => Date.parse(m.date) > now - 150 * DAY); return rec.length >= 3 ? rec : ms.slice(-12); };
+const ARCH_T = (p, tempo) => { const r = (k) => p[k] / (avgLineup[k] || 1), out = [];
+  if (r("early") > 1.25 || (tempo.short > 0.4)) out.push("Early aggression"); if (r("late") > 1.25 || tempo.long > 0.45) out.push("Late-game scaling");
+  if (r("cc") > 1.12) out.push("Teamfight CC"); if (r("burst") > 1.12 && r("engage") > 1.05) out.push("Pick-off / burst"); if (r("push") > 1.2) out.push("Split push / objectives");
+  if (r("tank") > 1.12) out.push("Frontline heavy"); if (r("sustain") > 1.2) out.push("Sustain"); return out.length ? out.slice(0, 3) : ["Balanced"]; };
 function profile(name) {
   const ms = teamGames(name), picks = {}, bansFor = {}, bansVs = {}; let blue = [0, 0], red = [0, 0], early = [0, 0], late = [0, 0], g = 0;
   const secs = (s) => { const [a, b] = String(s || "").split(":").map(Number); return a * 60 + (b || 0); };
@@ -164,7 +206,12 @@ function profile(name) {
     const L = secs(x.len); if (L) { if (L < 14 * 60) { early[0] += won; early[1]++; } else if (L >= 18 * 60) { late[0] += won; late[1]++; } } }
   const comfort = Object.values(picks).filter((v) => v.n >= 2).map((v) => ({ ...v, wr: r3(v.w / v.n), share: r3(v.n / g) })).sort((a, b) => b.n - a.n);
   const top = (o, k = 6) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, k).map(([h, n]) => ({ h, n, share: r3(n / g) }));
-  return { games: g, comfort: comfort.slice(0, 15), bansTheyMake: top(bansFor), bansAgainstThem: top(bansVs), side: { blue: blue[1] ? { w: blue[0], n: blue[1] } : null, red: red[1] ? { w: red[0], n: red[1] } : null }, early: { w: early[0], n: early[1] }, late: { w: late[0], n: late[1] } };
+  // their average draft profile and tempo (share of short and long games) -> team archetype
+  const dp = Object.fromEntries(TRAITS.map((k) => [k, 0])); let dn = 0, sh = 0, lo = 0, lenSum = 0, lenN = 0;
+  for (const m of ms) for (const x of m.games) { const mine = m.a === name ? x.h1 : x.h2, p = profileOf(mine); for (const k of TRAITS) dp[k] += p[k]; dn++; const L = secs(x.len); if (L) { lenSum += L; lenN++; if (L < 14 * 60) sh++; else if (L >= 18 * 60) lo++; } }
+  for (const k of TRAITS) dp[k] = Math.round((dp[k] / Math.max(1, dn)) * 100) / 100;
+  const tempo = { short: lenN ? sh / lenN : 0, long: lenN ? lo / lenN : 0, avgMin: lenN ? Math.round((lenSum / lenN / 60) * 10) / 10 : null };
+  return { games: g, draft: dp, tempo, archetype: ARCH_T(dp, tempo), comfort: comfort.slice(0, 15), bansTheyMake: top(bansFor), bansAgainstThem: top(bansVs), side: { blue: blue[1] ? { w: blue[0], n: blue[1] } : null, red: red[1] ? { w: red[0], n: red[1] } : null }, early: { w: early[0], n: early[1] }, late: { w: late[0], n: late[1] } };
 }
 // signature hero effect: team record with vs without its most-played hero (shrunk), for "if it is banned"
 function sigEffect(name, prof) {
@@ -181,12 +228,29 @@ const ratingOf = (name) => { const t = R.T.get(name); return t ? t.r + (R.REG[t.
 const teamsOut = [...R.T.values()].filter((t) => t.n >= 3).map((t) => { const prof = profile(t.name); const lastM = [...done].reverse().find((m) => m.a === t.name || m.b === t.name);
   return { id: safe(t.name), name: t.name, region: t.region, rating: r3(ratingOf(t.name)), elo: Math.round(1500 + ratingOf(t.name) * 173.7), series: [t.w, t.l], games: [t.gw, t.gl], last: lastM?.date || null, league: lastM?.league || null, official: offTeam.get(t.name) || null, roster: rosterFor(t.name, lastM?.page || "").map((x) => ({ player: x.player, role: x.role, id: safe(x.page || x.player) })), profile: prof, signature: sigEffect(t.name, prof) }; })
   .sort((a, b) => b.rating - a.rating);
+// RELATIVE ARCHETYPES: a team's labels are the traits where it stands out from other teams (z-score 0.75+ among teams
+// with 10+ recent games); tempo uses its share of short and long games.
+{
+  const pool = teamsOut.filter((t) => t.profile.games >= 10), feats = { early: (t) => t.profile.draft.early + t.profile.tempo.short, late: (t) => t.profile.draft.late + t.profile.tempo.long, cc: (t) => t.profile.draft.cc, burst: (t) => t.profile.draft.burst + t.profile.draft.engage * 0.5, push: (t) => t.profile.draft.push, tank: (t) => t.profile.draft.tank, sustain: (t) => t.profile.draft.sustain };
+  const LBL = { early: "Early aggression", late: "Late-game scaling", cc: "Teamfight CC", burst: "Pick-off / burst", push: "Split push / objectives", tank: "Frontline heavy", sustain: "Sustain" };
+  const stat = Object.fromEntries(Object.entries(feats).map(([k, fn]) => { const v = pool.map(fn), m = v.reduce((a, x) => a + x, 0) / v.length, sd = Math.sqrt(v.reduce((a, x) => a + (x - m) ** 2, 0) / v.length) || 1; return [k, { m, sd }]; }));
+  for (const t of teamsOut) { const z = Object.entries(feats).map(([k, fn]) => [k, (fn(t) - stat[k].m) / stat[k].sd]).sort((a, b) => b[1] - a[1]);
+    t.profile.archetype = t.profile.games < 10 ? ["Not enough games yet"] : z.filter(([, v]) => v >= 0.75).slice(0, 3).map(([k]) => LBL[k]); if (!t.profile.archetype.length) t.profile.archetype = ["Balanced"];
+    t.profile.traitZ = Object.fromEntries(z.map(([k, v]) => [k, Math.round(v * 100) / 100])); }
+}
 for (const t of teamsOut) writeJSON(path.join(OUT, "teams", `${t.id}.json`), { ...t, matches: done.filter((m) => m.a === t.name || m.b === t.name).slice(-30).reverse().map((m) => ({ date: m.date, league: m.league, stage: m.stage, opp: m.a === t.name ? m.b : m.a, score: m.a === t.name ? m.score : [m.score[1], m.score[0]] })) });
 writeJSON(path.join(OUT, "teams.json"), teamsOut.map(({ profile, matches, ...t }) => ({ ...t, comfort: profile.comfort.slice(0, 3) })));
+{
+  const byRole = {}; for (const p of playersOut.filter((x) => x.games >= 15)) (byRole[p.role] ||= []).push(p.pool.filter((h) => h.n >= 2).length / Math.sqrt(p.games)); /* pool size for the games played, so long careers do not win by default */
+  const below = (arr, x) => arr.filter((v) => v < x).length / arr.length, atMost = (arr, x) => arr.filter((v) => v <= x).length / arr.length;
+  for (const p of playersOut) { p.arch.labels = p.arch.labels.filter((l) => l !== "Deep hero pool" && l !== "Specialist"); const arr = byRole[p.role] || [], n = p.pool.filter((h) => h.n >= 2).length / Math.sqrt(Math.max(1, p.games));
+    if (p.games >= 15 && arr.length >= 8) { const srt = [...arr].sort((a, b) => a - b), pc = (x) => srt[Math.floor(x * (srt.length - 1))], med = pc(0.5); if (n >= pc(0.85) && n > med) p.arch.labels.push("Deep hero pool"); else if (n <= pc(0.15) && n < med) p.arch.labels.push("Narrow pool / specialist"); }
+    if (p.official) { if (p.official.kda >= 5) p.arch.labels.push("Safe, high-KDA"); else if (p.official.kills >= 3 && p.official.deaths >= 2.5) p.arch.labels.push("High-risk playmaker"); } }
+}
 for (const p of playersOut) writeJSON(path.join(OUT, "players", `${p.id}.json`), p);
 writeJSON(path.join(OUT, "players.json"), playersOut.map(({ pool, ...p }) => ({ ...p, top: pool.slice(0, 3) })));
 // draft tables for the Draft lab (client-side): hero strength, combos and counters with 3+ games
-writeJSON(path.join(OUT, "draft.json"), { wd: P.wd, scale: { hero: 0.2, syn: 0.1, cnt: 0.04 }, heroes: Object.fromEntries([...D.H].map(([k, v]) => [k, [r1(v.n), r1(v.w)]])), pairs: Object.fromEntries([...D.PAIR].filter(([, v]) => v.n >= 3).map(([k, v]) => [k, [r1(v.n), r1(v.w)]])), vs: Object.fromEntries([...D.VS].filter(([, v]) => v.n >= 3).map(([k, v]) => [k, [r1(v.n), r1(v.w)]])) });
+writeJSON(path.join(OUT, "draft.json"), { traits: TR, avgLineup, shortLong: Object.fromEntries(HERO.filter((h) => h.shortLong).map((h) => [h.id, h.shortLong])), patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release } : null, wd: P.wd, scale: { hero: 0.2, syn: 0.1, cnt: 0.04 }, heroes: Object.fromEntries([...D.H].map(([k, v]) => [k, [r1(v.n), r1(v.w)]])), pairs: Object.fromEntries([...D.PAIR].filter(([, v]) => v.n >= 3).map(([k, v]) => [k, [r1(v.n), r1(v.w)]])), vs: Object.fromEntries([...D.VS].filter(([, v]) => v.n >= 3).map(([k, v]) => [k, [r1(v.n), r1(v.w)]])) });
 writeJSON(path.join(OUT, "heroes.json"), HERO);
 
 // ---------------------------------------------------------------- projections: upcoming matches and any pairing
@@ -239,12 +303,14 @@ writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series m
     const field = wild.map((w, i) => ({ key: w.team || `TBD (${w.via}) #${i + 1}`, r: w.rating ?? 0, reg: w.region || `?${i}`, adv: 0 }));
     const N = 20000;
     for (let it = 0; it < N; it++) {
-      const order = field.map((x) => [rnd(), x]).sort((a, b) => a[0] - b[0]).map((x) => x[1]);
+      const order = field.map((x) => [rnd(), x]).sort((a, b) => a[0] - b[0]).map((x) => x[1]); let runners = null;
       for (const grp of [order.slice(0, 5), order.slice(5, 10)]) {
         const wins = new Map(grp.map((x) => [x, 0]));
         for (let i = 0; i < grp.length; i++) for (let j = i + 1; j < grp.length; j++) { const p = lg((grp[i].r - grp[j].r) * (grp[i].reg !== grp[j].reg ? P.cx : 1)); /* same cross-region pull as every projection */ if (rnd() < p) wins.set(grp[i], wins.get(grp[i]) + 1); else wins.set(grp[j], wins.get(grp[j]) + 1); }
-        const top = Math.max(...wins.values()), tied = grp.filter((x) => wins.get(x) === top); tied[Math.floor(rnd() * tied.length)].adv++;
+        const ranked = [...grp].sort((a, b) => wins.get(b) - wins.get(a) || rnd() - 0.5); ranked[0].adv++; (runners ||= []).push([ranked[1], wins.get(ranked[1])]);
       }
+      // third slot (Moonton: 3 of 10 advance): the stronger runner-up, as an approximation of the decider match
+      const [r1x, r2x] = runners; const pR = lg((r1x[0].r - r2x[0].r) * (r1x[0].reg !== r2x[0].reg ? P.cx : 1)); (rnd() < pR ? r1x[0] : r2x[0]).adv++;
     }
     wild.forEach((w, i) => (w.pAdvance = r3(field[i].adv / N)));
     writeJSON(path.join(OUT, "m8.json"), { fetched: M8.fetched, format: M8.wildcardFormat, main, wildcard: wild, alsoListed: unplaced.map((t) => row({ team: t, via: "listed on Liquipedia's M8 page; qualifying slot not confirmed" })),
@@ -268,6 +334,6 @@ writeJSON(PT_FILE, PT);
 const ptg = Object.values(PT.matches).filter((x) => x.score);
 writeJSON(path.join(OUT, "pretip.json"), { started: PT.started, graded: ptg.length, waiting: Object.values(PT.matches).filter((x) => !x.score).length, winner: ptg.length ? r3(ptg.filter((x) => x.right).length / ptg.length) : null, matches: ptg.slice(-100).reverse() });
 const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > now).map((m) => m.league);
-writeJSON(path.join(OUT, "meta.json"), { built: new Date().toISOString(), series: done.length, games: totalGames, teams: teamsOut.length, players: playersOut.length, heroes: HERO.length, upcoming: upOut.length, leagues: [...new Set(EVENTS.map((e) => e.league))], ratingScale: "Elo-style: 1500 average, 100 points = about 64% in a single game",
+writeJSON(path.join(OUT, "meta.json"), { patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release, changes: lastPatch.changes } : null, patches: LP.patches.slice(-8).reverse().map((p) => ({ patch: p.patch, release: p.release, changes: p.changes.length })), built: new Date().toISOString(), series: done.length, games: totalGames, teams: teamsOut.length, players: playersOut.length, heroes: HERO.length, upcoming: upOut.length, leagues: [...new Set(EVENTS.map((e) => e.league))], ratingScale: "Elo-style: 1500 average, 100 points = about 64% in a single game",
   roles: ROLES, source: "Liquipedia (CC-BY-SA) for matches, drafts and rosters; MLBBHub for ranked-game hero rates. No betting data." });
 console.log(`wrote ${upOut.length} upcoming, ${teamsOut.length} teams, ${playersOut.length} players, ${HERO.length} heroes, ${picks.length} picks`);

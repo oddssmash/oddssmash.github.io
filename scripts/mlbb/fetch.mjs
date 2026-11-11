@@ -41,7 +41,9 @@ function params(block) {
 }
 const TZ = { SGT: 8, PHT: 8, PST: 8, MYT: 8, WIB: 7, WITA: 8, WIT: 9, ICT: 7, KST: 9, JST: 9, CST: 8, CET: 1, CEST: 2, EET: 2, EEST: 3, TRT: 3, GST: 4, AST: 3, MSK: 3, UTC: 0, GMT: 0, BST: 1, EST: -5, EDT: -4, CDT: -5, PDT: -7, BRT: -3 };
 function parseDate(s) {
-  if (!s) return null; const tz = (s.match(/Abbr\/(\w+)/) || [])[1] || "SGT", clean = s.replace(/\{\{[^}]*\}\}/g, "").replace(/,(\d)/, ", $1").trim();
+  if (!s) return null; const tz = ((s.match(/abbr\/(\w+)/i) || [])[1] || "SGT").toUpperCase(), clean = s.replace(/\{\{[^}]*\}\}/g, "").replace(/,(\d)/, ", $1").trim();
+  const iso = clean.match(/(\d{4})-(\d{2})-(\d{2})(?:\s*-\s*(\d{1,2}):(\d{2}))?/); // "2026-11-12 - 13:00"
+  if (iso) { const t = Date.UTC(+iso[1], +iso[2] - 1, +iso[3], +(iso[4] ?? 12), +(iso[5] ?? 0)) - (TZ[tz] ?? 8) * 3600000; return { iso: new Date(t).toISOString(), timed: iso[4] != null }; }
   const m = clean.match(/([A-Za-z]+)\s+(\d{1,2}),?\s*(\d{4})(?:\s*-\s*(\d{1,2}):(\d{2}))?/); if (!m) return null;
   const mon = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"].indexOf(m[1].slice(0, 3).toLowerCase()); if (mon < 0) return null;
   const t = Date.UTC(+m[3], mon, +m[2], +(m[4] ?? 12), +(m[5] ?? 0)) - (TZ[tz] ?? 8) * 3600000;
@@ -126,6 +128,42 @@ for (const t of tl) {
   writeJSON(f, { team: t, page: r.title, revid: r.revid, fetched: new Date().toISOString(), squad: parseSquad(text) }); tf++;
 }
 console.log(`MLBB: ${tf} team rosters updated (${tl.length} teams)`);
+// Heroes and patches from Liquipedia: hero role, lane, specialties, base toughness and ability text (crowd control is
+// counted from what the skills do); patch release dates and which heroes each patch buffed, nerfed or reworked.
+// Batched: up to 50 pages per request. Refetched weekly.
+{
+  const HF = path.join(MD, "heroes-lp.json"), old = readJSON(HF);
+  if (!old || Date.now() - Date.parse(old.fetched) > 7 * 86400000) {
+    const cm = []; let cont = null;
+    for (let i = 0; i < 6; i++) { const j = await api({ action: "query", list: "categorymembers", cmtitle: "Category:Hero", cmlimit: "500", ...(cont ? { cmcontinue: cont } : {}) }); cm.push(...(j?.query?.categorymembers || []).filter((x) => x.ns === 0).map((x) => x.title)); cont = j?.continue?.cmcontinue; if (!cont) break; }
+    const CC = { stun: /\bstun/gi, airborne: /airborne|knock(?:s|ed|ing)? (?:them |enemies |targets )?(?:up|airborne)/gi, knockback: /knock(?:s|ed|ing)? (?:them |enemies |targets )?back|knockback/gi, suppress: /suppress/gi, immobilize: /immobiliz|root(?:s|ed)?\b|bind/gi, taunt: /taunt/gi, freeze: /freez/gi, petrify: /petrif/gi, silence: /silenc/gi, slow: /\bslow/gi, pull: /\bpull(?:s|ed|ing)?\b/gi, charm: /charm/gi };
+    const heroes = {};
+    for (let i = 0; i < cm.length; i += 50) {
+      const j = await api({ action: "query", prop: "revisions", rvprop: "content", rvslots: "main", titles: cm.slice(i, i + 50).join("|") });
+      for (const pg of Object.values(j?.query?.pages || {})) {
+        const t = pg.revisions?.[0]?.slots?.main?.["*"]; if (!t || !/\{\{Infobox hero/i.test(t)) continue;
+        const ib = params(blocks(t, "Infobox hero")[0] || ""), ab = blocks(t, "AbilityCard").map((b) => params(b).desc || "").join(" ").replace(/\{\{[^{}]*\|([^{}|]*)\}\}/g, "$1");
+        const cc = Object.fromEntries(Object.entries(CC).map(([k, re]) => [k, (ab.match(re) || []).length]));
+        heroes[pg.title.toLowerCase()] = { name: pg.title, lane: ib.lane || null, role: ib.primaryrole || null, role2: ib.secondaryrole || null, spec: [ib.specialty1, ib.specialty2, ib.specialty3].filter(Boolean), hp: +ib.hp || null, def: +ib.phydef || null, mdef: +ib.magdef || null, released: ib.releasedate || null, cc };
+      }
+    }
+    // patches since 2025: release date and hero adjustments
+    const pp = []; cont = null;
+    for (const pre of ["Patch 1.9.", "Patch 2."]) { const j = await api({ action: "query", list: "allpages", apprefix: pre, aplimit: "500" }); pp.push(...(j?.query?.allpages || []).map((x) => x.title)); }
+    const patches = [];
+    for (let i = 0; i < pp.length; i += 50) {
+      const j = await api({ action: "query", prop: "revisions", rvprop: "content", rvslots: "main", titles: pp.slice(i, i + 50).join("|") });
+      for (const pg of Object.values(j?.query?.pages || {})) {
+        const t = pg.revisions?.[0]?.slots?.main?.["*"]; if (!t) continue; const ib = params(blocks(t, "Infobox patch")[0] || ""); if (!ib.release || ib.release < "2025-01-01") continue;
+        const changes = [...t.matchAll(/\{\{Herobc\/[^|]*\|[\s\S]*?\|\s*hero\s*=\s*([^|\n]+)[\s\S]*?\|\s*type\s*=\s*([^|\n]+)/g)].map((m) => ({ hero: m[1].trim().toLowerCase(), type: m[2].trim() }));
+        patches.push({ patch: pg.title.replace("Patch ", ""), release: ib.release, changes });
+      }
+    }
+    patches.sort((a, b) => a.release.localeCompare(b.release));
+    writeJSON(HF, { fetched: new Date().toISOString(), heroes, patches });
+    console.log(`heroes ${Object.keys(heroes).length}, patches since 2025: ${patches.length} (latest ${patches.at(-1)?.patch} ${patches.at(-1)?.release}, ${patches.at(-1)?.changes.length} hero changes)`);
+  }
+}
 // M8 qualification: who is seeded into the main stage and who plays the Wildcard (empty slots = still to be decided)
 {
   const j = await api({ action: "query", prop: "revisions", rvprop: "content", rvslots: "main", titles: "M8 World Championship/Qualification" });
@@ -140,7 +178,7 @@ console.log(`MLBB: ${tf} team rosters updated (${tl.length} teams)`);
       const seeds = +(row.match(/align="center"\s*\|\s*(\d+)\s*$/m) || [])[1] || teams.length;
       for (let i = 0; i < Math.max(seeds, teams.length); i++) out[sect].push({ team: teams[i] || null, via });
     }
-    writeJSON(path.join(MD, "m8.json"), { fetched: new Date().toISOString(), ...out, wildcardFormat: "Two groups of five, best-of-one round robin; the top team in each group goes to the main stage (Bangkok, from December 17, 2026). Main stage in Türkiye, January 2027." });
+    writeJSON(path.join(MD, "m8.json"), { fetched: new Date().toISOString(), ...out, wildcardFormat: "10 teams in two groups of five (best-of-one round robin) in Bangkok from December 17, 2026; three advance to the 16-team main stage in Türkiye (January 2027): the two group winners and a third team from the runners-up (Moonton, M8 slot allocation)." });
     console.log(`M8 qualification: main ${out.main.filter((x) => x.team).length}/${out.main.length} set, wildcard ${out.wildcard.filter((x) => x.team).length}/${out.wildcard.length} set`);
   }
 }

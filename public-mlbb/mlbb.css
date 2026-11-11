@@ -29,3 +29,14 @@ table.ft .n { text-align: right; font-variant-numeric: tabular-nums; white-space
 .pk-p { display: inline-grid; place-items: center; min-width: 52px; height: 36px; border-radius: 10px; background: var(--surface-2); font-weight: 700; } .pk-p.hi { background: var(--silver-metal); color: #0b0b0b; }
 .rs-c { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--surface-2); font-weight: 700; } .rs-c.ok { color: var(--good-ink); } .rs-c.no { color: var(--crit-ink); }
 .statgrid.sg4 { grid-template-columns: repeat(4, minmax(0, 1fr)); } .stat b { display: block; font-size: 18px; } .stat span { font-size: 12px; color: var(--muted); }
+
+/* simulator */
+.tbar { position: relative; height: 10px; background: var(--surface-2); border-radius: 5px; min-width: 120px; }
+.tbar .tmid { position: absolute; left: 50%; top: -2px; bottom: -2px; width: 2px; background: var(--muted); }
+.tbar .ta { position: absolute; right: 50%; top: 0; bottom: 0; background: var(--accent); border-radius: 5px 0 0 5px; }
+.tbar .tbb { position: absolute; left: 50%; top: 0; bottom: 0; background: var(--line-2); border-radius: 0 5px 5px 0; }
+table.tb2 td:nth-child(3) { width: 45%; }
+.sug { margin-bottom: 10px; } .sug b { display: block; margin-bottom: 4px; } .sug .hchip { cursor: pointer; border: 0; font: inherit; }
+.mbar { display: inline-block; width: 50%; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; } .mbar span { display: block; height: 100%; background: var(--accent); }
+.tgrid2 { display: grid; gap: 4px; margin: 8px 0; }
+.btn { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; }

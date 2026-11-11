@@ -57,3 +57,6 @@ table.ft .n { text-align: right; font-variant-numeric: tabular-nums; white-space
 .menu-i { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; color: inherit; margin-bottom: 8px; } .menu-i:hover { text-decoration: none; } .menu-ic { font-size: 22px; } .menu-c { color: var(--muted); font-size: 20px; }
 tr.sub td { padding-top: 0; border-top: 0; }
 
+
+.chip.live { background: var(--crit); color: #fff; font-weight: 700; } .livec { border-color: var(--crit); }
+

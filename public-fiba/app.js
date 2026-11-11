@@ -37,9 +37,22 @@ function drawNav(active) {
 document.getElementById("theme").addEventListener("click", () => { const l = document.documentElement.dataset.theme !== "light"; document.documentElement.dataset.theme = l ? "light" : "dark"; document.getElementById("theme-color").setAttribute("content", l ? "#f4f5f6" : "#0b0c0d"); try { localStorage.setItem("theme", l ? "light" : "dark"); } catch {} });
 document.getElementById("skip").addEventListener("click", () => app.focus());
 
+// ---------------------------------------------------------------- live scores
+// Published every 10 minutes by a scheduled job (FIBA's pages cannot be read from another site in the browser).
+const LIVE_URL = "https://raw.githubusercontent.com/oddssmash/oddssmash.github.io/live-data/fiba-live.json";
+async function liveData() { try { const r = await fetch(`${LIVE_URL}?t=${Math.floor(Date.now() / 60000)}`, { cache: "no-store" }); if (!r.ok) return null; const j = await r.json(); S.live = j; return j; } catch { return null; } }
+const liveOf = (id) => S.live?.games?.find((g) => g.id === String(id)) || null;
+const PhiL = (z) => { const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989423 * Math.exp(-z * z / 2), p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return z > 0 ? 1 - p : p; };
+// live win chance: current lead plus the projected margin for the time left, spread shrinking with the time left
+function liveWin(pm, sd, L) { const q = /OT/.test(L.period || "") ? 4 : +(String(L.period || "Q1").replace(/\D/g, "") || 1), [mm, ss] = String(L.clock || "10:00").split(":").map(Number), left = Math.max(0, (4 - q) * 10 + (mm || 0) + (ss || 0) / 60) + (/OT/.test(L.period || "") ? 0 : 0), r = Math.max(0.005, left / 40), lead = L.a - L.b;
+  return { p: PhiL((lead + pm * r) / (sd * Math.sqrt(r))), left }; }
+const liveBadge = (g) => { const L = liveOf(g.id); if (!L || (!L.live && !L.final)) return ""; return `<div class="small"><span class="chip ${L.live ? "live" : ""}">${L.live ? "LIVE" : "Final"} ${esc(L.period || "")} ${L.live ? esc(L.clock || "") : ""} · ${L.a}-${L.b}</span></div>`; };
+let liveTimer = null;
+function startLive(redraw) { clearInterval(liveTimer); liveTimer = setInterval(async () => { if (!/^#\/(games|game)/.test(location.hash || "#/games")) return clearInterval(liveTimer); await liveData(); redraw(); }, 60000); }
+
 // ---------------------------------------------------------------- games
 async function vGames() {
-  const [up, meta] = await Promise.all([load("upcoming.json"), load("meta.json")]);
+  const [up, meta] = await Promise.all([load("upcoming.json"), load("meta.json"), liveData()]);
   const comps = [...new Set(up.map((g) => g.comp))];
   const list = up.filter((g) => (!S.comp || g.comp === S.comp) && (!S.kind || g.kind === S.kind));
   const days = [...new Set(list.map((g) => dayKey(g.date)))];
@@ -51,6 +64,7 @@ async function vGames() {
   app.querySelectorAll("[data-k]").forEach((b) => b.addEventListener("click", () => { S.kind = b.dataset.k; S.comp = ""; vGames(); }));
   app.querySelectorAll("[data-c]").forEach((b) => b.addEventListener("click", () => { S.comp = b.dataset.c; vGames(); }));
   stamp(meta);
+  if (up.some((g) => Math.abs(Date.parse(g.date) - Date.now()) < 3.5 * 3600000)) startLive(vGames);
 }
 function gameCard(g) {
   const pa = g.proj.pA, fa = pa >= 0.5;
@@ -60,12 +74,14 @@ function gameCard(g) {
     <div class="gc-p"><div class="${fa ? "fav" : ""}"><small>${esc(g.a.name)}</small><strong>${pct(pa)}</strong></div><div class="${!fa ? "fav" : ""}"><small>${esc(g.b.name)}</small><strong>${pct(1 - pa)}</strong></div></div>
     <div class="gc-bar"><span style="flex:${pa};background:${fa ? "var(--accent)" : "var(--line-2)"}"></span><span style="flex:${1 - pa};background:${!fa ? "var(--accent)" : "var(--line-2)"}"></span></div>
     <div class="fg-row"><span><small>Proj</small><b>${f0(g.proj.a)}-${f0(g.proj.b)}</b></span><span><small>Our spread</small><b>${esc(g.proj.spread > 0 ? `${g.a.code} −${f1(g.proj.spread)}` : g.proj.spread < 0 ? `${g.b.code} −${f1(-g.proj.spread)}` : "Pick")}</b></span><span><small>Our total</small><b>${f1(g.proj.total)}</b></span></div>
-    <div class="small"><span class="chip">Confidence: ${esc(g.confidence)}</span> <span class="muted">Records: ${g.a.w}-${g.a.l} / ${g.b.w}-${g.b.l} in our data</span></div></a>`;
+    ${liveBadge(g)}<div class="small"><span class="chip">Confidence: ${esc(g.confidence)}</span> <span class="muted">Records: ${g.a.w}-${g.a.l} / ${g.b.w}-${g.b.l} in our data</span></div></a>`;
 }
 
 // ---------------------------------------------------------------- one game
 async function vGame(id) {
-  const g = await load(`games/${id}.json`);
+  const [g] = await Promise.all([load(`games/${id}.json`), liveData()]);
+  const L = liveOf(id), LW = L && L.live ? liveWin(g.proj.a - g.proj.b, g.proj.sd, L) : null;
+  if (Math.abs(Date.parse(g.date) - Date.now()) < 3.5 * 3600000) startLive(() => vGame(id));
   const A = g.a, B = g.b, p = g.proj, fa = p.pA >= 0.5, fav = fa ? A : B;
   const side = (s) => g.players.filter((x) => x.side === s);
   const ptable = (s, t) => `<div class="card"><h2>${badge(t, g.kind, 24)} ${esc(t.name)}</h2><div class="tw"><table class="ft"><thead><tr><th>Player</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Range</th><th class="n">Reb</th><th class="n">Ast</th><th class="n">3PM</th><th class="n">Line (his avg)</th></tr></thead><tbody>
@@ -73,6 +89,7 @@ async function vGame(id) {
     <p class="small muted">${g.announced?.[s] ? `Roster: ${esc(g.rosterSource?.[s] || "official roster posted by FIBA")}. Players marked NEW have no FIBA games in our data yet, so they start from what players at their position usually produce, in a bench role, until they play.` : `Roster and roles from ${esc(t.name)}'s last game in our data${g.rosterFrom[s] ? ` (${esc(dayShort(g.rosterFrom[s]))})` : ""}; this switches to the official 12 as soon as FIBA posts them (usually a day or two before tip-off).`} The line is set at his average (shown for 10+ projected minutes); O/U is the side our projection favours and how often it happened in 10,000 simulated games. When the projection differs from his average, the reason is under his row; CHECK marks a big gap with no minutes change, kept out of the picks.</p></div>`;
   app.innerHTML = `<a class="back" href="#/games">‹ Games</a>
     <p class="small muted" style="margin:0">${esc(g.compName)}${g.round ? " · " + esc(g.round) : ""}${g.group ? " · Group " + esc(g.group) : ""} · ${esc(dayLabel(g.date))}, ${esc(timeOf(g.date, g.timed))} PH${g.venue ? " · " + esc(g.venue) : ""}${g.city ? ", " + esc(g.city) : ""}</p>
+    ${L && (L.live || L.final) ? `<div class="card livec"><h2>${L.live ? "LIVE" : "Final"} · ${esc(L.period || "")} ${L.live ? esc(L.clock || "") : ""}</h2><div class="gp-h"><span>${badge(A, g.kind, 40)}<b>${L.a}</b></span><span class="muted small">${L.live ? "Score now" : "Final score"}</span><span><b>${L.b}</b>${badge(B, g.kind, 40)}</span></div>${LW ? `<p>Live win chance: <b>${esc(A.name)} ${pct(LW.p)}</b> · ${esc(B.name)} ${pct(1 - LW.p)} <span class="small muted">(about ${Math.round(LW.left)} minutes left; from the score, the time left and our pre-game margin of ${f1(p.a - p.b)})</span></p>` : ""}<p class="small muted">Scores update about every 10 minutes (FIBA's pages can only be read by a scheduled job, not live from your phone). Live sportsbook odds are not available for FIBA competitions from any source we can read, so none are shown.</p></div>` : ""}
     <h1>${esc(fav.name)} by ${f1(Math.abs(p.a - p.b))}</h1>
     <div class="card"><div class="gp-h"><span>${badge(A, g.kind, 56)}<b>${f0(p.a)}</b></span><span class="muted small">Projected score</span><span><b>${f0(p.b)}</b>${badge(B, g.kind, 56)}</span></div>
       <div class="spread"><span class="${fa ? "" : "muted"}">${esc(A.name)} ${pct(p.pA)}</span><span class="${!fa ? "" : "muted"}">${esc(B.name)} ${pct(1 - p.pA)}</span></div>

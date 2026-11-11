@@ -1,0 +1,38 @@
+name: Live scores (FIBA)
+
+# Near-live scores for FIBA games. FIBA's pages cannot be read from another website in the browser, so this job
+# reads them every 10 minutes and publishes a small JSON file on the live-data branch, which the site polls from
+# raw.githubusercontent.com. It does nothing when no game is in progress. GitHub may run scheduled jobs a few
+# minutes late.
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: live-scores
+  cancel-in-progress: false
+
+jobs:
+  live:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Read FIBA live scores
+        run: node scripts/fiba/live.mjs
+      - name: Publish to the live-data branch (one commit, replaced each time)
+        run: |
+          mkdir -p /tmp/live && cp live/*.json /tmp/live/
+          cd /tmp/live
+          git init -q -b live-data
+          git config user.name "ODDSSMASH"
+          git config user.email "cbdpccapps@users.noreply.github.com"
+          git add -A && git commit -q -m "live scores $(date -u +%FT%TZ)"
+          git push -q --force "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" live-data
