@@ -3561,7 +3561,7 @@ hero?.insertAdjacentHTML("afterend", bottomLine());
 const slot = app.querySelector(".bottom-line .viz-slot"); if (slot) slot.innerHTML = marginChart(g, sim);
       flipCard(g, sim, S.curRaw).then((html) => { if (!html || S.curGame !== g || app.querySelector(".flip")) return; const bl = app.querySelector(".bottom-line"); if (!bl) return; bl.insertAdjacentHTML("afterend", html); const fc = bl.nextElementSibling; if (fc) fc.hidden = (S.gTab || "ov") !== "ov"; });
       const glance = [...app.children].find((el) => el.dataset?.tabOf === "pl");
-      if (!app.querySelector("[data-tab-of=si]")) { app.insertAdjacentHTML("beforeend", `<div data-tab-of="si">${sim.adjusted ? `<div class="note"><b>Adjusted for: ${esc(sim.adjusted.join(", "))} out.</b> The 10,000 simulated games are shifted by the change in projected margin (${sg(sim.shift)} for the home team) and players' chances follow their new minutes. The full scenario lab updates at the next data refresh.</div>` : ""}${universeCard(sim, g)}${donutCard(sim)}${simPlayersCard(sim, g)}${playingCard(S.curRaw, g, outsFor(g.id)).replace('id="g-who"', 'id="g-who-sim"')}<a class="btn block explore" href="#/sim/${esc(g.id)}">Explore all scenarios ›</a></div>`); const si = app.lastElementChild; si.hidden = (S.gTab || "ov") !== "si"; }
+      if (!app.querySelector("[data-tab-of=si]")) { app.insertAdjacentHTML("beforeend", `<div data-tab-of="si">${sim.adjusted ? `<div class="note"><b>Adjusted for: ${esc(sim.adjusted.join(", "))} out.</b> The 10,000 simulated games are shifted by the change in projected margin (${sg(sim.shift)} for the home team) and players' chances follow their new minutes. The full scenario lab updates at the next data refresh.</div>` : ""}${buildCard(g)}${universeCard(sim, g)}${donutCard(sim)}${simPlayersCard(sim, g)}${playingCard(S.curRaw, g, outsFor(g.id)).replace('id="g-who"', 'id="g-who-sim"')}<a class="btn block explore" href="#/sim/${esc(g.id)}">Explore all scenarios ›</a></div>`); const si = app.lastElementChild; si.hidden = (S.gTab || "ov") !== "si"; buildInit(g, S.curRaw); }
       if (glance) { glance.insertAdjacentHTML("afterend", insightCard(g, sim)); const ins = glance.nextElementSibling; if (ins) ins.hidden = (S.gTab || "ov") !== "pl"; }
     }, () => {});
     const keys = app.querySelector("#g-keys");
@@ -3695,6 +3695,123 @@ function universeCard(sim, g) {
     <p class="small muted">Each version below is a slice of those same simulations, with its real likelihood. They overlap (a game can be close and go to overtime), so they do not add up to 100%. Tap one for its score and the players who gain or lose.</p>
     ${list.map(row).join("")}
     <div class="uv-main" style="margin-top:10px"><span class="chip warn">What-if</span> Your own choices (marking players out below) shift this forecast; they are not weighted by likelihood.</div></div>`;
+}
+// ---------------- Build your own prediction and simulation
+// Our full-workflow prediction stays as the reference. The custom one averages the rating systems you keep (each with its
+// own learned weight), adds the analysis layers you switch on, and can include the sportsbook line as one more input.
+const BUILD_SYS = [["efficiency", "Recent efficiency (pace × offence × defence)"], ["players", "Player stats: player-by-player build-up"], ["elo", "Elo rating (results and margins)"], ["adjusted", "Opponent-adjusted efficiency"], ["luckAdjusted", "Luck-adjusted (3-point luck removed)"]];
+const BUILD_LAYERS = [["scen", "Scenario library: learned situation effects"], ["absence", "Absences and who is playing"], ["defense", "Defence, zones and four factors"], ["style", "Playstyle matchup"], ["home", "Home court"]];
+const buildState = (gid) => { try { return JSON.parse(localStorage.getItem("build:" + gid) || "null"); } catch { return null; } };
+const saveBuild = (gid, st) => { try { localStorage.setItem("build:" + gid, JSON.stringify(st)); } catch { /* private mode */ } };
+function buildCompute(g, st, odds) {
+  // Starts from our full-workflow prediction. Switching a rating system off moves the blend to the average of the ones
+  // kept (with their learned weights); switching a layer off removes the points that layer is worth in this game's reasons;
+  // the sportsbook line, when switched on, joins the blend as one more input. With the defaults it equals our workflow.
+  const H = g.teams.find((t) => t.isHome), A = g.teams.find((t) => !t.isHome), o = odds?.games?.[g.id];
+  const ourM = g.pred.hs - g.pred.as, ourT = g.pred.hs + g.pred.as;
+  const avg = (keep, withMarket) => { let w = 0, m = 0; for (const x of g.models || []) if (keep(x.k)) { w += x.weight; m += x.weight * x.margin; } if (withMarket && o && Number.isFinite(o.spreadHome)) { const mw = (g.models || []).reduce((z, x) => z + x.weight, 0) / Math.max(1, (g.models || []).length); w += mw; m += mw * -o.spreadHome; } return w ? m / w : null; };
+  const all = avg(() => true, false), mine = avg((k) => st.sys[k], st.market);
+  let margin = ourM + (mine != null && all != null ? mine - all : 0);
+  const parts = [];
+  if (mine != null && all != null && Math.abs(mine - all) >= 0.05) parts.push([st.market ? "Rating systems kept + sportsbook line" : "Rating systems kept", mine - all]);
+  const keysOf = (kinds) => { const hk = (g.keys?.teams || []).find((k) => String(k.tid) === String(g.home)), ak = (g.keys?.teams || []).find((k) => String(k.tid) === String(g.away)); const sum = (k) => (k?.win || []).filter((x) => kinds.includes(x.kind)).reduce((z, x) => z + (x.w || 0), 0); return sum(hk) - sum(ak); };
+  const L = {
+    scen: [(H.scen || []).reduce((z, x) => z + x.w, 0) - (A.scen || []).reduce((z, x) => z + x.w, 0) + keysOf(["situation"]), "Scenario library removed"],
+    absence: [keysOf(["absence"]), "Absences removed"],
+    defense: [keysOf(["zone", "fourFactors"]), "Defence and zones removed"],
+    style: [(H.vsStyle || 0) - (A.vsStyle || 0) + keysOf(["style"]), "Playstyle matchup removed"],
+    home: [keysOf(["home"]), "Home court removed"],
+  };
+  for (const [k, [v, label]] of Object.entries(L)) if (!st.layer[k] && Number.isFinite(v) && Math.abs(v) >= 0.05) { margin -= v; parts.push([label, -v]); }
+  // total: our total, moved by the share of the total sources switched off (team model, player build-up) or the book added
+  const src = { team: (H.model || H.pts) + (A.model || A.pts), players: (H.sumPlayers || H.pts) + (A.sumPlayers || A.pts) };
+  const allT = (src.team + src.players) / 2, keepT = [];
+  if (BUILD_SYS.some(([k]) => k !== "players" && st.sys[k])) keepT.push(src.team);
+  if (st.sys.players) keepT.push(src.players);
+  if (st.market && o && Number.isFinite(o.total)) keepT.push(o.total);
+  let total = ourT + (keepT.length ? keepT.reduce((x, y) => x + y, 0) / keepT.length - allT : 0);
+  const pace = g.pred.pace || 100; total *= (pace + st.pace) / pace;
+  const shoot = (st.hShoot - st.aShoot) * 1.75; margin += shoot; total += (st.hShoot + st.aShoot) * 1.75;
+  if (st.pace) parts.push([`Pace ${st.pace > 0 ? "+" : ""}${st.pace} possessions (total only)`, 0]);
+  if (st.hShoot || st.aShoot) parts.push(["Shooting sliders", shoot]);
+  return { margin, total, parts, o, sigma: S.learning?.params?.at(-1)?.sigma || 14.3 };
+}
+function buildSim(c, N = 10000) {
+  let seed = 12345; const rnd = () => { seed = (seed * 1664525 + 1013904223) % 4294967296; return seed / 4294967296; };
+  const nrm = () => { let u = 0, v = 0; while (!u) u = rnd(); v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const sdT = 17.5, hist = new Array(41).fill(0); let hw = 0, close = 0, bh = 0, ba = 0, ot = 0, cov = 0, over = 0, tSum = 0;
+  const sp = c.o && Number.isFinite(c.o.spreadHome) ? c.o.spreadHome : null, bt = c.o && Number.isFinite(c.o.total) ? c.o.total : null;
+  for (let i = 0; i < N; i++) {
+    let mg = c.margin + c.sigma * nrm(); const tt = c.total + sdT * nrm();
+    if (Math.abs(mg) < 0.5) { ot++; mg = rnd() < 0.5 + c.margin / 60 ? 3 : -3; }
+    if (mg > 0) hw++; if (Math.abs(mg) <= 5) close++; if (mg >= 15) bh++; if (mg <= -15) ba++;
+    if (sp != null && mg + sp > 0) cov++; if (bt != null && tt > bt) over++; tSum += tt;
+    hist[Math.max(0, Math.min(40, Math.round(mg / 2) + 20))]++;
+  }
+  return { N, pHome: hw / N, close: close / N, bh: bh / N, ba: ba / N, ot: ot / N, cover: sp != null ? cov / N : null, over: bt != null ? over / N : null, total: tSum / N, hist, sp, bt };
+}
+function buildCard(g) {
+  return `<div class="card build" id="build-card"><h2>Build your own prediction and simulation</h2>
+    <p class="small muted">Our full-workflow prediction stays as the reference. Switch analysis on or off and move the sliders: the custom prediction and its 10,000-game simulation update at once. Your choices are saved on this device for this game.</p>
+    <div id="build-out"></div></div>`;
+}
+function buildInit(g, raw) {
+  const box = document.getElementById("build-out"); if (!box) return;
+  const def = { sys: Object.fromEntries(BUILD_SYS.map(([k]) => [k, true])), layer: { scen: true, absence: true, defense: true, style: true, home: true }, market: false, pace: 0, hShoot: 0, aShoot: 0 };
+  const st = { ...def, ...(buildState(g.id) || {}) };
+  load("odds.json").catch(() => null).then((odds) => {
+    const H = T(g.home).abbr, A = T(g.away).abbr;
+    const draw = () => {
+      const c = buildCompute(g, st, odds), sm = buildSim(c), o = c.o;
+      const ourM = g.pred.hs - g.pred.as, ourT = g.pred.hs + g.pred.as;
+      const fav = (m) => (m >= 0 ? H : A), half = (v) => Math.round(Math.abs(v) - 0.5) + 0.5;
+      const mv = o?.open && Number.isFinite(o.open.spreadHome) && Number.isFinite(o.spreadHome) ? o.spreadHome - o.open.spreadHome : null;
+      const mvT = o?.open && Number.isFinite(o.open.total) && Number.isFinite(o.total) ? o.total - o.open.total : null;
+      const maxH = Math.max(...sm.hist);
+      const bars = sm.hist.map((v, i) => { const x = i * 10, h = (v / maxH) * 80, mg = (i - 20) * 2; return `<rect x="${x + 1}" y="${90 - h}" width="8" height="${h}" fill="var(${mg >= 0 ? "--s2" : "--s1"})" opacity="${Math.abs(mg) <= 5 ? 1 : 0.75}"><title>${mg >= 0 ? H : A} by ${Math.abs(mg)}: ${pct(v / sm.N)}</title></rect>`; }).join("");
+      const chk = (grp, k, label, on) => `<label class="bld-t"><input type="checkbox" data-b="${grp}:${k}"${on ? " checked" : ""}> <span>${esc(label)}</span></label>`;
+      box.innerHTML = `
+        <div class="bld-cmp">
+          <div><small>Our workflow</small><b>${esc(fav(ourM))} by ${f1(Math.abs(ourM))}</b><span>${esc(H)} ${pct(g.pred.pHome)} · total ${f1(ourT)}</span></div>
+          <div class="mine"><small>Your build</small><b>${esc(fav(c.margin))} by ${f1(Math.abs(c.margin))}</b><span>${esc(H)} ${pct(sm.pHome)} · total ${f1(c.total)}</span></div>
+        </div>
+        <div class="bld-grid">
+          <div><h4>Rating systems in our blend</h4>${BUILD_SYS.map(([k, l]) => chk("sys", k, l, st.sys[k])).join("")}
+            ${chk("market", "on", "Sportsbook line (as one more input)", st.market)}</div>
+          <div><h4>Analysis layers (in our workflow: untick to remove)</h4>${BUILD_LAYERS.map(([k, l]) => chk("layer", k, l, st.layer[k])).join("")}</div>
+        </div>
+        <div class="bld-sl">
+          <label>Pace <b>${st.pace > 0 ? "+" : ""}${st.pace}</b> possessions<input type="range" min="-8" max="8" step="1" value="${st.pace}" data-s="pace"></label>
+          <label>${esc(H)} shooting <b>${st.hShoot > 0 ? "+" : ""}${st.hShoot}</b> eFG pts<input type="range" min="-6" max="6" step="1" value="${st.hShoot}" data-s="hShoot"></label>
+          <label>${esc(A)} shooting <b>${st.aShoot > 0 ? "+" : ""}${st.aShoot}</b> eFG pts<input type="range" min="-6" max="6" step="1" value="${st.aShoot}" data-s="aShoot"></label>
+        </div>
+        <h4>Your build: the pieces</h4>
+        <ul class="plain small">${(g.models || []).filter((x) => st.sys[x.k]).map((x) => `<li class="spread"><span>${esc(x.label)} <span class="muted">(weight ${x.weight.toFixed(2)})</span></span><span class="num">${fav(x.margin)} by ${f1(Math.abs(x.margin))}</span></li>`).join("")}
+          ${st.market && o ? `<li class="spread"><span>Sportsbook line (${esc(o.provider || "book")})</span><span class="num">${fav(-o.spreadHome)} by ${f1(Math.abs(o.spreadHome))}</span></li>` : ""}
+          ${c.parts.map(([l, v]) => `<li class="spread"><span>${esc(l)}</span><span class="num ${v > 0 ? "up" : v < 0 ? "down" : ""}">${v ? `${v > 0 ? "+" : "−"}${f1(Math.abs(v))} for ${v > 0 ? esc(H) : esc(A)}` : ""}</span></li>`).join("")}</ul>
+        <h4>Your simulation (10,000 games)</h4>
+        <figure class="viz"><svg viewBox="0 0 410 104" role="img" aria-label="Simulated final margins"><line x1="205" x2="205" y1="0" y2="92" class="axis"/>${bars}<text x="2" y="102" class="vt">${esc(A)} by 40</text><text x="205" y="102" class="vt" text-anchor="middle">0</text><text x="408" y="102" class="vt" text-anchor="end">${esc(H)} by 40</text></svg></figure>
+        <div class="statgrid sg4">
+          <div class="stat"><b>${pct(sm.pHome)}</b><span>${esc(H)} wins</span></div>
+          <div class="stat"><b>${esc(fav(c.margin))} −${half(c.margin)}</b><span>your spread</span></div>
+          <div class="stat"><b>${f1(sm.total)}</b><span>your total</span></div>
+          <div class="stat"><b>${pct(sm.close)}</b><span>close (5 or less)</span></div>
+          <div class="stat"><b>${pct(sm.bh)}</b><span>${esc(H)} by 15+</span></div>
+          <div class="stat"><b>${pct(sm.ba)}</b><span>${esc(A)} by 15+</span></div>
+          <div class="stat"><b>${pct(sm.ot)}</b><span>overtime</span></div>
+          ${sm.cover != null ? `<div class="stat"><b>${pct(sm.cover)}</b><span>${esc(H)} covers ${sm.sp > 0 ? "+" : ""}${sm.sp}</span></div>` : ""}
+          ${sm.over != null ? `<div class="stat"><b>${pct(sm.over)}</b><span>over ${sm.bt}</span></div>` : ""}
+        </div>
+        ${o ? `<h4>Sportsbook (comparison only)</h4><p class="small">${esc(o.provider || "Book")}: ${esc(H)} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome} (${decOdds(o.spreadOddsHome)}) · total ${o.total} (over ${decOdds(o.overOdds)}) · moneyline ${esc(H)} ${decOdds(o.mlHome)} / ${esc(A)} ${decOdds(o.mlAway)}.${mv != null && mv !== 0 ? ` <b>Line movement:</b> ${esc(H)} ${o.open.spreadHome > 0 ? "+" : ""}${o.open.spreadHome} → ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}, so the market moved toward <b>${mv > 0 ? esc(A) : esc(H)}</b>.` : ""}${mvT != null && mvT !== 0 ? ` Total ${o.open.total} → ${o.total} (moved ${mvT > 0 ? "up: money on the over" : "down: money on the under"}).` : ""}</p>
+          <p class="small muted">The free feed does not publish betting percentages (share of tickets or money). Line movement since opening is the usual sign of where the money went.</p>` : ""}
+        <p class="small muted">Your build is not back-tested: only our full workflow is graded game by game (see More → Accuracy report). With every box at its default your build equals our workflow; unticking a layer removes the points it is worth in this game's reasons, so it is an approximation. Statistical exploration, not betting advice.</p>
+        <button class="btn sm" type="button" data-b-reset>Reset to our workflow's inputs</button>`;
+      box.querySelectorAll("[data-b]").forEach((el) => el.addEventListener("change", () => { const [grp, k] = el.dataset.b.split(":"); if (grp === "market") st.market = el.checked; else st[grp][k] = el.checked; saveBuild(g.id, st); draw(); }));
+      box.querySelectorAll("[data-s]").forEach((el) => el.addEventListener("input", () => { st[el.dataset.s] = Number(el.value); saveBuild(g.id, st); draw(); }));
+      box.querySelector("[data-b-reset]")?.addEventListener("click", () => { Object.assign(st, structuredClone(def)); saveBuild(g.id, st); draw(); });
+    };
+    draw();
+  });
 }
 function takeawayCard(g) {
   const fav = g.pred.pHome >= 0.5 ? g.home : g.away, p = Math.max(g.pred.pHome, 1 - g.pred.pHome), L = gameLines(g);
@@ -3870,7 +3987,7 @@ function predictionsCard(g, sim, board) {
     const o = pl.props.pts.pOver; best.push({ label: `${pl.n} ${o >= 0.5 ? "over" : "under"} ${pl.props.pts.line} points`, p: Math.max(o, 1 - o), player: { id: pl.id, n: pl.n }, lean: true });
   }
   const row = (k, main, sub, p) => `<div class="pr-row"><span class="pr-k">${k}</span><span class="pr-v"><b>${main}</b>${sub ? `<i>${sub}</i>` : ""}</span>${p != null ? `<span class="pr-p">${pct(p)}</span>` : ""}</div>`;
-  return `<div class="card preds" data-tab-of="ov"><h2>Our predictions</h2>
+  return `<div class="card preds" data-tab-of="ov"><div class="card-h"><h2>Our predictions</h2><button class="btn sm" type="button" data-gt-go="si">Build your own ›</button></div>
     ${row("Moneyline", `${esc(favT)} to win`, `fair odds ${esc(T(L.fav).abbr)} ${mlTxt(pFav)} · ${esc(T(dog).abbr)} ${mlTxt(1 - pFav)} · ${strength(pFav)}`, pFav)}
     ${(() => { const c = sim?.comparison; if (c?.spread?.ourProb == null) return ""; const q = c.spread.ourProb, l = c.spread.bookLine, tm = c.spread.team, oth = tm === T(home).abbr ? T(away).abbr : T(home).abbr, take = q >= 0.5;
       return row("Spread", `${esc(take ? tm : oth)} ${(take ? l : -l) > 0 ? "+" : ""}${take ? l : -l}`, `sportsbook main line · our margin ${esc(T(L.fav).abbr)} by ${f1(Math.abs(g.pred.hs - g.pred.as))} · ${strength(Math.max(q, 1 - q))}`, Math.max(q, 1 - q)); })() || `${coverFav != null && coverFav < 0.5 ? row("Spread", `${esc(T(dog).abbr)} +${L.spread.toFixed(1)}`, `covers in ${pct(1 - coverFav)} of simulations · our line, so close to even`, 1 - coverFav) : row("Spread", `${esc(favT)} ${spreadTxt(L.spread)}`, coverFav != null ? `covers in ${pct(coverFav)} of simulations · our line, so close to even` : "set at our projected margin", coverFav)}`}
