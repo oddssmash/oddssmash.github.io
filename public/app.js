@@ -3031,6 +3031,43 @@ const up = await load("upcoming.json").catch(() => []);
     for (const x of out) { x.price = priceFor(x.gid, x.kind, x.pick, T(x.home).abbr); x.ev = evOf(x.p, x.price); x.qual = x.book != null && x.ev != null && x.p - x.book >= QUAL.gap && x.ev >= QUAL.ev; x.dec = decOf(x.price); Object.assign(x, robustOf(x)); x.gold = x.qual && x.dec != null && x.dec >= GOLD.minOdds && x.p >= GOLD.minP && x.p - x.book < GOLD.maxGap && x.hold != null && x.hold >= GOLD.minHold && x.libAgainst <= x.libFor; }
     return out.sort((a, b) => b.p - a.p);
   };
+  // Sportsbook pre-game player prop prices (display only). ESPN lists two prices per line without saying which is
+  // the over, so the order is worked out from the same book's "milestone" prices (always over-type, e.g. 20+ points).
+  const PT = { "Total Points": "pts", "Total Rebounds": "reb", "Total Assists": "ast", "Total 3-Point Field Goals": "tpm", "Total Points, Rebounds, and Assists": "pra" };
+  const MS = { "Points Milestones": "pts", "Rebounds Milestones": "reb", "Assists Milestones": "ast", "Three Pointers Made Milestones": "tpm" };
+  const loadPropOdds = async (gid) => {
+    try {
+      const bust = `_=${Math.floor(Date.now() / 60000)}`, base = `${ESPN_CORE}/events/${gid}/competitions/${gid}/odds`;
+      const j = await fetch(`${base}?lang=en&region=us&${bust}`, { cache: "no-store" }).then((x) => x.json());
+      const it = (j.items || []).find((x) => !/live/i.test(x.provider?.name || "")); if (!it?.provider?.id) return null;
+      const pb = await fetch(`${base}/${it.provider.id}/propBets?lang=en&region=us&limit=1000&${bust}`, { cache: "no-store" }).then((x) => x.json());
+      const pairs = new Map(), miles = new Map();
+      for (const x of pb.items || []) {
+        const ath = String(x.athlete?.$ref || "").match(/athletes\/(\d+)/)?.[1]; if (!ath) continue;
+        const price = Number(x.odds?.american?.value), tgt = x.current?.target?.value ?? Number(String(x.odds?.total?.value || "").replace("+", ""));
+        if (PT[x.type?.name]) { const k = `${ath}|${PT[x.type.name]}|${tgt}`; if (!pairs.has(k)) pairs.set(k, []); pairs.get(k).push(price); }
+        else if (MS[x.type?.name]) miles.set(`${ath}|${MS[x.type.name]}|${Number(tgt) - 0.5}`, price);
+      }
+      let vote = 0; // > 0: the first price is the over
+      for (const [k, pr] of pairs) { const m = miles.get(k); if (m == null || pr.length < 2) continue; const t = amP(m), a = amP(pr[0]), b = amP(pr[1]); if (t == null || a == null || b == null) continue; vote += Math.abs(a - t) < Math.abs(b - t) ? 1 : -1; }
+      const firstOver = vote >= 0, out = new Map();
+      for (const [k, pr] of pairs) { if (pr.length < 2) continue; const [ath, fam, line] = k.split("|"); out.set(`${ath}|${fam}`, { line: Number(line), over: firstOver ? pr[0] : pr[1], under: firstOver ? pr[1] : pr[0] }); }
+      out.vote = vote; out.book = it.provider.name; return out;
+    } catch { return null; }
+  };
+  const PROPODDS = Object.fromEntries(await Promise.all(gids.filter((id) => !(GAME[id]?.date && Date.parse(GAME[id].date) < Date.now())).map(async (id) => [id, await Promise.race([loadPropOdds(id), new Promise((res) => setTimeout(() => res(null), 7000))])])));
+  // Scenario check for a prop: share of the simulated game scripts (weighted by likelihood) where his average in that
+  // script lands on our side of the line. Scenario rows hold [id, pts, min, reb, ast].
+  const propHold = (gid, pid, fam, line, over) => {
+    const sim = SIM[gid]; if (!sim || fam === "tpm") return null;
+    let w = 0, ok = 0;
+    for (const sc of (sim.scenarios || []).filter((y) => y.freq >= 0.03)) {
+      const row = (sc.players || []).find((p) => String(p[0]) === String(pid)); if (!row) continue;
+      const v = fam === "pts" ? row[1] : fam === "reb" ? row[3] : fam === "ast" ? row[4] : row[1] + row[3] + row[4];
+      w += sc.freq; ok += (over ? v > line : v < line) ? sc.freq : 0;
+    }
+    return w ? ok / w : null;
+  };
   const mainLines = () => {
     const out = [];
     for (const gid of gids) {
@@ -3043,7 +3080,14 @@ const up = await load("upcoming.json").catch(() => []);
           if (ref.src === "ours") continue; // our own main line sits at our median, so it is always near 50%
           const over = ref.pOver >= 0.5, p = Math.max(ref.pOver, 1 - ref.pOver);
           const thr = (pl.thr?.[fam] || []).filter(([x]) => Math.abs(x - ref.line) <= (fam === "pts" || fam === "pra" ? 10 : 3)).slice(0, 4);
-          out.push({ gid, pl, fam, word, line: ref.line, over, p, median: ref.median, mean: pl.dist?.[fam]?.[0], thr, src: ref.src, home: sim.home ?? GAME[gid]?.home, away: sim.away ?? GAME[gid]?.away, date: GAME[gid]?.date });
+          const x = { gid, pl, fam, word, line: ref.line, over, p, median: ref.median, mean: pl.dist?.[fam]?.[0], thr, src: ref.src, home: sim.home ?? GAME[gid]?.home, away: sim.away ?? GAME[gid]?.away, date: GAME[gid]?.date };
+          const po = PROPODDS[gid]?.get(`${pl.id}|${fam}`);
+          if (po && po.line === ref.line) { x.price = over ? po.over : po.under; const bo = noVig(po.over, po.under); x.book = bo == null ? null : over ? bo : 1 - bo; x.bk = `Over ${po.line} ${decOdds(po.over)} · Under ${po.line} ${decOdds(po.under)}`; }
+          x.dec = decOf(x.price); x.ev = evOf(x.p, x.price); x.gap = x.book != null ? x.p - x.book : null;
+          x.qual = x.gap != null && x.ev != null && x.gap >= QUAL.gap && x.ev >= QUAL.ev;
+          x.hold = propHold(gid, pl.id, fam, ref.line, over);
+          x.gold = x.qual && x.dec != null && x.dec >= GOLD.minOdds && x.p >= GOLD.minP && x.gap < GOLD.maxGap && x.hold != null && x.hold >= GOLD.minHold;
+          out.push(x);
         }
       }
     }
@@ -3088,7 +3132,7 @@ const up = await load("upcoming.json").catch(() => []);
       <div class="filters" role="group" aria-label="Day">${days.map((d) => `<button class="fbtn" type="button" data-pk-day="${esc(d)}" aria-pressed="${d === S.pkDay}">${esc(dayName(d))}</button>`).join("")}</div>
       <div class="filters" role="group" aria-label="Prop type">${[["main", "Main lines"], ["top", "85%+ picks"], ["player", "Player props"], ["team", "Team props"], ["parlay", "Parlays"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-kind="${k}" aria-pressed="${S.pkKind === k}">${l}</button>`).join("")}</div>
       ${S.pkKind === "main" ? (() => {
-        const ml = mainLines(), shown = ml.filter((x) => x.p >= 0.55).slice(0, 60);
+        const ml = mainLines(), shown = ml.filter((x) => x.p >= 0.55).sort((a, b) => (b.gold - a.gold) || (b.qual - a.qual) || (b.p - a.p)).slice(0, 60);
         const gml = gameMain();
         const gcard = (x) => `<div class="card pick ml${x.gold ? " gold" : ""}">${x.gold ? `<div class="gold-tag">★ Worth a look: edge + odds ${esc(x.dec.toFixed(2))} + ${pct(x.p)} to hit</div>` : ""}<div class="pick-h">${teamLogo(x.home, { size: "sm" })}<span><b>${esc(x.kind)}</b><span class="small muted"> ${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.6 ? "lean" : x.p >= 0.53 ? "slight lean" : "coin-flip"}</span>${meter(x.p)}
@@ -3098,16 +3142,20 @@ const up = await load("upcoming.json").catch(() => []);
           <div class="small ${x.qual ? "qual" : "muted"}">${x.qual ? "✓ Statistical edge: our chance beats the book's by 5+ points and EV is +3% or more." : "No qualifying edge: our chance and the price are too close (we need a 5-point gap and +3% EV)."}</div>
           ${x.book != null && Math.abs(x.p - x.book) >= 0.12 ? `<div class="small" style="color:var(--warn)">⚠ Big disagreement (${Math.round(Math.abs(x.p - x.book) * 100)} points). Gaps this large often mean the bookmaker has late news we do not (injury, rest, lineup). Check the latest news before trusting it; our game totals miss by about 15 points on average.</div>` : ""}
           <div class="pick-m small muted">${x.date ? esc(timePH(x.date)) + " · " : ""}<a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
-        const card = (x) => `<div class="card pick ml"><div class="pick-h">${avatar(x.pl.id, x.pl.n, { size: "sm" })}<span><b>${esc(x.pl.n)}</b><span class="small muted"> ${esc(T(x.pl.side === 0 ? x.home : x.away).abbr || "")} · ${esc(x.word)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
+        const card = (x) => `<div class="card pick ml${x.gold ? " gold" : ""}">${x.gold ? `<div class="gold-tag">★ Worth a look: edge + odds ${esc(x.dec.toFixed(2))} + ${pct(x.p)} to hit</div>` : ""}<div class="pick-h">${avatar(x.pl.id, x.pl.n, { size: "sm" })}<span><b>${esc(x.pl.n)}</b><span class="small muted"> ${esc(T(x.pl.side === 0 ? x.home : x.away).abbr || "")} · ${esc(x.word)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.62 ? "lean" : "slight lean"}</span>${meter(x.p)}
           <div class="pick-l"><b>${x.over ? "Over" : "Under"} ${esc(x.line)} ${esc(x.word)}</b> <span class="small muted">sportsbook main line</span></div>
+          ${x.bk ? `<div class="lp-bk small"><span class="lp-bkl">Bookmaker</span> ${esc(x.bk)}</div>` : ""}
+          ${x.price != null ? `<div class="pick-alt"><span>odds ${esc(decOdds(x.price))}</span><span>book's fair chance ${pct(x.book)}</span><span class="${(x.gap ?? 0) >= 0.05 ? "up" : ""}">gap ${(x.gap > 0 ? "+" : "") + Math.round(x.gap * 100)}</span>${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}</div>` : ""}
+          ${x.hold != null ? `<div class="small">Scenario check: his average lands on our side in <b>${pct(x.hold)}</b> of the simulated game scripts</div>` : ""}
+          ${x.price != null ? `<div class="small ${x.qual ? "qual" : "muted"}">${x.qual ? "✓ Statistical edge vs the bookmaker." : "No qualifying edge at this price."}</div>` : ""}
           <div class="pick-alt"><span>Our median ${esc(x.median ?? "-")}${x.mean != null ? ` · average ${f1(x.mean)}` : ""}</span>${x.thr.map(([t, q]) => `<span>${esc(t)}+: ${pct(q)}</span>`).join("")}</div>
           <div class="pick-m small muted">${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}${x.date ? ` · ${esc(timePH(x.date))}` : ""} · <a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
-        return `${gml.some((x) => x.gold) ? `<div class="gold-strip"><b>★ Gold picks</b>${gml.filter((x) => x.gold).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(x.pick)}</span> <i>${esc(T(x.away).abbr)}@${esc(T(x.home).abbr)} · odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · holds in ${pct(x.hold)} of scenarios</i></a>`).join("")}<span class="small muted">Gold = edge vs the bookmaker (5+ points, EV +3%), decimal odds 1.60+, our chance 55%+, gap under 12 points, holds in 60%+ of the simulated game scripts and tonight's scenario library is not against it. Statistical comparison, not betting advice.</span></div>` : `<div class="note small">No gold picks on this day: nothing combines a real edge, odds of 1.60+, a 55%+ chance and support across our scenarios.</div>`}
+        return `${gml.some((x) => x.gold) || ml.some((x) => x.gold) ? `<div class="gold-strip"><b>★ Gold picks</b>${gml.filter((x) => x.gold).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(x.pick)}</span> <i>${esc(T(x.away).abbr)}@${esc(T(x.home).abbr)} · odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · holds in ${pct(x.hold)} of scenarios</i></a>`).join("")}${ml.filter((x) => x.gold).slice(0, 12).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(shortName(x.pl.n))} ${x.over ? "over" : "under"} ${esc(x.line)} ${esc(x.word)}</span> <i>odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · holds in ${pct(x.hold)} of scenarios</i></a>`).join("")}<span class="small muted">Gold = edge vs the bookmaker (5+ points, EV +3%), decimal odds 1.60+, our chance 55%+, gap under 12 points, holds in 60%+ of the simulated game scripts and tonight's scenario library is not against it. Statistical comparison, not betting advice.</span></div>` : `<div class="note small">No gold picks on this day: nothing combines a real edge, odds of 1.60+, a 55%+ chance and support across our scenarios.</div>`}
           <h2 class="pk-sec">Game lines</h2>
           ${gml.length && !gml.some((x) => x.qual) ? `<div class="note"><b>No qualifying edge today.</b> On every game line our chance is within 5 points of the bookmaker's fair chance or the expected value is under +3%. A high chance alone is not an edge.</div>` : ""}
           ${gml.length ? gml.map(gcard).join("") : `<p class="empty">No sportsbook game lines for this day yet (they usually post a day or two before).</p>`}
-          <h2 class="pk-sec">Player props</h2><p class="small muted">EV (expected value) = our chance × the decimal price − 1, per unit staked: it uses our chance, never the book's. Player prop prices are not published in the free feed, so props show our chance only. Statistical comparison, not betting advice.</p>
+          <h2 class="pk-sec">Player props</h2><p class="small muted">EV (expected value) = our chance × the decimal price − 1, per unit staked: it uses our chance, never the book's. Player prop prices come from the same bookmaker's pre-game prop feed; the over/under order is checked against its milestone prices. Statistical comparison, not betting advice.</p>
           <p class="small muted">Player props at the <b>sportsbook's main line</b> (the line you would actually see, e.g. 22.5 points), with our lean and our chance from 10,000 simulations. The book only sets which line is tested: our chance is our own model, never the odds. These sit between 55% and 75% because main lines are set close to even; that is normal. The chips show our chance at nearby lines.</p>
           ${shown.length ? shown.map(card).join("") : `<p class="empty">No sportsbook main lines for this day: player lines usually appear on game day, and games that have started are left out (open the game's Live tab instead). Our own main line for every player is on each game page (Players tab).</p>`}
           ${ml.length > shown.length ? `<p class="small muted">${ml.length - shown.length} more lines are close to 50/50 and left out.</p>` : ""}`;
