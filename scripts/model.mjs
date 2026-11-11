@@ -13,7 +13,7 @@ import { clamp, round, mean, sd, phi, posGroup, phaseOf, tsa, ew, normName, regr
 // Shooting-efficiency regression (see playerBaseline). CL_EFF_K=0 turns it off for comparison runs.
 // Back-test (2026-11-11): K=400, half-life 40 games cut points MAE 4.949 -> 4.933 (2025-26) and 4.950 -> 4.922 (2026-27), game Brier unchanged.
 // Roster rule (see ensemble): pull toward the player-by-player margin when it differs from the team systems.
-const ROSTER_PULL = Number(process.env.CL_ROSTER_PULL ?? 0), ROSTER_GAP = Number(process.env.CL_ROSTER_GAP ?? 3);
+const ROSTER_PULL = Number(process.env.CL_ROSTER_PULL ?? 0), ROSTER_GAP = Number(process.env.CL_ROSTER_GAP ?? 3), ROSTER_EARLY = Number(process.env.CL_ROSTER_EARLY ?? 0);
 const EFF_K = Number(process.env.CL_EFF_K ?? 400), EFF_HL = Number(process.env.CL_EFF_HL ?? 40);
 import { teamBox, repairBlankRows, markCupFinals, scoreOnlyGames } from "./lib/boxfix.mjs";
 import { loadPbp } from "./lib/zonedata.mjs";
@@ -829,7 +829,8 @@ function finishGame(g, H, A, known) {
   // Roster check: the player-by-player system is the only one built from tonight's actual players. When it differs from
   // the team-level systems by ROSTER_GAP+ points, the roster or rotation has likely changed, so the blend moves toward it.
   let rosterShift = 0;
-  if (ROSTER_PULL > 0) {
+  const earlyOK = !ROSTER_EARLY || Math.min(totals[0].S?.sched?.seasonGames ?? 99, totals[1].S?.sched?.seasonGames ?? 99) <= ROSTER_EARLY;
+  if (ROSTER_PULL > 0 && earlyOK) {
     const teamAvg = (models.efficiency + models.elo + models.adjusted + models.luckAdjusted) / 4, gap = models.players - teamAvg;
     if (Math.abs(gap) >= ROSTER_GAP) { rosterShift = ROSTER_PULL * (models.players - ensemble); ensemble += rosterShift; }
   }
