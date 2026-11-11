@@ -70,7 +70,7 @@ async function vGame(id) {
   const side = (s) => g.players.filter((x) => x.side === s);
   const ptable = (s, t) => `<div class="card"><h2>${badge(t, g.kind, 24)} ${esc(t.name)}</h2><div class="tw"><table class="ft"><thead><tr><th>Player</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Range</th><th class="n">Reb</th><th class="n">Ast</th><th class="n">3PM</th><th class="n">Our line</th></tr></thead><tbody>
     ${side(s).map((x) => `<tr><td>${x.isNew ? `${esc(x.n)} <span class="ztag cold" title="${esc(x.src)}">NEW</span>` : `<a href="#/player/${esc(x.pid)}">${esc(x.n)}</a>`} <span class="muted small">${esc(x.pos)}</span>${x.src && !x.isNew ? `<span class="small muted" style="display:block">${esc(x.src)}</span>` : ""}</td><td class="n">${f0(x.min)}</td><td class="n"><b>${f1(x.pts)}</b></td><td class="n muted">${f0(x.lo)}-${f0(x.hi)}</td><td class="n">${f1(x.reb)}</td><td class="n">${f1(x.ast)}</td><td class="n">${f1(x.f3m)}</td><td class="n">${f1(x.line)} <span class="${x.pOver >= 0.5 ? "up" : "down"}">${x.pOver >= 0.5 ? "O" : "U"} ${pct(Math.max(x.pOver, 1 - x.pOver))}</span></td></tr>`).join("")}</tbody></table></div>
-    <p class="small muted">${g.announced?.[s] ? `Official roster posted by FIBA. Players marked NEW have no FIBA games in our data yet, so they start from what players at their position usually produce, in a bench role, until they play.` : `Roster and roles from ${esc(t.name)}'s last game in our data${g.rosterFrom[s] ? ` (${esc(dayShort(g.rosterFrom[s]))})` : ""}; this switches to the official 12 as soon as FIBA posts them (usually a day or two before tip-off).`} "Our line" is set at his average; O/U is the side our projection favours and how often it happened in 10,000 simulated games.</p></div>`;
+    <p class="small muted">${g.announced?.[s] ? `Roster: ${esc(g.rosterSource?.[s] || "official roster posted by FIBA")}. Players marked NEW have no FIBA games in our data yet, so they start from what players at their position usually produce, in a bench role, until they play.` : `Roster and roles from ${esc(t.name)}'s last game in our data${g.rosterFrom[s] ? ` (${esc(dayShort(g.rosterFrom[s]))})` : ""}; this switches to the official 12 as soon as FIBA posts them (usually a day or two before tip-off).`} "Our line" is set at his average; O/U is the side our projection favours and how often it happened in 10,000 simulated games.</p></div>`;
   app.innerHTML = `<a class="back" href="#/games">‹ Games</a>
     <p class="small muted" style="margin:0">${esc(g.compName)}${g.round ? " · " + esc(g.round) : ""}${g.group ? " · Group " + esc(g.group) : ""} · ${esc(dayLabel(g.date))}, ${esc(timeOf(g.date, g.timed))} PH${g.venue ? " · " + esc(g.venue) : ""}${g.city ? ", " + esc(g.city) : ""}</p>
     <h1>${esc(fav.name)} by ${f1(Math.abs(p.a - p.b))}</h1>
@@ -168,6 +168,7 @@ async function vPlayer(pid) {
   app.innerHTML = `<a class="back" href="#/players">‹ Players</a>
     <div class="ehead">${face(p.n, 64)}<div><h1 style="margin:0">${esc(p.n)}</h1><p class="small muted" style="margin:0">${esc(p.pos || "")}${p.no ? " · #" + esc(p.no) : ""} · ${p.teams.map((t) => `<a href="#/team/${esc(t.tid)}">${esc(t.name)}</a> (${t.gp})`).join(", ")}</p></div></div>
     <div class="statgrid sg4" style="margin:12px 0"><div class="stat"><b>${f1(p.pts)}</b><span>Points</span></div><div class="stat"><b>${f1(p.reb)}</b><span>Rebounds</span></div><div class="stat"><b>${f1(p.ast)}</b><span>Assists</span></div><div class="stat"><b>${f1(p.min)}</b><span>Minutes</span></div></div>
+    <div class="card" id="vs"></div>
     <div class="card"><h2>Shooting</h2><p>FG ${p.shooting.fg ?? "-"}% on ${f1(p.shooting.fga)} a game · three ${p.shooting.three ?? "-"}% on ${f1(p.shooting.f3a)} · free throws ${p.shooting.ft ?? "-"}% on ${f1(p.shooting.fta)}.</p>
       <p class="small">${hot.length ? `<b class="up">Strengths:</b> ${hot.map((z) => `${esc(z.label.toLowerCase())} ${f1(z.pct)}% (FIBA ${f1(z.lgPct)}%)`).join("; ")}. ` : ""}${cold.length ? `<b class="down">Weaknesses:</b> ${cold.map((z) => `${esc(z.label.toLowerCase())} ${f1(z.pct)}% (FIBA ${f1(z.lgPct)}%)`).join("; ")}.` : ""}${!hot.length && !cold.length ? "No zone stands out from the FIBA average yet." : ""}</p></div>
     <div class="card"><h2>Hot and cold zones</h2><div class="court-wrap">${court(p.shots, p.zones)}</div><p class="small muted">His last ${p.shots.length} shots with a location. Filled = made.</p>${zoneTable(p.zones)}</div>
@@ -176,6 +177,101 @@ async function vPlayer(pid) {
   // opponent ids → names
   const teams = await load("teams.json"), nm = Object.fromEntries(teams.map((t) => [t.tid, t.code || t.name]));
   app.querySelectorAll('a[href^="#/team/"]').forEach((a) => { const id = a.getAttribute("href").split("/")[2]; if (a.textContent === id && nm[id]) a.textContent = nm[id]; });
+  playerVersus(p);
+}
+
+// ---------------------------------------------------------------- Versus (player and team pages)
+// Projections for any matchup from our FIBA data, even with no head-to-head games: per-minute rates, pace,
+// the opponent's defence per 100 possessions and by zone, and the learned home edge. Head-to-head games are listed
+// beside the projection when they exist.
+const Phi = (z) => { const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989423 * Math.exp(-z * z / 2), p = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return z > 0 ? 1 - p : p; };
+function bindPick(input, items, label, onPick) {
+  const box = document.getElementById(input.id + "-l");
+  const draw = () => { const q = input.value.trim().toLowerCase(); const hits = q ? items.filter((x) => label(x).toLowerCase().includes(q)).slice(0, 8) : [];
+    box.innerHTML = hits.map((x) => `<button type="button" class="vs-hit" data-i="${items.indexOf(x)}">${esc(label(x))}</button>`).join("");
+    box.querySelectorAll("button").forEach((b) => b.addEventListener("click", () => { const x = items[+b.dataset.i]; input.value = label(x); box.innerHTML = ""; onPick(x); })); };
+  input.addEventListener("input", draw);
+}
+const pickBox = (id, ph) => `<div class="vs-pick"><input class="field" id="${id}" type="search" placeholder="${esc(ph)}" autocomplete="off" aria-label="${esc(ph)}"><div class="vs-list" id="${id}-l"></div></div>`;
+const venueBtns = (v) => `<div class="filters" role="group" aria-label="Venue">${[["neutral", "Neutral court"], ["home", "At home"], ["away", "Away"]].map(([k, l]) => `<button class="fbtn" type="button" data-venue="${k}" aria-pressed="${v === k}">${l}</button>`).join("")}</div>`;
+// his line against a team: rates x minutes, adjusted for the game's pace, their defence and the venue
+function projPlayerVs(p, myT, opp, venue, meta) {
+  const L = meta.lg[opp.kind] || meta.lg.nt, pace = ((myT?.pace ?? L.pace) + (opp.pace ?? L.pace)) / 2, fP = pace / L.pace, fD = (L.ppp - (opp.def || 0)) / L.ppp;
+  const hca = meta.hca?.[opp.kind] ?? 0, teamPts = (L.ppp * pace) / 100, fV = venue === "home" ? 1 + hca / 2 / teamPts : venue === "away" ? 1 - hca / 2 / teamPts : 1;
+  const min = p.projMin || p.min || 0, r = (k) => ((p.rates?.[k] || 0) / 36) * min;
+  return { min, pts: r("pts") * fP * fD * fV, reb: r("reb") * fP, ast: r("ast") * fP, f3m: r("f3m") * fP * fD, pace, fD, fV, hca };
+}
+// his zones against their zone defence (both pulled toward the FIBA average on small samples)
+function zonesVs(myZ, oppZdef) {
+  return myZ.map((z) => { const d = oppZdef.find((x) => x.id === z.id), lg = (z.lgPct || 0) / 100, mine = ((z.made || 0) + 15 * lg) / ((z.att || 0) + 15), def = d && d.att ? (d.made + 60 * lg) / (d.att + 60) - lg : 0, proj = Math.min(0.95, Math.max(0.05, mine + def));
+    return { ...z, defPct: d?.pct, proj: proj * 100, delta: (proj - lg) * 100 }; });
+}
+function zvTable(rows, who, them) {
+  return `<table class="ft"><thead><tr><th>Zone</th><th class="n">${esc(who)}</th><th class="n">${esc(them)} allow</th><th class="n">Projected</th><th class="n">vs FIBA avg</th></tr></thead><tbody>${rows.map((z) => `<tr><td>${esc(z.label)} <span class="muted small">${f1(z.share)}% of shots</span></td><td class="n">${z.pct == null ? "-" : f1(z.pct) + "%"}</td><td class="n">${z.defPct == null ? "-" : f1(z.defPct) + "%"}</td><td class="n"><b>${f1(z.proj)}%</b></td><td class="n ${z.delta >= 3 ? "up" : z.delta <= -3 ? "down" : ""}">${sg(z.delta)}</td></tr>`).join("")}</tbody></table>`;
+}
+async function playerVersus(p) {
+  const el = document.getElementById("vs"); if (!el) return;
+  const [teams, players, meta] = await Promise.all([load("teams.json"), load("players.json"), load("meta.json")]);
+  const myT = teams.find((t) => t.tid === p.team), kind = myT?.kind || p.kind, pool = teams.filter((t) => t.kind === kind && t.tid !== p.team);
+  const others = players.filter((x) => x.pid !== p.pid);
+  const st = { mode: "team", venue: "neutral" };
+  const ctl = () => `<div class="filters" role="group" aria-label="Versus"><button class="fbtn" type="button" data-vm="team" aria-pressed="${st.mode === "team"}">vs team</button><button class="fbtn" type="button" data-vm="player" aria-pressed="${st.mode === "player"}">vs player</button></div>
+    ${st.mode === "team" ? pickBox("vs-q", `Pick a ${kind === "nt" ? "national team" : "club"}, e.g. ${pool[0]?.name || ""}`) : pickBox("vs-q", "Pick a player, e.g. a rival guard or the centre he will face")}${venueBtns(st.venue)}<div id="vs-out"></div>`;
+  const draw = async () => {
+    const out = document.getElementById("vs-out"); if (!out) return;
+    if (st.mode === "team" && st.team) {
+      const o = st.team, of = await load(`teams/${o.tid}.json`), pr = projPlayerVs(p, myT, o, st.venue, meta), h2h = p.log.filter((l) => l.opp === o.tid);
+      const avg = (k) => h2h.reduce((a, l) => a + l[k], 0) / h2h.length;
+      out.innerHTML = `<div class="statgrid sg4" style="margin:10px 0"><div class="stat"><b>${f1(pr.pts)}</b><span>Points</span></div><div class="stat"><b>${f1(pr.reb)}</b><span>Rebounds</span></div><div class="stat"><b>${f1(pr.ast)}</b><span>Assists</span></div><div class="stat"><b>${f1(pr.f3m)}</b><span>Threes</span></div></div>
+        <p class="small">${esc(p.n)} vs ${esc(o.name)} (${st.venue === "neutral" ? "neutral court" : st.venue === "home" ? "at home" : "away"}): ${f0(pr.min)} minutes, pace ${f1(pr.pace)}, ${esc(o.name)} defence ${sg(o.def)} per 100 (${pr.fD < 1 ? "tougher" : "softer"} than average)${pr.fV !== 1 ? `, home edge ${pr.fV > 1 ? "+" : "−"}${f1(pr.hca / 2)} team points` : ""}.</p>
+        <h3>His zones against their defence</h3>${zvTable(zonesVs(p.zones, of.zonesDef || []), p.n.split(" ").slice(-1)[0], o.code || o.name)}
+        <h3>Head-to-head</h3>${h2h.length ? `<p class="small">${h2h.length} game${h2h.length > 1 ? "s" : ""}: ${f1(avg("pts"))} pts, ${f1(avg("reb"))} reb, ${f1(avg("ast"))} ast on average.</p><ul class="plain small">${h2h.map((l) => `<li class="spread"><span>${esc(dayShort(l.date))}</span><span>${l.pts} pts · ${l.reb} reb · ${l.ast} ast · FG ${esc(l.fg)}</span></li>`).join("")}</ul>` : `<p class="small muted">No games against ${esc(o.name)} in our data: the projection above comes from his rates, the pace and their defence.</p>`}
+        <p class="small muted">A quick what-if from our data only. Game pages use the full model and the posted roster.</p>`;
+    } else if (st.mode === "player" && st.pl) {
+      const q = await load(`players/${st.pl.pid}.json`), qT = teams.find((t) => t.tid === q.team);
+      const mine = new Map(p.log.map((l) => [l.id, l])), shared = q.log.filter((l) => mine.has(l.id) && mine.get(l.id).tid !== l.tid);
+      const pr = qT && qT.tid !== p.team ? projPlayerVs(p, myT, qT, st.venue, meta) : null;
+      out.innerHTML = `${pr ? `<div class="statgrid sg4" style="margin:10px 0"><div class="stat"><b>${f1(pr.pts)}</b><span>Points</span></div><div class="stat"><b>${f1(pr.reb)}</b><span>Rebounds</span></div><div class="stat"><b>${f1(pr.ast)}</b><span>Assists</span></div><div class="stat"><b>${f1(pr.f3m)}</b><span>Threes</span></div></div>
+        <p class="small">${esc(p.n)} projected against ${esc(q.n)}'s team, ${esc(qT.name)} (${st.venue === "neutral" ? "neutral court" : st.venue}).</p>` : `<p class="small muted">${qT?.tid === p.team ? `${esc(q.n)} is his teammate.` : "No current team on record for that player."}</p>`}
+        <h3>Games against each other</h3>${shared.length ? `<table class="ft"><thead><tr><th>Date</th><th class="n">${esc(p.n.split(" ").slice(-1)[0])}</th><th class="n">${esc(q.n.split(" ").slice(-1)[0])}</th></tr></thead><tbody>${shared.map((l) => { const m = mine.get(l.id); return `<tr><td>${esc(dayShort(l.date))}</td><td class="n">${m.pts} pts · ${m.reb} reb · ${m.ast} ast</td><td class="n">${l.pts} pts · ${l.reb} reb · ${l.ast} ast</td></tr>`; }).join("")}</tbody></table>` : `<p class="small muted">They have not met in our FIBA data.</p>`}
+        ${q.zones && p.zones ? `<h3>Shooting by zone side by side</h3><table class="ft"><thead><tr><th>Zone</th><th class="n">${esc(p.n.split(" ").slice(-1)[0])}</th><th class="n">${esc(q.n.split(" ").slice(-1)[0])}</th></tr></thead><tbody>${p.zones.map((z, i) => `<tr><td>${esc(z.label)}</td><td class="n">${z.pct == null ? "-" : f1(z.pct) + "%"} <span class="muted small">(${z.att})</span></td><td class="n">${q.zones[i]?.pct == null ? "-" : f1(q.zones[i].pct) + "%"} <span class="muted small">(${q.zones[i]?.att ?? 0})</span></td></tr>`).join("")}</tbody></table>` : ""}`;
+    } else out.innerHTML = `<p class="small muted">${st.mode === "team" ? "Pick a team to see his projected line, his zones against their defence and any head-to-head games." : "Pick a player to see their games against each other and his projected line against that player's team."}</p>`;
+  };
+  const render = () => {
+    el.innerHTML = `<h2>Versus</h2>${ctl()}`;
+    el.querySelectorAll("[data-vm]").forEach((b) => b.addEventListener("click", () => { st.mode = b.dataset.vm; render(); }));
+    el.querySelectorAll("[data-venue]").forEach((b) => b.addEventListener("click", () => { st.venue = b.dataset.venue; el.querySelectorAll("[data-venue]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); draw(); }));
+    const inp = document.getElementById("vs-q");
+    if (st.mode === "team") { bindPick(inp, pool, (t) => t.name, (t) => { st.team = t; draw(); }); if (st.team) inp.value = st.team.name; }
+    else { bindPick(inp, others, (x) => `${x.n} (${x.teamName || ""})`, (x) => { st.pl = x; draw(); }); if (st.pl) inp.value = `${st.pl.n} (${st.pl.teamName || ""})`; }
+    draw();
+  };
+  // start against his next opponent when there is one
+  const up = await load("upcoming.json").catch(() => []), nx = up.find((g) => g.a.tid === p.team || g.b.tid === p.team);
+  if (nx) { const oid = nx.a.tid === p.team ? nx.b.tid : nx.a.tid; st.team = pool.find((t) => t.tid === oid) || null; st.venue = nx.home === -1 ? "neutral" : (nx.home === 0) === (nx.a.tid === p.team) ? "home" : "away"; }
+  render();
+}
+async function teamVersus(t) {
+  const el = document.getElementById("vs"); if (!el) return;
+  const [teams, meta] = await Promise.all([load("teams.json"), load("meta.json")]);
+  const me = teams.find((x) => x.tid === t.tid) || t, pool = teams.filter((x) => x.kind === t.kind && x.tid !== t.tid), st = { venue: "neutral", opp: null };
+  const draw = async () => {
+    const out = document.getElementById("vs-out"); if (!st.opp) { out.innerHTML = `<p class="small muted">Pick a team for a projected score, win chance, zone matchup and head-to-head record.</p>`; return; }
+    const o = st.opp, of = await load(`teams/${o.tid}.json`), L = meta.lg[t.kind], pace = L.pace + ((me.pace - L.pace) + (o.pace - L.pace)) / 2, hca = st.venue === "home" ? meta.hca[t.kind] : st.venue === "away" ? -meta.hca[t.kind] : 0;
+    const pa = (pace * (L.ppp + me.off - o.def)) / 100 + hca / 2, pb = (pace * (L.ppp + o.off - me.def)) / 100 - hca / 2, pW = Phi((pa - pb) / (meta.sd || 10)), h2h = t.games.filter((g) => g.oppTid === o.tid);
+    out.innerHTML = `<div class="gp-h" style="margin-top:10px"><span>${badge(t, t.kind, 40)}<b>${f0(pa)}</b></span><span class="muted small">Projected</span><span><b>${f0(pb)}</b>${badge(o, o.kind, 40)}</span></div>
+      <div class="spread"><span>${esc(t.name)} ${pct(pW)}</span><span>${esc(o.name)} ${pct(1 - pW)}</span></div>
+      <div class="gc-bar"><span style="flex:${pW};background:${pW >= 0.5 ? "var(--accent)" : "var(--line-2)"}"></span><span style="flex:${1 - pW};background:${pW < 0.5 ? "var(--accent)" : "var(--line-2)"}"></span></div>
+      <p class="small muted">${st.venue === "neutral" ? "Neutral court." : `${esc(st.venue === "home" ? t.name : o.name)} at home: ${meta.hca[t.kind] >= 0.25 ? `+${f1(meta.hca[t.kind])} pts` : "no measurable edge so far"}, learned from ${t.kind === "nt" ? "national-team" : "club"} results.`} From both teams' offence, defence and pace per 100 possessions (adjusted for opponents). A simpler estimate than a game page, which also uses rosters.</p>
+      <div class="grid two"><div><h3>${esc(t.code || t.name)} offence vs ${esc(o.code || o.name)} defence</h3>${zvTable(zonesVs(t.zonesOff || [], of.zonesDef || []), t.code || "Off", o.code || "Def")}</div><div><h3>${esc(o.code || o.name)} offence vs ${esc(t.code || t.name)} defence</h3>${zvTable(zonesVs(of.zonesOff || [], t.zonesDef || []), o.code || "Off", t.code || "Def")}</div></div>
+      <h3>Head-to-head</h3>${h2h.length ? `<p class="small">${h2h.filter((g) => g.us > g.them).length}-${h2h.filter((g) => g.us < g.them).length} in our data.</p><ul class="plain small">${h2h.map((g) => `<li class="spread"><span>${esc(dayShort(g.date))} · ${esc(g.comp)}</span><span>${g.us > g.them ? '<b class="up">W</b>' : '<b class="down">L</b>'} ${g.us}-${g.them}</span></li>`).join("")}</ul>` : `<p class="small muted">They have not met in our data.</p>`}`;
+  };
+  el.innerHTML = `<h2>Versus</h2>${pickBox("vs-q", `Pick a ${t.kind === "nt" ? "national team" : "club"}`)}${venueBtns(st.venue)}<div id="vs-out"></div>`;
+  el.querySelectorAll("[data-venue]").forEach((b) => b.addEventListener("click", () => { st.venue = b.dataset.venue; el.querySelectorAll("[data-venue]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); draw(); }));
+  const up = await load("upcoming.json").catch(() => []), nx = up.find((g) => g.a.tid === t.tid || g.b.tid === t.tid);
+  if (nx) { const oid = nx.a.tid === t.tid ? nx.b.tid : nx.a.tid; st.opp = pool.find((x) => x.tid === oid) || null; st.venue = nx.home === -1 ? "neutral" : (nx.home === 0) === (nx.a.tid === t.tid) ? "home" : "away"; el.querySelectorAll("[data-venue]").forEach((x) => x.setAttribute("aria-pressed", String(x.dataset.venue === st.venue))); }
+  const inp = document.getElementById("vs-q"); bindPick(inp, pool, (x) => x.name, (x) => { st.opp = x; draw(); }); if (st.opp) inp.value = st.opp.name;
+  draw();
 }
 
 // ---------------------------------------------------------------- teams
@@ -198,10 +294,12 @@ async function vTeam(tid) {
     ${nx.length ? `<h2>Next games</h2><div class="gc-grid">${nx.map(gameCard).join("")}</div>` : ""}
     ${t.ha ? `<p class="small">Home ${t.ha.home[0]}-${t.ha.home[1]} · away ${t.ha.away[0]}-${t.ha.away[1]} · neutral ${t.ha.neutral[0]}-${t.ha.neutral[1]}</p>` : ""}
     <div id="t-news"></div>
+    <div class="card" id="vs"></div>
     <div class="card"><h2>Roster (last game, ${esc(t.rosterFrom ? dayShort(t.rosterFrom) : "-")})</h2><div class="tw"><table class="ft"><thead><tr><th>Player</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Reb</th><th class="n">Ast</th><th class="n">GP</th></tr></thead><tbody>
       ${t.roster.map((p) => `<tr><td><a href="#/player/${esc(p.pid)}">${esc(p.n)}</a> <span class="muted small">${esc(p.pos)}</span></td><td class="n">${f0(p.min)}</td><td class="n">${f1(p.pts)}</td><td class="n">${f1(p.reb)}</td><td class="n">${f1(p.ast)}</td><td class="n">${p.gp}</td></tr>`).join("")}</tbody></table></div><p class="small muted">Per-game numbers are his projected role: recent minutes times his per-minute rates.</p></div>
     <div class="card"><h2>Shooting zones</h2><div class="grid two"><div><h3>Offence</h3>${zoneTable(t.zonesOff)}</div><div><h3>Defence (what opponents shoot)</h3>${zoneTable(t.zonesDef.map((z) => ({ ...z, tag: z.tag === "hot" ? "cold" : z.tag === "cold" ? "hot" : z.tag })))}</div></div><p class="small muted">On defence, HOT means opponents shoot worse than average there (a strong spot), COLD means they shoot better (a soft spot).</p></div>
     <div class="card"><h2>Results</h2><ul class="plain">${t.games.slice(0, 30).map((g) => `<li class="spread"><span>${esc(dayShort(g.date))} · ${g.us > g.them ? '<b class="up">W</b>' : '<b class="down">L</b>'} vs <a href="#/team/${esc(g.oppTid)}">${esc(g.opp)}</a> <span class="muted small">${esc(g.comp)}</span></span><span class="num">${g.us}-${g.them}</span></li>`).join("")}</ul></div>`;
+  teamVersus(t);
   newsCard(document.getElementById("t-news"), (x) => x.teams.includes(t.tid), `News and talk: ${t.name}`);
 }
 

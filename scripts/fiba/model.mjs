@@ -103,26 +103,41 @@ function zonesFor(shots) {
 }
 
 // ---------------------------------------------------------------- projections for upcoming games
-const lastRoster = (tid) => { // players from the team's most recent game
+// Owner-supplied lineups and retirements (config/fiba-rosters.json), matched to our players by name.
+const CFG = readJSON(path.join(ROOT, "config", "fiba-rosters.json"), { lineups: [], retired: [] });
+const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z ]+/g, " ").replace(/\s+/g, " ").trim();
+function findPlayer(name, tid) {
+  const t = norm(name).split(" "), first = t[0], last = t.slice(-1)[0], full = t.join(" ");
+  const cands = [...PL.values()].filter((s) => { const u = norm(s.n).split(" "); return u.join(" ") === full || (u[0] === first && u.slice(-1)[0] === last) || (u.slice(-1)[0] === last && u[0][0] === first[0] && u.length > 1); });
+  return cands.sort((a, b) => (b.teams?.[tid] ? 1 : 0) - (a.teams?.[tid] ? 1 : 0) || b.gp - a.gp)[0] || null;
+}
+const tidOfCode = (code) => [...R.T.keys()].find((tid) => games.some((g) => g.box.teams.some((t) => t.tid === tid && t.code === code)));
+const RETIRED = new Set(); for (const r of CFG.retired || []) { const p = findPlayer(r.n, tidOfCode(r.team)); if (p) RETIRED.add(p.pid); }
+function manualLineup(code, date) {
+  const L = (CFG.lineups || []).find((l) => l.team === code && date.slice(0, 10) >= l.from && date.slice(0, 10) <= l.to); if (!L) return null;
+  const tid = tidOfCode(code);
+  return { source: L.source, list: L.players.map((x) => { const p = findPlayer(x.n, tid); return p ? { pid: p.pid, n: p.n, pos: p.pos || x.pos || "", no: p.no || "" } : { pid: `new-${norm(x.n).replace(/ /g, "-")}`, n: x.n, pos: x.pos || "F", no: "", min: x.min || null }; }) };
+}
+const lastRoster = (tid) => { // players from the team's most recent game (retired players left out)
   const last = [...games].reverse().find((g) => g.box.teams.some((t) => t.tid === tid)); if (!last) return { date: null, list: [] };
   const side = last.box.teams[0].tid === tid ? 0 : 1;
-  return { date: last.date, gid: last.id, list: last.box.players.filter((p) => p.side === side).map((p) => PL.get(p.pid)).filter(Boolean) };
+  return { date: last.date, gid: last.id, list: last.box.players.filter((p) => p.side === side && !RETIRED.has(p.pid)).map((p) => PL.get(p.pid)).filter(Boolean) };
 };
 // A player new to our data (first FIBA game in a competition we follow): start from what players at his position
 // usually produce per minute in FIBA, a little below average, in a bench role. He is marked "new" on the page.
 const grpOf = (pos) => (/C/i.test(pos || "") ? "C" : /F/i.test(pos || "") ? "F" : "G");
 const PRIOR = {}; for (const g of ["G", "F", "C"]) { const ps = [...PL.values()].filter((s) => s.gp >= 5 && grpOf(s.pos) === g); const w = ps.reduce((a, s) => a + s.min, 0) || 1; PRIOR[g] = Object.fromEntries(STAT.map((k) => [k, (ps.reduce((a, s) => a + s.rate[k] * s.min, 0) / w) * 0.85])); }
 const ROSTERS = new Map(); { const RDIR = path.join(FD, "rosters"); if (fs.existsSync(RDIR)) for (const f of fs.readdirSync(RDIR)) { const r = readJSON(path.join(RDIR, f)); if (r) ROSTERS.set(r.id, r); } }
-function projectPlayers(tid, oppTid, pace, kind, announced = null) {
+function projectPlayers(tid, oppTid, pace, kind, announced = null, source = null) {
   const ro = lastRoster(tid), L = R.lg[kind], opp = R.T.get(oppTid);
   // the announced 12 when FIBA has posted them, else the players from the team's last game
   let list;
-  if (announced?.length) list = announced.map((a) => { const s = PL.get(a.pid); return s ? { s, min: s.min, kinds: s.teams } : { s: { pid: a.pid, n: a.n, pos: a.pos, no: a.no, gp: 0, rate: PRIOR[grpOf(a.pos)], log: [] }, min: 12, isNew: true }; });
+  if (announced?.length) list = announced.map((a) => { const s = PL.get(a.pid); return s ? { s, min: s.min, kinds: s.teams } : { s: { pid: a.pid, n: a.n, pos: a.pos, no: a.no, gp: 0, rate: PRIOR[grpOf(a.pos)], log: [] }, min: a.min || 12, isNew: true }; });
   else list = ro.list.map((s) => ({ s, min: s.min }));
   list = list.filter((x) => x.min > 1);
   const tot = list.reduce((a, x) => a + x.min, 0) || 1; list.forEach((x) => (x.min = Math.min(38, (x.min * 200) / tot)));
   const fPace = pace / L.pace, fDef = opp ? (L.ppp - opp.def) / L.ppp : 1;
-  return { from: announced?.length ? null : ro.date, announced: !!announced?.length, gid: ro.gid, players: list.sort((a, b) => b.min - a.min).map(({ s, min, isNew }) => {
+  return { from: announced?.length ? null : ro.date, announced: !!announced?.length, source, gid: ro.gid, players: list.sort((a, b) => b.min - a.min).map(({ s, min, isNew }) => {
     const other = Object.values(s.teams || {}).filter((t) => t.kind !== kind).reduce((a, t) => a + t.gp, 0), same = Object.values(s.teams || {}).filter((t) => t.kind === kind).reduce((a, t) => a + t.gp, 0);
     return { pid: s.pid, n: s.n, pos: s.pos, no: s.no, min: r1(min), isNew: !!isNew, src: isNew ? "new: no FIBA games in our data, estimated from his position" : same === 0 && other ? `first ${kind === "nt" ? "national-team" : "club"} game in our data: rates from his ${other} ${kind === "nt" ? "club" : "national-team"} games` : null,
       pts: r1(s.rate.pts * min * fPace * fDef), reb: r1(s.rate.reb * min * fPace), ast: r1(s.rate.ast * min * fPace), stl: r1(s.rate.stl * min * fPace), blk: r1(s.rate.blk * min * fPace), f3m: r1(s.rate.f3m * min * fPace * fDef), gp: s.gp, avgPts: s.log.length ? r1(s.log.reduce((a, l) => a + l[5], 0) / s.log.length) : null }; }) };
@@ -153,7 +168,9 @@ for (const g of upcoming) {
   const offA = A?.off || 0, defA = A?.def || 0, offB = B?.off || 0, defB = B?.def || 0, pace = L.pace + ((A?.pace || 0) + (B?.pace || 0)) / 2;
   const pa = pace * (L.ppp + offA - defB) / 100 + hca / 2, pb = pace * (L.ppp + offB - defA) / 100 - hca / 2, nmin = Math.min(A?.n || 0, B?.n || 0);
   const sd = P.sd * (1 + 1.2 / Math.sqrt(1 + nmin)), pA = Phi((pa - pb) / sd);
-  const RO = ROSTERS.get(g.id), prA = projectPlayers(g.a.tid, g.b.tid, pace, g.kind, RO?.a), prB = projectPlayers(g.b.tid, g.a.tid, pace, g.kind, RO?.b);
+  // roster priority: FIBA-posted 12 for this game, then an owner-supplied announced lineup, then the last game
+  const RO = ROSTERS.get(g.id), mA = RO?.a?.length ? null : manualLineup(g.a.code, g.date), mB = RO?.b?.length ? null : manualLineup(g.b.code, g.date);
+  const prA = projectPlayers(g.a.tid, g.b.tid, pace, g.kind, RO?.a?.length ? RO.a : mA?.list, RO?.a?.length ? "official roster posted by FIBA" : mA?.source), prB = projectPlayers(g.b.tid, g.a.tid, pace, g.kind, RO?.b?.length ? RO.b : mB?.list, RO?.b?.length ? "official roster posted by FIBA" : mB?.source);
   // scale player points so each side adds up to the team projection (free throws and bench included)
   for (const [pr, tot] of [[prA, pa], [prB, pb]]) { const s = pr.players.reduce((a, p) => a + p.pts, 0); if (s > 0) pr.players.forEach((p) => (p.pts = r1((p.pts * tot) / s))); }
   const pls = [...prA.players.slice(0, 12).map((p) => ({ ...p, side: 0 })), ...prB.players.slice(0, 12).map((p) => ({ ...p, side: 1 }))];
@@ -168,8 +185,8 @@ for (const g of upcoming) {
     if (Math.abs(defA - defB) >= 3) why.push([Math.abs(defA - defB) * pace / 200, `${defA > defB ? g.a.name : g.b.name} have the stronger defence`]);
   }
   if (nmin < 4) why.push([0, `Thin record: ${Math.min(A?.n || 0, B?.n || 0)} game${nmin === 1 ? "" : "s"} for one side in our data, so the range is wider`]);
-  for (const [pr, t] of [[prA, g.a], [prB, g.b]]) why.push([0, pr.announced ? `${t.name}: official roster posted by FIBA` : `${t.name}: roster from their last game${pr.from ? ` (${pr.from.slice(0, 10)})` : ""}; the final 12 is not posted yet${g.kind === "nt" ? " and national-team rosters change between windows" : ""}`]);
-  const nNew = [...prA.players, ...prB.players].filter((p) => p.isNew).length; if (nNew) why.push([0, `${nNew} player${nNew > 1 ? "s" : ""} new to our data: estimated from his position until he plays`]);
+  for (const [pr, t] of [[prA, g.a], [prB, g.b]]) why.push([0, pr.announced ? `${t.name}: ${pr.source || "official roster posted by FIBA"}` : `${t.name}: roster from their last game${pr.from ? ` (${pr.from.slice(0, 10)})` : ""}; the final 12 is not posted yet${g.kind === "nt" ? " and national-team rosters change between windows" : ""}`]);
+  const nNew = [...prA.players, ...prB.players].filter((p) => p.isNew).length; if (nNew) why.push([0, `${nNew} player${nNew > 1 ? "s" : ""} new to our data: estimated from their position until they play`]);
   const quarters = [0.255, 0.245, 0.25, 0.25].map((f) => [r1(pa * f), r1(pb * f)]);
   const players = pls.map((p, j) => { const s = sim.pts[j], ln = halfLine(p.avgPts || p.pts);
     return { ...p, lo: r1(q(s, 0.1)), hi: r1(q(s, 0.9)), line: ln, pOver: r3(share(s, (v) => v > ln)), m10: r3(share(s, (v) => v >= 10)), m15: r3(share(s, (v) => v >= 15)), m20: r3(share(s, (v) => v >= 20)) }; });
@@ -177,7 +194,7 @@ for (const g of upcoming) {
     a: { ...g.a, n: A?.n || 0, w: A?.w || 0, l: A?.l || 0, off: r1(offA), def: r1(defA) }, b: { ...g.b, n: B?.n || 0, w: B?.w || 0, l: B?.l || 0, off: r1(offB), def: r1(defB) },
     proj: { a: r1(pa), b: r1(pb), pA: r3(pA), spread, total, pace: r1(pace), sd: r1(sd), lo: [r1(q(sim.sA, 0.1)), r1(q(sim.sB, 0.1))], hi: [r1(q(sim.sA, 0.9)), r1(q(sim.sB, 0.9))],
       close: r3(share(mg, (m) => Math.abs(m) <= 5)), blowout: r3(share(mg, (m) => Math.abs(m) >= 20)), ot: r3(share(mg, (m) => Math.abs(m) < 0.6)), coverA: r3(share(mg, (m) => m > spread)), over: r3(share(tt, (t) => t > total)) },
-    quarters, why: why.sort((x, y) => y[0] - x[0]).map((w) => w[1]), players, rosterFrom: [prA.from, prB.from], announced: [prA.announced, prB.announced], ha: [haRec(g.a.tid), haRec(g.b.tid)], confidence: nmin < 4 ? "low (thin record)" : Math.abs(pA - 0.5) >= 0.3 ? "high" : Math.abs(pA - 0.5) >= 0.15 ? "medium" : "low (near coin-flip)" };
+    quarters, why: why.sort((x, y) => y[0] - x[0]).map((w) => w[1]), players, rosterFrom: [prA.from, prB.from], announced: [prA.announced, prB.announced], rosterSource: [prA.source, prB.source], ha: [haRec(g.a.tid), haRec(g.b.tid)], confidence: nmin < 4 ? "low (thin record)" : Math.abs(pA - 0.5) >= 0.3 ? "high" : Math.abs(pA - 0.5) >= 0.15 ? "medium" : "low (near coin-flip)" };
   writeJSON(path.join(OUT, "games", `${g.id}.json`), rec);
   upOut.push({ id: g.id, date: g.date, timed: g.timed, comp: g.comp, kind: g.kind, round: g.round, group: g.group, a: rec.a, b: rec.b, proj: { a: rec.proj.a, b: rec.proj.b, pA: rec.proj.pA, spread, total }, confidence: rec.confidence, home: h });
   // picks: our own lines (no sportsbook). Winner, our spread side, total side, and player points at his average.
@@ -238,6 +255,6 @@ writeJSON(path.join(OUT, "upcoming.json"), upOut);
 picks.sort((a, b) => b.p - a.p);
 writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the simulation (10,000 runs per game). No sportsbook data is used or shown. Player lines are set at his average; the pick is the side our projection favours.", picks });
 const comps = EVENTS.map((e) => ({ slug: e.slug, name: e.name, short: e.short, kind: e.kind, games: games.filter((g) => g.slug === e.slug).length, upcoming: upOut.filter((u) => sched.find((s) => s.id === u.id)?.slug === e.slug).length }));
-writeJSON(path.join(OUT, "meta.json"), { built: new Date().toISOString(), games: games.length, upcoming: upOut.length, players: players.length, teams: teams.length, comps, zones: ZONES.map(([id, label]) => ({ id, label })),
+writeJSON(path.join(OUT, "meta.json"), { lg: { nt: { ppp: r1(R.lg.nt.ppp), pace: r1(R.lg.nt.pace) }, club: { ppp: r1(R.lg.club.ppp), pace: r1(R.lg.club.pace) } }, hca: P.hca, sd: P.sd, built: new Date().toISOString(), games: games.length, upcoming: upOut.length, players: players.length, teams: teams.length, comps, zones: ZONES.map(([id, label]) => ({ id, label })),
   source: "fiba.basketball public game pages: schedules, box scores and play-by-play shot locations. No betting data.", accuracy: { graded: R.n, winner: r3(R.acc), brier: r3(R.brier) } });
 console.log(`wrote ${upOut.length} upcoming, ${teams.length} teams, ${players.length} players, ${picks.length} picks; player points MAE ${pMae == null ? "-" : r1(pMae)} on ${pPred.length}`);

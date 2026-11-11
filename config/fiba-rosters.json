@@ -1,0 +1,29 @@
+{
+  "_about": "Announced lineups and retirements that FIBA's own pages do not show yet. A FIBA-posted roster for a game always wins over this file. 'from'/'to' are the dates (YYYY-MM-DD, UTC) the lineup applies to. For a player new to our data, add pos (G, F or C) and, if known, min (expected minutes) so his estimate starts from the right role; without min he starts at 12 minutes.",
+  "lineups": [
+    {
+      "team": "PHI",
+      "from": "2026-11-20",
+      "to": "2026-12-05",
+      "event": "FIBA World Cup 2027 Asian Qualifiers, November window",
+      "source": "Gilas Pilipinas 12-man lineup announced by SBP (GMA News graphic, courtesy FIBA/SBP), supplied by the site owner on 2026-11-11",
+      "players": [
+        { "n": "Juan Gomez de Liano" },
+        { "n": "Chris Newsome" },
+        { "n": "Rhenz Abando", "pos": "G" },
+        { "n": "Dwight Ramos" },
+        { "n": "Quentin Millora-Brown" },
+        { "n": "Kevin Quiambao" },
+        { "n": "Bennie Boatwright", "pos": "F" },
+        { "n": "CJ Perez" },
+        { "n": "Scottie Thompson" },
+        { "n": "Mike Phillips" },
+        { "n": "Kai Sotto" },
+        { "n": "AJ Edu" }
+      ]
+    }
+  ],
+  "retired": [
+    { "team": "PHI", "n": "June Mar Fajardo", "note": "retired from the national team (owner, 2026-11-11)" }
+  ]
+}
