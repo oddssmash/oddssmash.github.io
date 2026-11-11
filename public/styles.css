@@ -1088,3 +1088,11 @@ a.gtab { color: var(--ink-2); }
 .ev-strong { background: #2fbf71; color: #06210f; } .ev-medium { background: #f5b82e; color: #2a1c00; } .ev-weak { background: #8a93a6; color: #0b1020; } .ev-noise { background: #5b6476; color: #e6e9f0; }
 .bn { margin: 4px 0 6px; font-size: 15px; }
 .bn-k { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; background: #f5b82e; color: #2a1c00; margin-right: 6px; }
+.gs-i { border-top: 1px solid color-mix(in srgb, #f5b82e 30%, transparent); padding: 6px 0; }
+.gs-i > summary { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; cursor: pointer; list-style: none; }
+.gs-i > summary::-webkit-details-marker { display: none; }
+.gs-i > summary::after { content: "▸ why"; font-size: 11px; color: #f5b82e; margin-left: auto; }
+.gs-i[open] > summary::after { content: "▾ why"; }
+.gs-i > summary span { font-weight: 800; padding: 2px 10px; border-radius: 999px; background: #f5b82e; color: #2a1c00; }
+.gs-i > summary i { font-style: normal; font-size: 13px; opacity: .9; }
+.gs-i p { margin: 6px 0; line-height: 1.45; }
