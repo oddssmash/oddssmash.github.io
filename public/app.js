@@ -2002,6 +2002,59 @@ async function nextGameOutlook() {
   }
   return (S.outlook = { day, date: future[0].date, rows });
 }
+// Zone-based projection for the Scout list: his next-game scoring rebuilt from his shots by zone (14 zones, last season
+// and this season), his shooting there pulled slightly toward the league on small samples, and his next opponent's
+// defence in each zone (also pulled toward the league). Focuses on the zone picked in the filter. From our data only.
+const Z5_OF = (id) => (id === "rim" ? "rim" : id.startsWith("sh") ? "paint" : id.startsWith("m") ? "mid" : id === "tCL" || id === "tCR" ? "c3" : "atb");
+async function zoneProj(pid) {
+  S.zpCache ||= new Map(); if (S.zpCache.has(pid)) return S.zpCache.get(pid);
+  const d = await load(`players/${pid}.json`).catch(() => null), rows = d?.zones14?.rows, gms = d?.zones14?.games, c = S.P?.[pid]?.cur, b = c && c[0] >= 5 ? { g: c[0], min: c[1], pts: c[2], reb: c[3], ast: c[4] } : seasonLine(S.P?.[pid]);
+  if (!rows?.length || !gms || !b) { S.zpCache.set(pid, null); return null; }
+  S.zpUp ||= await load("upcoming.json").catch(() => []);
+  const g = S.zpUp.filter((u) => (u.home === d.team || u.away === d.team) && Date.parse(u.date) > Date.now()).sort((a, c) => a.date.localeCompare(c.date))[0];
+  const opp = g ? (g.home === d.team ? g.away : g.home) : null, od = opp ? await load(`teams/${opp}.json`).catch(() => null) : null;
+  const z = rows.filter((x) => x.att > 0).map((x) => {
+    const a = x.att / gms, v = x.id.startsWith("t") ? 3 : 2, his = x.made / x.att, lg = (x.lgPct ?? 0) / 100, hp = (x.made + 25 * lg) / (x.att + 25);
+    const dz = od?.zones14?.def?.find((y) => y.id === x.id), oD = dz ? (dz.made + 150 * lg) / (dz.att + 150) - lg : 0, pj = Math.min(0.95, Math.max(0.05, hp + oD));
+    return { id: x.id, z5: Z5_OF(x.id), a, v, his, lg, pj, oD, tag: x.tag, edge: a * (his - lg) * v, reg: a * (hp - his) * v, opp: a * oD * v };
+  });
+  const sum = (k, f = () => true) => z.filter(f).reduce((s, x) => s + x[k], 0);
+  const fga = sum("a"), fgm = z.reduce((s, x) => s + x.a * x.pj, 0), tpm = z.filter((x) => x.v === 3).reduce((s, x) => s + x.a * x.pj, 0);
+  const res = { b, z, opp, date: g?.date, home: g ? g.home === d.team : null, fga, fgm, tpm, edge: sum("edge"), reg: sum("reg"), oppAdj: sum("opp") };
+  res.pts = b.pts + res.reg + res.oppAdj;
+  S.zpCache.set(pid, res); return res;
+}
+function zoneProjHTML(r, zf) {
+  if (!r) return `<span class="muted">No zone record to project from.</span>`;
+  const sg = (v) => `${v > 0 ? "+" : ""}${f1(v)}`, cls = (v) => (v > 0.05 ? "up" : v < -0.05 ? "down" : ""), oa = r.opp ? T(r.opp).abbr : null;
+  const [zk, zid] = zf ? zf.split(":") : [], word = (id) => (ZONE_FALLBACK[id] || id).toLowerCase();
+  let focus = "";
+  if (zid) {
+    const f = r.z.filter((x) => x.z5 === zid), a = f.reduce((s, x) => s + x.a, 0);
+    if (a > 0.05) {
+      const his = f.reduce((s, x) => s + x.a * x.his, 0) / a, lg = f.reduce((s, x) => s + x.a * x.lg, 0) / a, pj = f.reduce((s, x) => s + x.a * x.pj, 0) / a, v = f[0].v;
+      const oD = f.reduce((s, x) => s + x.a * x.oD, 0) / a;
+      focus = `<div><b>${zk === "hot" ? "🔥" : "🧊"} ${esc(word(zid))}:</b> ${f1(a)} shots a game at ${f1(his * 100)}% (league ${f1(lg * 100)}%) → <b>${f1(a * pj * v)} pts</b> projected from there${oa ? ` vs ${esc(oa)} (their defence there ${oD <= 0 ? "" : "+"}${f1(oD * 100)} pts of FG% vs league)` : ""}. That zone is worth <span class="${cls(a * (his - lg) * v)}">${sg(a * (his - lg) * v)} pts</span> a game to him over a league-average shooter.</div>`;
+    } else focus = `<div class="muted">He rarely shoots from ${esc(word(zid))}.</div>`;
+  }
+  const top = r.z.filter((x) => Math.abs(x.edge) >= 0.25).sort((a, c) => Math.abs(c.edge) - Math.abs(a.edge)).slice(0, 3).map((x) => `${esc(Z14_NAMES[x.id] || x.id)} <span class="${cls(x.edge)}">${sg(x.edge)}</span>`).join(", ");
+  return `<div><b>Zone-based projection${oa ? ` ${r.home ? "vs" : "at"} ${esc(oa)}` : ""}: ${f1(r.pts)} pts</b> · ${f1(r.fgm)}/${f1(r.fga)} FG (${f0((r.fgm / r.fga) * 100)}%) · ${f1(r.tpm)} threes made <span class="muted">(average ${f1(r.b.pts)} pts)</span></div>
+    ${focus}
+    <div class="muted">Hot and cold zones add <span class="${cls(r.edge)}">${sg(r.edge)}</span> pts a game over a league-average shooter on the same shots${top ? ` (${top})` : ""}${oa ? `; ${esc(oa)}'s zone defence <span class="${cls(r.oppAdj)}">${sg(r.oppAdj)}</span>` : "; no game scheduled"}; small-sample pull toward the league <span class="${cls(r.reg)}">${sg(r.reg)}</span>.</div>`;
+}
+// Fill the zone projections as their rows scroll into view (each needs his player file and the opponent's team file).
+function fillZoneProj(box) {
+  const gen = (S.zpGen = (S.zpGen || 0) + 1);
+  let todo = [...box.querySelectorAll("[data-zp]")]; if (!todo.length) return;
+  const run = async (el) => { const r = await zoneProj(el.dataset.zp); if (S.zpGen === gen && el.isConnected) el.innerHTML = zoneProjHTML(r, S.zf); };
+  // a plain scroll check (IntersectionObserver proved unreliable in some embedded browsers)
+  let queued = false;
+  const check = () => { queued = false; if (S.zpGen !== gen) { removeEventListener("scroll", onScroll); return; }
+    const lim = innerHeight + 400, now = todo.filter((el) => el.getBoundingClientRect().top < lim); todo = todo.filter((el) => !now.includes(el)); now.forEach(run);
+    if (!todo.length) removeEventListener("scroll", onScroll); };
+  const onScroll = () => { if (!queued) { queued = true; setTimeout(check, 120); } };
+  addEventListener("scroll", onScroll, { passive: true }); setTimeout(check, 0);
+}
 async function playerIndex(scout) {
   const all = (await load("players.json")).slice().sort((a, b) => (b.cur?.[2] ?? -1) - (a.cur?.[2] ?? -1));
   const zones = S.meta?.scout?.zones || FIVE.map((id) => ({ id, label: ZONE_FALLBACK[id] }));
@@ -2028,7 +2081,9 @@ async function playerIndex(scout) {
       return `<div class="ol-item">${scoutItem(p)}<div class="ol-why small"><div><b class="${x.delta > 0 ? "up" : "down"}">${x.delta > 0 ? "▲" : "▼"} ${f1(x.proj.pts)} pts projected vs his ${f1(x.base.pts)} ${esc(x.base.basis)} (${x.delta > 0 ? "+" : ""}${f1(x.delta)}, ${x.pctd > 0 ? "+" : ""}${Math.round(x.pctd * 100)}%)</b> ${x.home ? "vs" : "at"} ${esc(T(x.opp).abbr)} · ${f1(x.proj.reb)} reb · ${f1(x.proj.ast)} ast</div>
         ${x.why.length ? `<ul class="dots">${x.why.map((w) => `<li>${w}</li>`).join("")}</ul>` : ""}
         ${x.unexplained ? `<div style="color:var(--warn)">⚠ No injury, minutes or matchup reason explains a gap this size: treat with caution.</div>` : !x.why.length ? `<div class="muted">Small gap with no single big reason: mostly his recent form and team context.</div>` : ""}
+        <div class="zp" data-zp="${esc(x.id)}"><span class="muted">Loading zone projection...</span></div>
         <a class="go" href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`; }).join("") || `<p class="empty">No player matches.</p>`;
+    fillZoneProj(document.getElementById("plist"));
   };
   const draw = () => {
     if (scout && S.ol) return drawOutlook();
@@ -2038,7 +2093,8 @@ async function playerIndex(scout) {
     found = favFirst(found, "p");
     const rows = found.slice(0, 60);
     document.getElementById("pcount").textContent = found.length > rows.length ? `Showing the top ${rows.length} of ${found.length.toLocaleString()} players by points per game. Search to narrow it down.` : `${found.length.toLocaleString()} ${found.length === 1 ? "player" : "players"}`;
-    document.getElementById("plist").innerHTML = rows.map((p) => (scout ? scoutItem(p) : playerItem(p))).join("") || `<p class="empty">No player matches that search.</p>`;
+    document.getElementById("plist").innerHTML = rows.map((p) => (scout ? `<div class="ol-item">${scoutItem(p)}<div class="ol-why small zp" data-zp="${esc(p.id)}"><span class="muted">Loading zone projection...</span></div></div>` : playerItem(p))).join("") || `<p class="empty">No player matches that search.</p>`;
+    if (scout) fillZoneProj(document.getElementById("plist"));
   };
   document.getElementById("q").addEventListener("input", (e) => { S.q = e.target.value; draw(); });
   document.getElementById("zf")?.addEventListener("change", (e) => { S.zf = e.target.value; draw(); });

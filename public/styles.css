@@ -1122,3 +1122,7 @@ a.gtab { color: var(--ink-2); }
 .ol-item { display: grid; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 12px; }
 .ol-why { padding: 2px 6px 6px; line-height: 1.45; }
 .ol-why ul { margin: 4px 0; }
+
+/* zone-based projection under each Scout player */
+.zp > div + div { margin-top: 3px; }
+
