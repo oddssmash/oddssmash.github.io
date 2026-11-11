@@ -26,7 +26,7 @@ function series(p, bo) { const need = Math.ceil(bo / 2), out = {}; let win = 0; 
 
 // ---------------------------------------------------------------- chrome
 const NAV = [["matches", "Matches", "M4 5h16v14H4zM4 10h16M9 5v14"], ["sim", "Simulator", "M5 4h14v16H5zM9 8h6M9 12h6M9 16h3"], ["heroes", "Heroes", "M12 3l3 6 6 1-4.5 4 1 6-5.5-3-5.5 3 1-6L3 10l6-1z"], ["teams", "Teams", "M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"], ["more", "More", "M4 7h16M4 12h16M4 17h16"]];
-const TAB = { matches: "matches", match: "matches", versus: "matches", draft: "sim", sim: "sim", picks: "matches", heroes: "heroes", hero: "heroes", teams: "teams", team: "teams", players: "teams", player: "teams", more: "more", m8: "matches", results: "more", how: "more", sources: "more" };
+const TAB = { matches: "matches", match: "matches", versus: "matches", draft: "sim", sim: "sim", picks: "matches", heroes: "heroes", hero: "heroes", teams: "teams", team: "teams", players: "teams", player: "teams", more: "more", m8: "matches", library: "more", matrix: "heroes", results: "more", how: "more", sources: "more" };
 function drawNav(active) { const nav = document.getElementById("nav"); if (!nav.childElementCount) nav.innerHTML = NAV.map(([k, l, d]) => `<a href="#/${k}" data-tab="${k}"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg></span><span class="nav-l">${l}</span></a>`).join("");
   for (const a of nav.children) a.dataset.tab === active ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"); }
 document.getElementById("theme").addEventListener("click", () => { const l = document.documentElement.dataset.theme !== "light"; document.documentElement.dataset.theme = l ? "light" : "dark"; document.getElementById("theme-color").setAttribute("content", l ? "#f4f5f6" : "#0b0c0d"); try { localStorage.setItem("theme", l ? "light" : "dark"); } catch {} });
@@ -163,6 +163,12 @@ async function vSim() {
   const prof = (hs) => { const p = {}; for (const k of Object.keys(TRAIT_LBL)) p[k] = hs.reduce((a, h) => a + (D.traits[h]?.[k] || 0), 0); return p; };
   const detail = async (t) => { if (!t) return null; const d = await load(`teams/${sid(t.name)}.json`).catch(() => null); if (!d) return null; const pl = await Promise.all(d.roster.map((r) => load(`players/${r.id}.json`).catch(() => null))); return { d, pl }; };
   const [dA, dB] = await Promise.all([detail(st.a), detail(st.b)]);
+  const MAPS = Object.fromEntries(Object.entries(await load("maps.json").catch(() => ({}))).map(([k, v]) => [k.trim(), v]).filter(([, v]) => v.games >= 10));
+  // draft plan (coaching-board style): what each side should ban first, and the fallback per role if a comfort pick is banned
+  const plan = (me, them) => { if (!me || !them) return "";
+    const targets = them.d.profile.comfort.filter((c) => c.n >= 3).map((c) => ({ ...c, score: c.n * (c.wr - 0.35) })).sort((a, b) => b.score - a.score).slice(0, 6);
+    const alt = ["EXP", "Jungle", "Mid", "Gold", "Roam"].map((r) => { const c = me.d.profile.comfort.filter((x) => x.role === r).slice(0, 3); return c.length ? `<li><b>${r}:</b> ${c.map((x, i) => `${i ? "if banned → " : ""}${heroChip(x.h)} <span class="muted small">${x.n}g ${pct(x.wr)}</span>`).join(" ")}</li>` : ""; }).join("");
+    return `<div class="card"><h2>Draft plan: ${esc(me.d.name)}</h2><h3>Ban priority against ${esc(them.d.name)}</h3><ol class="small">${targets.map((t) => `<li>${heroChip(t.h)} <span class="muted">their ${esc(t.role)} · ${t.n} games, ${pct(t.wr)} won</span></li>`).join("")}</ol><h3>Picks by role, with fallbacks</h3><ul class="plain small">${alt}</ul><p class="small muted">From both teams' last 150 days of games. Win condition: ${esc(me.d.profile.archetype.join(", "))}.</p></div>`; };
   const taken = () => new Set([...st.h1, ...st.h2, ...st.b1, ...st.b2].filter(Boolean));
   // suggestion score for side s (1 or 2), role i
   const suggest = (s, i) => {
@@ -194,6 +200,8 @@ async function vSim() {
     return `<div class="sug"><b class="small">Suggested ${ROLES[i]} for ${esc((side === 1 ? st.a : st.b)?.name || `side ${side === 1 ? "A" : "B"}`)}</b>${sg.map((x) => `<button class="hchip" type="button" data-sug="${side},${i},${esc(x.h)}" title="${esc(x.why.join("; "))}">${esc(cap(x.h))}</button>`).join("")}<span class="small muted" style="display:block">${esc(sg[0]?.why.join(" · ") || "")}</span></div>`; };
   const draw = () => { const r = compute(), A = st.a?.name || "Side A", B = st.b?.name || "Side B", wa = draftWarnings(r.pA, D.avgLineup, r.h1.length), wb = draftWarnings(r.pB, D.avgLineup, r.h2.length);
     document.getElementById("sim-sug").innerHTML = sugBox(1) + sugBox(2);
+    document.getElementById("sim-plan").innerHTML = dA && dB ? `<div class="grid two">${plan(dA, dB)}${plan(dB, dA)}</div>` : "";
+    const MI = st.map && MAPS[st.map]; document.getElementById("sim-mapinfo").innerHTML = MI ? `Blue side has won ${pct(MI.blueWin)} of ${MI.games} pro games on ${esc(st.map)}.${[st.a, st.b].filter(Boolean).map((t) => { const r = MI.teams[t.name]; return r ? ` ${esc(t.name)} ${r[0]}-${r[1] - r[0]} here.` : ""; }).join("")}${[...st.h1, ...st.h2].filter(Boolean).map((h) => { const r = MI.heroes[h]; return r ? ` ${cap(h)} ${r[0]}-${r[1] - r[0]}.` : ""; }).join("")}` : st.map ? "Few pro games on record for this map." : "Map events are recorded for recent seasons only.";
     document.getElementById("sim-out").innerHTML = `<div class="card"><div class="gp-h"><span><b>${pct(r.p)}</b></span><span class="muted small">Win chance this game</span><span><b>${pct(1 - r.p)}</b></span></div><div class="spread"><span>${esc(A)}</span><span>${esc(B)}</span></div>
       <div class="gc-bar"><span style="flex:${r.p};background:${r.p >= 0.5 ? "var(--accent)" : "var(--line-2)"}"></span><span style="flex:${1 - r.p};background:${r.p < 0.5 ? "var(--accent)" : "var(--line-2)"}"></span></div>
       <p class="small">Teams alone: ${pct(lg(r.base))} for ${esc(A)}; the draft moves it ${r.p - lg(r.base) >= 0 ? "+" : ""}${Math.round((r.p - lg(r.base)) * 100)} points.</p>
@@ -206,8 +214,10 @@ async function vSim() {
     <label class="small"><input type="checkbox" id="sim-series" ${st.series ? "checked" : ""}> Series mode: heroes a team already used in this series are locked for that team (global ban)</label>
     <div class="grid two"><div class="card"><h2>Side A</h2>${pickBox("sta", "Team (optional)", st.a?.name || "")}<h3>Bans</h3>${[0, 1, 2, 3, 4].map((i) => slot(1, i, "b")).join("")}<h3>Picks</h3>${[0, 1, 2, 3, 4].map((i) => slot(1, i, "h")).join("")}</div>
       <div class="card"><h2>Side B</h2>${pickBox("stb", "Team (optional)", st.b?.name || "")}<h3>Bans</h3>${[0, 1, 2, 3, 4].map((i) => slot(2, i, "b")).join("")}<h3>Picks</h3>${[0, 1, 2, 3, 4].map((i) => slot(2, i, "h")).join("")}</div></div>
-    <div id="sim-sug" class="card"></div><div id="sim-out"></div>
+    <div class="card"><label class="small" for="sim-map">Battlefield (annual map event)</label><select class="field" id="sim-map"><option value="">Not set</option>${Object.keys(MAPS).map((k) => `<option${st.map === k ? " selected" : ""}>${esc(k)}</option>`).join("")}</select><div id="sim-mapinfo" class="small" style="margin-top:6px"></div></div>
+    <div id="sim-plan"></div><div id="sim-sug" class="card"></div><div id="sim-out"></div>
     <p><button class="btn" type="button" id="sim-next">Next game in the series (lock these picks, clear the board)</button> <button class="btn" type="button" id="sim-reset">Reset</button></p>`;
+  document.getElementById("sim-map").addEventListener("change", (e) => { st.map = e.target.value; draw(); });
   bindPick(document.getElementById("sta"), teams, (t) => `${t.name} (${t.region})`, (t) => { st.a = t; vSim(); });
   bindPick(document.getElementById("stb"), teams, (t) => `${t.name} (${t.region})`, (t) => { st.b = t; vSim(); });
   for (const side of [1, 2]) for (const kind of ["h", "b"]) for (let i = 0; i < 5; i++) { const inp = document.getElementById(`s${kind}${side}${i}`); bindPick(inp, names, (h) => cap(h), (h) => { st[`${kind}${side}`][i] = h; draw(); }); inp.addEventListener("change", () => { if (!inp.value) { st[`${kind}${side}`][i] = ""; draw(); } }); }
@@ -218,14 +228,45 @@ async function vSim() {
   draw();
 }
 
+// ---------------------------------------------------------------- Draft library (every pro game with its draft)
+async function vLibrary() {
+  const idx = await load("library.json"); S.lib ||= { league: idx[0]?.id, q: "", team: "", hero: "" };
+  const rows = await load(`library/${S.lib.league}.json`);
+  const draw = () => { const q = S.lib.q.trim().toLowerCase();
+    const f = rows.filter((r) => !q || r[2].toLowerCase().includes(q) || r[3].toLowerCase().includes(q) || [...r[10], ...r[11]].some((h) => h.includes(q)) || (r[1] || "").toLowerCase().includes(q)).slice(0, 60);
+    document.getElementById("lib").innerHTML = f.map((r) => { const [date, stage, a, b, bo, n, w, side1, map, len, h1, h2, b1, b2] = r, A = w === 1, ROLES = ["EXP", "JGL", "MID", "GLD", "ROM"];
+      const side = (t, hs, bs, won, sd) => `<div class="ld-side ${won ? "won" : ""}"><div class="spread"><b>${tb(t, 22)} ${esc(t)}</b><span class="small ${won ? "up" : "muted"}">${won ? "WIN" : ""} ${sd ? esc(sd) : ""}</span></div><div class="ld-picks">${hs.map((h, i) => `<span class="ld-p"><span class="muted small">${ROLES[i]}</span>${heroImg(h, 30)}<span class="small">${esc(cap(h))}</span></span>`).join("")}</div><div class="small muted">Bans: ${bs.map((h) => `${heroImg(h, 16)}${esc(cap(h))}`).join(" · ") || "-"}</div></div>`;
+      return `<div class="card ld"><div class="small muted spread"><span>${esc(date || "")} · ${esc(stage || "")} · Game ${n} of Bo${bo}</span><span>${map ? esc(map.trim()) + " · " : ""}${esc(len || "")}</span></div>${side(a, h1, b1, A, side1)}${side(b, h2, b2, !A, side1 === "blue" ? "red" : side1 === "red" ? "blue" : "")}</div>`; }).join("") || `<p class="empty">No game matches.</p>`;
+    document.getElementById("lib-n").textContent = `${f.length < rows.length ? `Showing ${f.length} of ` : ""}${rows.length} games in this league`; };
+  app.innerHTML = `<a class="back" href="#/more">‹ More</a><h1>Draft library</h1><p class="lead">Every pro game in our data with both drafts (picks in role order and bans), side, battlefield map, length and result. Search a team, a hero or a stage.</p>
+    <select class="field" id="lib-l">${idx.map((x) => `<option value="${esc(x.id)}"${x.id === S.lib.league ? " selected" : ""}>${esc(x.league)} (${x.games})</option>`).join("")}</select>
+    <input class="field" id="lib-q" type="search" placeholder="Team, hero or stage, e.g. Falcons or Hirara or Playoffs" value="${esc(S.lib.q)}" style="margin-top:8px">
+    <p class="small muted" id="lib-n" style="margin:8px 0"></p><div id="lib"></div><p class="small muted">Source: Liquipedia. Blue side picks first in pro MLBB; Liquipedia lists picks by role, not in draft order.</p>`;
+  document.getElementById("lib-l").addEventListener("change", (e) => { S.lib.league = e.target.value; vLibrary(); });
+  document.getElementById("lib-q").addEventListener("input", (e) => { S.lib.q = e.target.value; draw(); });
+  draw();
+}
+// ---------------------------------------------------------------- Counter matrix
+async function vMatrix() {
+  const M = await load("matrix.json"); S.mx ||= { lane: "", hero: "" };
+  const G = { 2: ["▲▲", "Hard counter", "mx2"], 1: ["▲", "Favoured", "mx1"], "-1": ["▼", "Losing", "mxm1"], "-2": ["▼▼", "Hard loss", "mxm2"] };
+  const heroes = Object.keys(M.m).filter((h) => !S.mx.lane || M.lanes[h] === S.mx.lane).sort();
+  const one = S.mx.hero && M.m[S.mx.hero] ? Object.entries(M.m[S.mx.hero]).sort((a, b) => b[1][0] - a[1][0] || b[1][1] - a[1][1]) : null;
+  app.innerHTML = `<a class="back" href="#/more">‹ More</a><h1>Counter matrix</h1><p class="lead">How each hero has done against others in pro games. ${esc(M.note)}</p>
+    <div class="filters" role="group" aria-label="Lane"><button class="fbtn" data-ml="" aria-pressed="${!S.mx.lane}">All</button>${["EXP", "Jungle", "Mid", "Gold", "Roam"].map((r) => `<button class="fbtn" data-ml="${r}" aria-pressed="${S.mx.lane === r}">${r}</button>`).join("")}</div>
+    <div class="mx-grid">${heroes.map((h) => `<button class="mx-h ${S.mx.hero === h ? "on" : ""}" type="button" data-mh="${esc(h)}">${heroImg(h, 36)}<span class="small">${esc(cap(h))}</span></button>`).join("")}</div>
+    ${one ? `<div class="card"><h2>${heroImg(S.mx.hero, 32)} ${esc(cap(S.mx.hero))} against</h2>${[2, 1, -1, -2].map((g) => { const xs = one.filter(([, v]) => v[0] === g); return xs.length ? `<h3><span class="${G[g][2]}">${G[g][0]}</span> ${G[g][1]}</h3><p>${xs.map(([o, v]) => `${heroChip(o)} <span class="muted small">${v[2]}% · ${v[1]} games</span>`).join(" ")}</p>` : ""; }).join("")}</div>` : `<p class="small muted">Pick a hero to see who it counters and who counters it.</p>`}`;
+  app.querySelectorAll("[data-ml]").forEach((b) => b.addEventListener("click", () => { S.mx.lane = b.dataset.ml; vMatrix(); }));
+  app.querySelectorAll("[data-mh]").forEach((b) => b.addEventListener("click", () => { S.mx.hero = b.dataset.mh; vMatrix(); }));
+}
 // ---------------------------------------------------------------- heroes
 async function vHeroes() {
   const heroes = await load("heroes.json"), ROLES = ["EXP", "Jungle", "Mid", "Gold", "Roam"];
   const meta = await load("meta.json");
   app.innerHTML = `<h1>Meta heroes</h1>${meta.patch ? `<p class="small"><span class="chip">Current patch ${esc(meta.patch.patch)} (${esc(dshort(meta.patch.release))})</span> ${meta.patch.changes.length ? esc(meta.patch.changes.map((c) => `${cap(c.hero)} ${c.type}`).join(" · ")) : ""}</p>` : ""}<p class="lead">Every hero in pro play in our data. Tier by recent presence (picked or banned) in the last 150 days: S 40%+, A 20%+, B 8%+. Open a hero for its best combos and counters.</p>
-    <input class="field" id="hq" type="search" placeholder="Search a hero" value="${esc(S.hq)}"><div class="filters" role="group" aria-label="Role" style="margin-top:8px"><button class="fbtn" data-hr="" aria-pressed="${!S.hrole}">All roles</button>${ROLES.map((r) => `<button class="fbtn" data-hr="${r}" aria-pressed="${S.hrole === r}">${r}</button>`).join("")}</div><div id="hl"></div>`;
+    <p class="small"><a href="#/matrix">Counter matrix ›</a> · <a href="#/library">Draft library ›</a></p><input class="field" id="hq" type="search" placeholder="Search a hero" value="${esc(S.hq)}"><div class="filters" role="group" aria-label="Role" style="margin-top:8px"><button class="fbtn" data-hr="" aria-pressed="${!S.hrole}">All roles</button>${ROLES.map((r) => `<button class="fbtn" data-hr="${r}" aria-pressed="${S.hrole === r}">${r}</button>`).join("")}</div><div id="hl"></div>`;
   const draw = () => { const q = S.hq.toLowerCase(), f = heroes.filter((h) => (!q || h.id.includes(q)) && (!S.hrole || h.roles[0]?.r === S.hrole));
-    document.getElementById("hl").innerHTML = ["S", "A", "B", "C"].map((t) => { const hs = f.filter((h) => h.tier === t); return hs.length ? `<h3>${t} tier <span class="muted">· ${hs.length}</span></h3><div class="tgrid">${hs.slice(0, t === "C" ? 30 : 60).map((h) => `<a class="titem" href="#/hero/${encodeURIComponent(h.id)}"><span class="hpic">${heroImg(h.id, 44)}<span class="tier t${t}">${t}</span></span><span><span class="t1">${esc(cap(h.id))}</span><span class="t2">${esc(h.roles.slice(0, 2).map((r) => r.r).join(" / "))} · recent: ${h.recent.picks} picks, ${h.recent.bans} bans${h.recent.wr != null ? `, ${pct(h.recent.wr)} won` : ""}</span></span><span class="t3"><b>${pct(h.recent.presence)}</b><br><span class="muted small">presence</span></span></a>`).join("")}</div>` : ""; }).join("") || `<p class="empty">No hero matches.</p>`; };
+    document.getElementById("hl").innerHTML = ["S", "A", "B", "C"].map((t) => { const hs = f.filter((h) => h.tier === t); return hs.length ? `<h3>${t} tier <span class="muted">· ${hs.length}</span></h3><div class="tgrid">${hs.slice(0, t === "C" ? 30 : 60).map((h) => `<a class="titem" href="#/hero/${encodeURIComponent(h.id)}"><span class="hpic">${heroImg(h.id, 44)}<span class="tier t${t}">${t}</span></span><span><span class="t1">${esc(cap(h.id))}</span><span class="t2">${esc(h.roles.slice(0, 2).map((r) => r.r).join(" / "))} · recent: ${h.recent.picks} picks, ${h.recent.bans} bans${h.firstPhaseBan != null && h.firstPhaseBan >= 0.6 ? " · priority ban" : ""}${h.recent.wr != null ? `, ${pct(h.recent.wr)} won` : ""}</span></span><span class="t3"><b>${pct(h.recent.presence)}</b><br><span class="muted small">presence</span></span></a>`).join("")}</div>` : ""; }).join("") || `<p class="empty">No hero matches.</p>`; };
   document.getElementById("hq").addEventListener("input", (e) => { S.hq = e.target.value; draw(); });
   app.querySelectorAll("[data-hr]").forEach((b) => b.addEventListener("click", () => { S.hrole = b.dataset.hr; app.querySelectorAll("[data-hr]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); draw(); }));
   draw();
@@ -309,7 +350,7 @@ async function vPicks() {
 }
 async function vMore() {
   const item = (href, ic, t, d) => `<a class="card menu-i" href="${href}"><span class="menu-ic" aria-hidden="true">${ic}</span><span><b>${t}</b><span class="small muted" style="display:block">${d}</span></span><span class="menu-c">›</span></a>`;
-  app.innerHTML = `<h1>More</h1>${item("#/results", "📋", "Results and accuracy", "Every graded series, the saved-before-start record and calibration.")}${item("#/m8", "🏆", "M8 World Championship", "The field, the Wildcard and each team's chance to advance.")}${item("#/versus", "⚔️", "Versus", "Any team against any team.")}${item("#/sim", "🧩", "Match simulator", "Live draft with suggestions, draft profile and win chance by game time.")}${item("#/picks", "⭐", "Picks", "Our own lines for scheduled matches.")}${item("#/players", "👤", "Players", "Hero pools, signature heroes and official stats.")}${item("#/how", "⚙️", "How it works", "Ratings, series math, the draft layer and the learning.")}${item("#/sources", "🔗", "Data sources", "Where the numbers come from, and what is not read.")}${item("../nba/", "🏀", "NBA", "Switch to the NBA section.")}${item("../fiba/", "🌍", "FIBA", "Switch to the FIBA section.")}`;
+  app.innerHTML = `<h1>More</h1>${item("#/results", "📋", "Results and accuracy", "Every graded series, the saved-before-start record and calibration.")}${item("#/library", "📚", "Draft library", "Every pro game with both drafts, side, map, length and result.")}${item("#/matrix", "🔀", "Counter matrix", "Who each hero beats and loses to in pro play.")}${item("#/m8", "🏆", "M8 World Championship", "The field, the Wildcard and each team's chance to advance.")}${item("#/versus", "⚔️", "Versus", "Any team against any team.")}${item("#/sim", "🧩", "Match simulator", "Live draft with suggestions, draft profile and win chance by game time.")}${item("#/picks", "⭐", "Picks", "Our own lines for scheduled matches.")}${item("#/players", "👤", "Players", "Hero pools, signature heroes and official stats.")}${item("#/how", "⚙️", "How it works", "Ratings, series math, the draft layer and the learning.")}${item("#/sources", "🔗", "Data sources", "Where the numbers come from, and what is not read.")}${item("../nba/", "🏀", "NBA", "Switch to the NBA section.")}${item("../fiba/", "🌍", "FIBA", "Switch to the FIBA section.")}`;
 }
 async function vResults() {
   const [res, acc, pt] = await Promise.all([load("results.json"), load("accuracy.json"), load("pretip.json").catch(() => null)]);
@@ -341,7 +382,7 @@ async function route() {
   const [, viewRaw = "matches", arg] = h.split("?")[0].split("/"), view = viewRaw || "matches";
   drawNav(TAB[view] || "matches");
   S.img ||= await load("images.json").catch(() => ({ heroes: {}, teams: {}, players: {} }));
-  try { await ({ matches: vMatches, match: vMatch, versus: vVersus, draft: vSim, sim: vSim, picks: vPicks, heroes: vHeroes, hero: vHero, teams: vTeams, team: vTeam, players: vPlayers, player: vPlayer, more: vMore, m8: vM8, results: vResults, how: vHow, sources: vSources }[view] || vMissing)(decodeURIComponent(arg || "")); }
+  try { await ({ matches: vMatches, match: vMatch, versus: vVersus, draft: vSim, sim: vSim, picks: vPicks, heroes: vHeroes, hero: vHero, teams: vTeams, team: vTeam, players: vPlayers, player: vPlayer, more: vMore, m8: vM8, library: vLibrary, matrix: vMatrix, results: vResults, how: vHow, sources: vSources }[view] || vMissing)(decodeURIComponent(arg || "")); }
   catch (e) { if (seq === S.seq) app.innerHTML = `<div class="card"><h2>Could not load this page</h2><p class="muted">${esc(e.message)}</p><p><a class="go" href="#/matches">Back to matches</a></p></div>`; }
   if (st.length > 1) app.querySelectorAll("a.back").forEach((a) => (a.textContent = "‹ Back"));
   if (S.last !== h) window.scrollTo(0, 0); S.last = h;

@@ -31,6 +31,10 @@ const cnt = {}; for (const m of all) for (const n of [m.a, m.b]) { const k = n.t
 const disp = Object.fromEntries(Object.entries(cnt).map(([k, v]) => [k, Object.entries(v).sort((a, b) => (/[A-Z]/.test(b[0]) - /[A-Z]/.test(a[0])) || b[1] - a[1])[0][0]])); // most common spelling that has capitals
 const canon = (n) => { const a = ALIAS[String(n).toLowerCase()]; return a || disp[String(n).toLowerCase()] || n; };
 for (const m of all) { m.a = canon(m.a); m.b = canon(m.b); }
+// one name per hero: match every spelling ("gatot", "popol and kupa") to Liquipedia's hero names
+{ const LPH = Object.keys(readJSON(path.join(MD, "heroes-lp.json"), { heroes: {} }).heroes), strip = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, ""), byStrip = new Map(LPH.map((h) => [strip(h), h])), memo = new Map();
+  const HN = (h) => { if (!h) return h; if (memo.has(h)) return memo.get(h); const k = strip(h).replace(/and/g, ""); let r = byStrip.get(strip(h)) || [...byStrip].find(([s2]) => s2.replace(/and/g, "") === k)?.[1] || (k.length >= 4 ? [...byStrip].find(([s2]) => s2.startsWith(k))?.[1] : null) || h; memo.set(h, r); return r; };
+  for (const m of all) for (const g of m.games) { g.h1 = g.h1.map(HN); g.h2 = g.h2.map(HN); g.b1 = g.b1.map(HN); g.b2 = g.b2.map(HN); if (g.map) g.map = g.map.trim(); } }
 const order = Object.fromEntries(EVENTS.map((e, i) => [e.page, i]));
 const done = all.filter((m) => m.done && m.games.length && !m.walkover).sort((a, b) => (a.date || "").localeCompare(b.date || "") || order[a.page] - order[b.page]);
 const upcoming = all.filter((m) => !m.done && m.date && Date.parse(m.date) > now - 6 * 3600000).sort((a, b) => a.date.localeCompare(b.date));
@@ -281,6 +285,29 @@ picks.sort((a, b) => b.p - a.p);
 writeJSON(path.join(OUT, "upcoming.json"), upOut);
 writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series math (game chance from team ratings). Capped at 90% (maps 85%) and only for teams with 6+ series in our data. No sportsbook data.", picks });
 
+// ---------------------------------------------------------------- DRAFT LIBRARY, counter matrix, maps, ban priority
+// Every pro game with its draft, side, battlefield map, length and result, one file per league for the Library page.
+{
+  fs.mkdirSync(path.join(OUT, "library"), { recursive: true });
+  const byL = {};
+  for (const m of done) for (const g of m.games) (byL[m.league] ||= []).push([m.date?.slice(0, 10), m.stage, m.a, m.b, m.bo, g.n, g.w, g.side1, g.map, g.len, g.h1, g.h2, g.b1, g.b2, m.score]);
+  const index = [];
+  for (const [lgName, rows] of Object.entries(byL)) { const id = safe(lgName); writeJSON(path.join(OUT, "library", `${id}.json`), rows.reverse()); index.push({ id, league: lgName, games: rows.length, last: rows[0]?.[0] }); }
+  writeJSON(path.join(OUT, "library.json"), index.sort((a, b) => (b.last || "").localeCompare(a.last || "")));
+  // counter matrix: every hero pair with 4+ games against each other, graded like a coaching board
+  const grade = (wr, n) => (n < 4 ? 0 : wr >= 0.65 ? 2 : wr >= 0.56 ? 1 : wr <= 0.35 ? -2 : wr <= 0.44 ? -1 : 0);
+  const mx = {}; for (const [k, v] of D.VS) { if (v.n < 4) continue; const [a, b] = k.split(">"); const wr = (v.w + 3) / (v.n + 6), gr = grade(wr, v.n); if (gr) (mx[a] ||= {})[b] = [gr, Math.round(v.n), Math.round(wr * 100)]; }
+  writeJSON(path.join(OUT, "matrix.json"), { note: "Hero vs hero in pro games, fading by half every 120 days, pulled toward 50%: hard counter 65%+, favoured 56%+, losing 44% or less, hard loss 35% or less; 4+ games needed.", lanes: Object.fromEntries(HERO.map((h) => [h.id, h.roles[0]?.r || null])), m: mx });
+  // maps (annual map events): team and hero records per battlefield, and how often blue side wins there
+  const MAPS = {}; for (const m of done) for (const g of m.games) if (g.map) { const M = (MAPS[g.map] ||= { games: 0, blue: 0, teams: {}, heroes: {} }); M.games++; if ((g.side1 === "blue" && g.w === 1) || (g.side1 === "red" && g.w === 2)) M.blue++;
+    for (const [t, hs, won] of [[m.a, g.h1, g.w === 1], [m.b, g.h2, g.w === 2]]) { const T = (M.teams[t] ||= [0, 0]); T[1]++; if (won) T[0]++; for (const h of hs) { const H = (M.heroes[h] ||= [0, 0]); H[1]++; if (won) H[0]++; } } }
+  writeJSON(path.join(OUT, "maps.json"), Object.fromEntries(Object.entries(MAPS).map(([k, v]) => [k, { games: v.games, blueWin: r3(v.blue / v.games), teams: v.teams, heroes: Object.fromEntries(Object.entries(v.heroes).filter(([, x]) => x[1] >= 5)) }])));
+  // ban priority: share of each hero's bans that come in the first ban phase (bans 1-3) over the last 150 days
+  const BP = {}; for (const m of done.filter((x) => Date.parse(x.date) > now - 150 * DAY)) for (const g of m.games) for (const bs of [g.b1, g.b2]) bs.forEach((h, i) => { const v = (BP[h] ||= [0, 0]); v[1]++; if (i < 3) v[0]++; });
+  for (const h of HERO) { const v = BP[h.id]; h.firstPhaseBan = v && v[1] >= 5 ? r3(v[0] / v[1]) : null; }
+  writeJSON(path.join(OUT, "heroes.json"), HERO);
+  console.log(`library: ${index.length} leagues · matrix: ${Object.values(mx).reduce((a, x) => a + Object.keys(x).length, 0)} graded pairs · maps: ${Object.keys(MAPS).length}`);
+}
 // ---------------------------------------------------------------- M8 field and Wildcard simulation
 // Teams from Liquipedia's M8 qualification table. The Wildcard is two groups of five, best-of-one round robin, top
 // team of each group advances. Groups are not drawn yet, so each run draws them at random; teams with no games in

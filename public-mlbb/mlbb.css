@@ -47,3 +47,10 @@ table.tb2 td:nth-child(3) { width: 45%; }
 .himg { border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 4px; background: var(--surface-2); }
 .pface { border-radius: 50%; object-fit: cover; object-position: center top; background: var(--face); flex: none; vertical-align: middle; }
 .hpic { position: relative; display: inline-block; } .hpic .tier { position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; font-size: 12px; }
+
+/* draft library and counter matrix */
+.ld { display: grid; gap: 8px; } .ld-side { padding: 8px; border-radius: 10px; background: var(--surface-2); } .ld-side.won { box-shadow: inset 3px 0 0 var(--good); }
+.ld-picks { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; margin: 6px 0; } .ld-p { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 2px; overflow: hidden; } .ld-p .himg { margin: 0; }
+.mx-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; margin: 10px 0; }
+.mx-h { display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; } .mx-h.on { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-wash); } .mx-h .himg { margin: 0; }
+.mx2 { color: var(--good-ink); font-weight: 800; } .mx1 { color: var(--good-ink); } .mxm1 { color: var(--crit-ink); } .mxm2 { color: var(--crit-ink); font-weight: 800; }
