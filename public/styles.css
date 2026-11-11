@@ -1009,3 +1009,25 @@ a.gtab { color: var(--ink-2); }
 .hz-ar { font-size: 16px; }
 .hz-ar.up { fill: #ffe08a; } .hz-ar.dn { fill: #b9f1ff; }
 .lv-chg { margin: 6px 0 2px; padding: 6px 10px; border-radius: 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); }
+
+/* ---------- live picks ---------- */
+.lp-card { margin: 12px 0; }
+.lp-legend { display: flex; flex-wrap: wrap; gap: 6px 12px; margin: 4px 0 8px; }
+.lp-key::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 3px; margin-right: 5px; vertical-align: -1px; }
+.lp-key.q::before { background: #f5b82e; } .lp-key.l::before { background: #2fbf71; } .lp-key.n::before { background: #5b6476; }
+.lp-row { border: 1px solid var(--line); border-left: 4px solid #5b6476; border-radius: 10px; padding: 8px 10px; margin: 6px 0; }
+.lp-row.lp-l { border-left-color: #2fbf71; }
+.lp-row.lp-q { border-left-color: #f5b82e; background: color-mix(in srgb, #f5b82e 9%, transparent); box-shadow: 0 0 0 1px color-mix(in srgb, #f5b82e 35%, transparent); }
+.lp-top { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.lp-tag { font-weight: 800; letter-spacing: .03em; padding: 1px 7px; border-radius: 999px; background: color-mix(in srgb, var(--accent) 22%, transparent); }
+.lp-k { opacity: .85; }
+.lp-star { margin-left: auto; color: #f5b82e; font-weight: 800; }
+.lp-mid { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 6px 0 4px; }
+.lp-pick { font-weight: 800; font-size: 16px; padding: 4px 12px; border-radius: 999px; background: #2fbf71; color: #06210f; }
+.lp-row.lp-n .lp-pick { background: #8a93a6; color: #0b1020; }
+.lp-row.lp-q .lp-pick { background: #f5b82e; color: #2a1c00; }
+.lp-price { font-weight: 700; font-variant-numeric: tabular-nums; font-size: 15px; }
+.lp-num { display: flex; flex-wrap: wrap; gap: 4px 12px; font-variant-numeric: tabular-nums; }
+.lp-h4 { margin: 12px 0 4px; font-size: 13px; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
+.lp-bk { margin: 2px 0 4px; padding: 4px 8px; border-radius: 6px; background: color-mix(in srgb, var(--ink) 6%, transparent); font-variant-numeric: tabular-nums; }
+.lp-bkl { font-weight: 800; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; margin-right: 6px; opacity: .8; }

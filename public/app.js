@@ -3845,6 +3845,7 @@ function liveEngineCard(g, L, M) {
     <div class="pr-row"><span class="pr-k">Live spread</span><span class="pr-v"><b>${esc(T(favLive).abbr)} ${spreadTxt(spread)}</b><i>projected final margin ${esc(T(favLive).abbr)} by ${f1(Math.abs(M.margin))}</i></span></div>
     <div class="pr-row"><span class="pr-k">Live total</span><span class="pr-v"><b>${f1(M.projTot)}</b><i>pre-game ${f1(g.pred.hs + g.pred.as)} · now ${esc(L.hs + L.as)}</i></span></div>
     <div class="pr-row"><span class="pr-k">Team totals</span><span class="pr-v"><b>${esc(T(away).abbr)} ${f1(M.projA)} · ${esc(T(home).abbr)} ${f1(M.projH)}</b><i>projected finals</i></span></div>
+    ${S.mkt && S.mkt.id === g.id ? livePicksCard(g, L, M, S.mkt) : `<p class="small muted">Live odds loading… our live picks appear here once the sportsbook feed arrives.</p>`}
     ${liveMarkets(g, L, M)}
     ${S.mkt && S.mkt.id === g.id ? marketCard(g, L, M, S.mkt) : ""}
     <p class="small muted" style="margin-top:8px">Starts from our pre-game projection and scenario library, then uses the live score, time left, pace and each player's line so far. Remaining minutes use his normal scoring rate, so a hot or cold start is expected to even out. Lines are the pre-game prop lines; no betting odds are used.</p></div>`;
@@ -3922,6 +3923,72 @@ async function marketFetch(id, keepProps) {
   // Pre-game props barely change once the game starts, so fetch them once per game.
   if (!m.preProps && liveIt && preIt) { try { m.preProps = parseProps(await pb(preIt.provider?.id), tid); } catch { m.preProps = []; } }
   return m;
+}
+// Our live picks at the sportsbook's live lines: our side, the live price, our chance vs the book's fair chance, EV.
+// Our chance comes from our live model only; the odds only set the line and price we compare against.
+function livePicks(g, L, M, m) {
+  const H = T(g.home).abbr, A = T(g.away).abbr, homeId = String(g.home), awayId = String(g.away);
+  const dec = (a) => { const v = Number(a); return !v ? null : v > 0 ? 1 + v / 100 : 1 + 100 / -v; };
+  const out = [], amB = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "-" : (Number(v) > 0 ? "+" : "") + Number(v));
+  const add = (o) => { if (o.ours == null || !Number.isFinite(o.ours) || o.ours <= 0.5 || o.ours >= 0.995) return; const d = dec(o.price); o.ev = d ? o.ours * d - 1 : null; o.gap = o.book != null ? o.ours - o.book : null; o.qual = o.gap != null && o.ev != null && o.gap >= 0.05 && o.ev >= 0.03; out.push(o); };
+  const sideP = (pOver, line, price2, label, kind, tag, extra = {}) => { const over = pOver >= 0.5; const pr = over ? price2[0] : price2[1]; const bk = noVig(price2[0], price2[1]); add({ tag, kind, bk: `Over ${line} ${amB(price2[0])} · Under ${line} ${amB(price2[1])}`, pick: `${over ? "Over" : "Under"} ${line}`, label, price: pr, ours: over ? pOver : 1 - pOver, book: bk == null ? null : over ? bk : 1 - bk, ...extra }); };
+  // game moneyline
+  const mH = noVig(m.home.ml, m.away.ml);
+  if (mH != null) { const home = M.pHome >= 0.5; add({ tag: "Game", kind: "Moneyline", bk: `${A} ${amB(m.away.ml)} · ${H} ${amB(m.home.ml)}`, pick: `${home ? H : A} to win`, price: home ? m.home.ml : m.away.ml, ours: home ? M.pHome : 1 - M.pHome, book: home ? mH : 1 - mH }); }
+  // game spread (home handicap)
+  if (Number.isFinite(m.home.sp)) { const hl = m.home.sp, pH = 1 - pNorm((-hl - M.margin) / M.sd), bk = noVig(m.home.spo, m.away.spo); const home = pH >= 0.5;
+    add({ tag: "Game", kind: "Spread", bk: `${A} ${-hl > 0 ? "+" : ""}${-hl} ${amB(m.away.spo)} · ${H} ${hl > 0 ? "+" : ""}${hl} ${amB(m.home.spo)}`, pick: home ? `${H} ${hl > 0 ? "+" : ""}${hl}` : `${A} ${-hl > 0 ? "+" : ""}${-hl}`, price: home ? m.home.spo : m.away.spo, ours: home ? pH : 1 - pH, book: bk == null ? null : home ? bk : 1 - bk, note: `our margin ${M.margin >= 0 ? H : A} by ${f1(Math.abs(M.margin))}` }); }
+  // game total
+  if (Number.isFinite(m.total)) { const T_ = M.totals, pO = L.hs + L.as > m.total ? 1 : 1 - pNorm((m.total - T_.projTot) / T_.sdTot); sideP(pO, m.total, [m.over, m.under], "", "Total", "Game", { note: `our total ${f1(T_.projTot)}` }); }
+  const P = m.props || [], pair2 = (x) => [x.odds[0], x.odds[1]];
+  // team totals
+  for (const x of P.filter((y) => y.type === "Team Total Points" && y.odds.length >= 2)) {
+    const k = x.team === homeId ? "h" : x.team === awayId ? "a" : null; if (!k) continue; const t = M.teamTot[k];
+    const pO = t.cur > x.line ? 1 : 1 - pNorm((x.line - t.proj) / t.sdT);
+    sideP(pO, x.line, pair2(x), "", `${k === "h" ? H : A} team total`, "Game", { note: `our ${k === "h" ? H : A} ${f1(t.proj)}` });
+  }
+  // quarters still to finish
+  for (const q of (M.quarters || []).filter((q) => q.status !== "final")) {
+    const name = ["1st", "2nd", "3rd", "4th"][q.q - 1] + " Quarter", tag = `Q${q.q}${q.status === "live" ? " live" : ""}`;
+    const tot = P.find((x) => x.type === `${name} Total` && x.odds.length >= 2);
+    if (tot) sideP(1 - pNorm((tot.line - (q.pH + q.pA)) / q.tsd), tot.line, pair2(tot), "", `Q${q.q} total`, tag, { note: `our Q${q.q} ${f1(q.pH + q.pA)}` });
+    const mls = P.filter((x) => x.type === `${name} Moneyline`), hm = mls.find((x) => x.team === homeId), am = mls.find((x) => x.team === awayId);
+    if (hm && am) { const home = q.pHome >= 0.5, bk = noVig(hm.odds[0], am.odds[0]); add({ tag, kind: `Q${q.q} winner`, bk: `${A} ${amB(am.odds[0])} · ${H} ${amB(hm.odds[0])}`, pick: `${home ? H : A} wins Q${q.q}`, price: home ? hm.odds[0] : am.odds[0], ours: home ? q.pHome : 1 - q.pHome, book: bk == null ? null : home ? bk : 1 - bk }); }
+    const sps = P.filter((x) => x.type === `${name} Spread` && x.team);
+    const hs = sps.find((x) => x.team === homeId), as = sps.find((x) => x.team === awayId);
+    if (hs) { const mH2 = q.pH - q.pA, pH2 = 1 - pNorm((-hs.line - mH2) / q.qsd), home = pH2 >= 0.5, bk = as ? noVig(hs.odds[0], as.odds[0]) : null;
+      add({ tag, kind: `Q${q.q} spread`, bk: `${A} ${-hs.line > 0 ? "+" : ""}${-hs.line} ${amB(as?.odds[0])} · ${H} ${hs.line > 0 ? "+" : ""}${hs.line} ${amB(hs.odds[0])}`, pick: home ? `${H} ${hs.line > 0 ? "+" : ""}${hs.line}` : `${A} ${-hs.line > 0 ? "+" : ""}${-hs.line}`, price: home ? hs.odds[0] : as?.odds[0], ours: home ? pH2 : 1 - pH2, book: bk == null ? null : home ? bk : 1 - bk, note: `our Q${q.q} ${A} ${f1(q.pA)} - ${f1(q.pH)} ${H}` }); }
+  }
+  // overtime
+  const ot = P.find((x) => x.type === "Will There Be Overtime?" && x.odds.length >= 2);
+  if (ot && M.pOT != null) { const yes = M.pOT >= 0.5, bk = noVig(ot.odds[0], ot.odds[1]); add({ tag: "Game", kind: "Overtime", bk: `Yes ${amB(ot.odds[0])} · No ${amB(ot.odds[1])}`, pick: yes ? "Overtime: yes" : "Overtime: no", price: yes ? ot.odds[0] : ot.odds[1], ours: yes ? M.pOT : 1 - M.pOT, book: bk == null ? null : yes ? bk : 1 - bk }); }
+  // player props at the live lines
+  const TYPES = { "Total Points": ["pts", "points"], "Total Rebounds": ["reb", "rebounds"], "Total Assists": ["ast", "assists"], "Total 3-Point Field Goals": ["tpm", "threes"], "Total Points, Rebounds, and Assists": ["pra", "pts+reb+ast"] };
+  const props = [];
+  for (const pl of M.players) for (const x of P.filter((y) => y.ath === String(pl.id) && TYPES[y.type] && y.odds.length >= 2)) {
+    const [k, word] = TYPES[x.type], o = pl.props?.[k]; if (!o) continue;
+    const pO = o.cur > x.line ? 1 : pl.restOut ? 0 : 1 - pNorm((x.line - o.proj) / o.sd);
+    const before = out.length; sideP(pO, x.line, pair2(x), shortName(pl.n), `${shortName(pl.n)} ${word}`, "Player", { note: `now ${f1(o.cur)} · our proj ${f1(o.proj)}` });
+    if (out.length > before) props.push(out.pop());
+  }
+  props.sort((a, b) => (b.gap ?? 0) - (a.gap ?? 0));
+  return { game: out, props: props.filter((x) => x.gap != null && x.gap >= 0.03).slice(0, 10) };
+}
+function livePicksCard(g, L, M, m) {
+  if (!m.live) return `<div class="lp-card"><h3>Our live picks</h3><p class="small muted">Waiting for the sportsbook's live odds. Picks appear only against live lines, never against stale pre-game lines.</p></div>`;
+  const lp = livePicks(g, L, M, m); if (!lp.game.length && !lp.props.length) return "";
+  const amT = (a) => (a == null || a === "" || !Number.isFinite(Number(a)) ? "-" : (Number(a) > 0 ? "+" : "") + Number(a));
+  const row = (x) => `<div class="lp-row ${x.qual ? "lp-q" : x.gap != null && x.gap >= 0.02 ? "lp-l" : "lp-n"}">
+      <div class="lp-top"><span class="lp-tag">${esc(x.tag)}</span><span class="lp-k">${esc(x.kind)}</span>${x.qual ? '<span class="lp-star" title="Qualifying edge">★ edge</span>' : ""}</div>
+      <div class="lp-mid"><span class="lp-pick">${esc(x.pick)}</span><span class="lp-price">${esc(amT(x.price))}</span></div>
+      ${x.bk ? `<div class="lp-bk small"><span class="lp-bkl">Bookmaker</span> ${esc(x.bk)}</div>` : ""}
+      <div class="lp-num small"><span>Ours <b>${pct(x.ours)}</b></span><span>Book fair ${x.book != null ? pct(x.book) : "-"}</span><span class="${(x.gap ?? 0) > 0 ? "up" : "down"}">gap ${x.gap != null ? (x.gap > 0 ? "+" : "") + Math.round(x.gap * 100) : "-"}</span>${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}${x.note ? `<span class="muted">${esc(x.note)}</span>` : ""}</div></div>`;
+  const order = (a, b) => (b.qual - a.qual) || ((b.gap ?? -1) - (a.gap ?? -1));
+  return `<div class="lp-card"><h3>Our live picks <span class="mk-badge">live odds · ${esc(m.book)}</span></h3>
+    <div class="lp-legend small"><span class="lp-key q">★ edge: ours beats the book by 5+ pts and EV +3%</span><span class="lp-key l">Lean: small edge</span><span class="lp-key n">Our side, no edge</span></div>
+    ${lp.game.sort(order).map(row).join("")}
+    ${lp.props.length ? `<h4 class="lp-h4">Player props</h4>${lp.props.sort(order).map(row).join("")}` : ""}
+    <p class="small muted">The highlighted pill is our pick. Our chance comes only from our live model (pre-game analysis + live score, clock, pace, fouls and rotation); the live odds only set the line and price. Lines move every few seconds, so a price can be gone by the time you see it. Not betting advice.</p></div>`;
 }
 function marketCard(g, L, M, m) {
   const H = T(g.home).abbr, A = T(g.away).abbr;
@@ -4093,3 +4160,6 @@ async function liveScoreboard() {
     S.liveData = { fetched: new Date().toISOString(), games, src: "live" };
   } catch { /* host blocks outside requests: keep the snapshot */ }
 }
+
+// Local debugging only (never on the public site): exposes the live engine for testing on localhost.
+if (["localhost", "127.0.0.1"].includes(location.hostname)) window.__cl = { S, liveFetch, liveModel, liveChange, marketFetch, livePicks, livePicksCard };
