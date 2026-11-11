@@ -1750,6 +1750,53 @@ function teamScout(t) {
         sub: `<span class="ink">${esc(c.value)}</span><br>${esc(c.ev)}${c.n ? `<br>Sample: ${esc(c.n)}` : ""}`,
       })).join("")}</ul></div>` : ""}`;
 }
+// Team "Versus": this team against another team (both offence-vs-defence maps and head-to-head) or against a player
+// (his projected zones against this team's defence). Projected FG% = offence zone FG% (shrunk) + defence's gap to league (shrunk).
+function projZones(offRows, defTeams, kOff) {
+  return (offRows || []).map((x) => {
+    const lg = (x.lgPct ?? 0) / 100, hp = ((x.made ?? 0) + kOff * lg) / ((x.att ?? 0) + kOff);
+    let da = 0, dm = 0; for (const t of defTeams) { const z = t.zones14?.def?.find((y) => y.id === x.id); if (z) { da += z.att; dm += z.made; } }
+    const proj = Math.min(0.95, Math.max(0.05, hp + (dm + 150 * lg) / (da + 150) - lg)), d = (proj - lg) * 100;
+    return { id: x.id, att: x.att, made: x.made, pct: Math.round(proj * 1000) / 10, lgPct: x.lgPct, diff: Math.round(d * 10) / 10, tag: d >= 4 ? "hot" : d <= -4 ? "cold" : "neutral", low: (x.att ?? 0) < 10 ? 1 : undefined };
+  });
+}
+async function teamVersus(t) {
+  const box = document.getElementById("tv-out"), ctl = document.getElementById("tv-ctl"); if (!box || !ctl) return;
+  const st = { vs: "team", opp: (S.upList || []).map((g) => (g.home === t.id ? g.away : g.away === t.id ? g.home : null)).find(Boolean) || (S.teams || []).find((x) => x.id !== t.id)?.id, pl: null };
+  const R = await load("results.json").catch(() => []);
+  const plist = Object.values(S.P || {}).filter((q) => q.team !== t.id).sort((a, b) => a.n.localeCompare(b.n));
+  const others = (S.teams || []).filter((x) => x.id !== t.id).sort((a, b) => a.name.localeCompare(b.name));
+  const drawCtl = () => {
+    ctl.innerHTML = st.vs === "team" ? `<select class="field" id="tv-team">${others.map((x) => `<option value="${esc(x.id)}"${x.id === st.opp ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`
+      : `<input class="field" id="tv-pin" list="tv-pl" placeholder="Type a player name" value="${esc(st.pl?.n || "")}"><datalist id="tv-pl">${plist.map((q) => `<option value="${esc(q.n)}">`).join("")}</datalist>`;
+    ctl.querySelector("#tv-team")?.addEventListener("change", (e) => { st.opp = e.target.value; draw(); });
+    ctl.querySelector("#tv-pin")?.addEventListener("change", (e) => { const q = plist.find((x) => x.n === e.target.value); if (q) { st.pl = q; draw(); } });
+  };
+  const draw = async () => {
+    if (st.vs === "team") {
+      const o = S.T[st.opp]; if (!o) { box.innerHTML = ""; return; }
+      const mine = projZones(t.zones14?.off, [o], 80), theirs = projZones(o.zones14?.off, [t], 80);
+      const h2h = R.filter((g) => (g.home === t.id && g.away === o.id) || (g.home === o.id && g.away === t.id)).sort((a, b) => b.date.localeCompare(a.date));
+      const w = h2h.filter((g) => (g.home === t.id ? g.act.hs > g.act.as : g.act.as > g.act.hs)).length;
+      const best = (rows) => [...rows].filter((x) => !x.low).sort((a, b) => b.diff - a.diff);
+      box.innerHTML = `<div class="tv-cmp"><div><b>${esc(t.abbr)}</b><span>net ${sg(t.ratings?.adjNet)} · pace ${f1(t.style?.pace)}</span><span class="small muted">${esc((t.style?.tags || []).join(", ") || "-")}</span></div><div><b>${esc(o.abbr)}</b><span>net ${sg(o.ratings?.adjNet)} · pace ${f1(o.style?.pace)}</span><span class="small muted">${esc((o.style?.tags || []).join(", ") || "-")}</span></div></div>
+        <p class="small vs-rec"><b>Head-to-head since October 2025:</b> ${h2h.length ? `${esc(t.abbr)} ${w}-${h2h.length - w}. ${h2h.slice(0, 4).map((g) => `${esc(new Date(g.date).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric", year: "2-digit" }))}: ${esc(T(g.away).abbr)} ${g.act.as}-${g.act.hs} ${esc(T(g.home).abbr)}`).join(" · ")}` : "no meetings yet."}</p>
+        <div class="grid two"><div><h3>${esc(t.abbr)} offence vs ${esc(o.abbr)} defence</h3>${hz14Figure(mine, "off", `${t.name} offence projected vs ${o.name}`)}<p class="small">Best: ${best(mine).slice(0, 2).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}. Toughest: ${best(mine).slice(-2).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}.</p></div>
+        <div><h3>${esc(o.abbr)} offence vs ${esc(t.abbr)} defence</h3>${hz14Figure(theirs, "off", `${o.name} offence projected vs ${t.name}`)}<p class="small">Best for them: ${best(theirs).slice(0, 2).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}. Toughest: ${best(theirs).slice(-2).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}.</p></div></div>
+        <p class="small muted">Projected FG% by zone = the offence's zone FG% (shrunk with 80 attempts) plus the defence's gap to league in that zone (shrunk with 150). Red = better than league, blue = worse.</p>`;
+    } else {
+      if (!st.pl) { box.innerHTML = `<p class="small muted">Type a player's name above.</p>`; return; }
+      const q = await load(`players/${st.pl.id}.json`).catch(() => null);
+      if (!q?.zones14?.rows?.length) { box.innerHTML = `<p class="small muted">No zone shooting on record for ${esc(st.pl.n)}.</p>`; return; }
+      const rows = projZones(q.zones14.rows, [t], 25), ptm = playTypeMatchup(q, t.id), sp = (q.splits?.best || []).concat(q.splits?.worst || []).find((x) => x.key === `opp:${t.id}`);
+      box.innerHTML = `<p class="small vs-rec"><b>${esc(q.n)} vs ${esc(t.abbr)}:</b> ${sp ? `${sp.n} games, ${sp.pts > 0 ? "+" : ""}${f1(sp.pts)} pts against his usual gap to our projections${sp.n < 10 ? " (small sample)" : ""}. ` : "No head-to-head split yet (needs 5+ games). "}${ptm ? `Play-type matchup: ${ptm.delta > 0 ? "+" : ""}${f1(ptm.delta)} pts (${num(ptm.n)} possessions, shown only).` : ""}</p>
+        <h3>${esc(q.n)} vs the ${esc(t.name)} defence</h3>${hz14Figure(rows, "off", `${q.n} projected vs ${t.name}`)}
+        <p class="small muted">His zone FG% (shrunk with 25 attempts) plus this defence's gap to league in each zone. <a href="#/scout/${esc(q.id)}">His full scouting report ›</a></p>`;
+    }
+  };
+  document.querySelectorAll("[data-tv]").forEach((b) => b.addEventListener("click", () => { st.vs = b.dataset.tv; document.querySelectorAll("[data-tv]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); drawCtl(); draw(); }));
+  drawCtl(); draw();
+}
 async function vTeam(id) {
   const t = S.T[id]; if (!t) throw new Error("Unknown team");
   const [plist, upl] = await Promise.all([load("players.json"), load("upcoming.json").catch(() => [])]);
@@ -1760,6 +1807,9 @@ async function vTeam(id) {
   app.innerHTML = `<a class="back" href="#/teams">‹ All teams</a>
     <header class="ehead">${teamLogo(id, { size: "xl" })}<div class="ehead-b"><h1>${esc(t.name)}</h1>
       <p class="ehead-m">${esc(t.record.w)}-${esc(t.record.l)} this season${t.coach ? ` · Head coach ${esc(t.coach)}` : ""}</p>${favBtn("t", id, t.name)}</div></header>
+    <section class="card" id="t-vs"><h2>Versus: compare against a team or a player</h2>
+      <div class="filters" role="group" aria-label="Against"><button class="fbtn" type="button" data-tv="team" aria-pressed="true">vs team</button><button class="fbtn" type="button" data-tv="player" aria-pressed="false">vs player</button></div>
+      <div id="tv-ctl"></div><div id="tv-out" aria-live="polite"></div></section>
     ${(() => { const g = (S.upList || []).find((x) => x.home === id || x.away === id); return g ? `<a class="card next-cta" href="#/game/${esc(g.id)}"><span><b>Next game: ${g.home === id ? "vs" : "at"} ${esc(T(g.home === id ? g.away : g.home).name)}</b><span class="small muted">${esc(dayLong(g.date))} · ${esc(timePH(g.date))}</span></span><span class="num"><b>${pct(g.home === id ? g.pred.pHome : 1 - g.pred.pHome)}</b><span class="small muted">win chance</span></span></a>` : ""; })()}
     <div class="card"><h2>Strength</h2>
       <div class="statgrid">
@@ -1808,6 +1858,7 @@ async function vTeam(id) {
     <div class="card"><h2>Roster</h2><div class="tgrid">${players.map((p) => playerItem(p, false)).join("") || `<p class="small muted">No players with games this season yet.</p>`}</div></div>
     <div class="card"><h2>Last 10 games</h2><div class="chips">${t.last10.slice().reverse().map((g) => `<span class="chip ${g.pts > g.oppPts ? "good" : "bad"}">${g.pts > g.oppPts ? "W" : "L"} ${g.home ? "vs" : "at"} ${esc(T(g.opp).abbr)} ${g.pts}-${g.oppPts}</span>`).join("")}</div></div>
     ${t.news?.length ? `<div class="card"><h2>Latest coverage</h2>${t.news.map(takeRow).join("")}</div>` : ""}`;
+  teamVersus(t);
 }
 
 // ---------------------------------------------------------------- Players
@@ -2036,12 +2087,18 @@ async function vScout(id, labTid) {
   const splits = allSplits(p), groups = [...new Set(splits.map((s) => SPLIT_GROUP[s.type] || "Other"))];
   let labTeam = S.T[labTid] && labTid !== p.team ? labTid : nextOpp || ranked[0]?.team || others[0]?.id;
   let role = ROLE[row?.role] ? row.role : "starter", sg0 = "top";
-  const sections = [["s-sw", "Strengths and weaknesses"], ["s-map", "Shot map"], ["s-def", "Defence"], ["s-style", "Playstyle"], ["s-cul", "Culture"], ["s-lab", "Matchup lab"], ["s-mm", "Matchup maps"], ["s-sit", "Situations"]];
+  const sections = [["s-sw", "Strengths and weaknesses"], ["s-map", "Shot map"], ["s-def", "Defence"], ["s-style", "Playstyle"], ["s-cul", "Culture"], ["s-mm", "Versus"], ["s-lab", "Matchup lab"], ["s-sit", "Situations"]];
 
   app.innerHTML = `<a class="back" href="#/scout">‹ Scout: all players</a>
     <header class="ehead">${avatar(p.id, p.n, { size: "xl" })}<div class="ehead-b"><h1>${esc(p.n)}</h1>
       <a class="ehead-t" href="#/team/${esc(p.team)}">${teamName(p.team)}</a>
       <p class="ehead-m">${[p.pos ? esc(p.pos) : "", ht ? esc(ht) : "", p.archetype ? esc(p.archetype) : "", "Scouting report"].filter(Boolean).join(" · ")}</p>${favBtn("p", p.id, p.n)}</div></header>
+    <section class="card" id="s-mm" tabindex="-1" aria-labelledby="s-mm-h"><h2 id="s-mm-h">Versus: compare him against a team or player(s)</h2>
+      <p class="small muted">Projected shooting by zone against the opponent you choose. Red = better than league average, blue = worse (for his defence: red = shooters do better than usual against him).</p>
+      <div class="filters" role="group" aria-label="Side"><button class="fbtn" type="button" data-mm-side="off" aria-pressed="true">His offence</button><button class="fbtn" type="button" data-mm-side="def" aria-pressed="false">His defence</button></div>
+      <div class="filters" role="group" aria-label="Against"><button class="fbtn" type="button" data-mm-vs="team" aria-pressed="true">vs team</button><button class="fbtn" type="button" data-mm-vs="player" aria-pressed="false">vs player(s)</button><button class="fbtn" type="button" data-mm-vs="style" aria-pressed="false">vs playstyle</button></div>
+      <div id="mm-ctl"></div><div id="mm-out" aria-live="polite"></div>
+    </section>
     <nav class="filters jumpnav" aria-label="Sections of this report">${sections.map(([k, l]) => `<button class="fbtn" type="button" data-jump="${k}">${l}</button>`).join("")}<a class="fbtn" href="#/player/${esc(p.id)}">Full profile ›</a></nav>
     ${next ? `<div class="card"><div class="card-h"><h2>Next game: ${next.home === p.team ? "vs" : "at"} ${esc(T(nextOpp).name)}</h2><a class="go" href="#/game/${esc(next.id)}">Game page ›</a></div>
       <p class="small muted">${esc(dayLong(next.date))} · ${esc(timePH(next.date))}</p>
@@ -2061,12 +2118,7 @@ async function vScout(id, labTid) {
         <span class="small muted">Toughest on paper</span><div class="chips">${ranked.slice(-3).reverse().map((r) => `<button class="fbtn sm" type="button" data-lab="${esc(r.team)}">${esc(T(r.team).abbr)} ${sg(r.paperPts)}</button>`).join("")}</div></div>` : ""}
       <div id="lab-out" aria-live="polite"></div>
     </section>
-    <section class="card" id="s-mm" tabindex="-1" aria-labelledby="s-mm-h"><h2 id="s-mm-h">Matchup maps: offence and defence</h2>
-      <p class="small muted">Projected shooting by zone against the opponent you choose. Red = better than league average, blue = worse (for his defence: red = shooters do better than usual against him).</p>
-      <div class="filters" role="group" aria-label="Side"><button class="fbtn" type="button" data-mm-side="off" aria-pressed="true">His offence</button><button class="fbtn" type="button" data-mm-side="def" aria-pressed="false">His defence</button></div>
-      <div class="filters" role="group" aria-label="Against"><button class="fbtn" type="button" data-mm-vs="team" aria-pressed="true">vs team</button><button class="fbtn" type="button" data-mm-vs="player" aria-pressed="false">vs player(s)</button><button class="fbtn" type="button" data-mm-vs="style" aria-pressed="false">vs playstyle</button></div>
-      <div id="mm-ctl"></div><div id="mm-out" aria-live="polite"></div>
-    </section>
+
     <section class="card" id="s-sit" tabindex="-1" aria-labelledby="s-sit-h"><h2 id="s-sit-h">Other situations that apply to him</h2>
       <p class="small muted">Each number is measured against <b>his own usual</b>: his gap against the projection in that spot minus his overall gap across all his games${p.splits?.overall ? ` (${esc(p.splits.overall.n)} games, ${sg(p.splits.overall.pts)} points overall)` : ""}. So a player who was generally under-projected does not look strong everywhere.</p>
       <p class="small muted">${esc(p.splits?.note || "Counts already include last season (with its play-in and playoffs), this season and preseason. Listed from 5 games against a specific team, opposing player or arena (the schedule allows only 3-4 meetings a season) and from 8 games for other situations; under 10 games is a small sample.")}</p>
@@ -2111,7 +2163,9 @@ async function vScout(id, labTid) {
           return { id: x.id, att: x.att, made: x.made, pct: Math.round(proj * 1000) / 10, lgPct: x.lgPct, diff: Math.round(d * 10) / 10, tag: x.att < 10 ? "neutral" : d >= 4 ? "hot" : d <= -4 ? "cold" : "neutral", low: x.att < 10 ? 1 : undefined };
         });
         const best = [...rows].filter((x) => !x.low).sort((a, b) => b.diff - a.diff);
-        out.innerHTML = `<h3>His offence vs ${esc(who())}</h3>${hz14Figure(rows, "off", `${p.n} projected vs ${who()}`)}
+        const sp0 = mm.vs === "team" ? splits.find((x) => x.key === `opp:${mm.team}`) : null, vr0 = mm.vs === "team" ? vsRow(mm.team) : null;
+        const recLine = mm.vs !== "team" ? "" : `<p class="small vs-rec">${sp0 ? `<b>His record vs ${esc(T(mm.team).abbr)}:</b> ${sp0.n} games, ${sp0.pts > 0 ? "+" : ""}${f1(sp0.pts)} pts against his usual gap to our projections${sp0.small || sp0.n < 10 ? " (small sample)" : ""}. ` : `No head-to-head split yet vs ${esc(T(mm.team).abbr)} (needs 5+ games). `}${vr0 ? `On paper this matchup is worth ${vr0.paperPts > 0 ? "+" : ""}${f1(vr0.paperPts)} pts; the model applies ${vr0.pts > 0 ? "+" : ""}${f1(vr0.pts)}.` : ""}${(() => { const ptm = playTypeMatchup(p, mm.team); return ptm ? ` Play-type matchup: ${ptm.delta > 0 ? "+" : ""}${f1(ptm.delta)} pts (${num(ptm.n)} possessions, shown only).` : ""; })()}</p>`;
+        out.innerHTML = `${recLine}<h3>His offence vs ${esc(who())}</h3>${hz14Figure(rows, "off", `${p.n} projected vs ${who()}`)}
           <p class="small">Best spots: ${best.slice(0, 3).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ") || "-"}. Toughest: ${best.slice(-3).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ") || "-"}.</p>
           <p class="small muted">Projected FG% = his zone FG% (shrunk toward league with 25 attempts) + the defence's gap to league in that zone (shrunk with 150 attempts). Grey = under 10 of his attempts in the zone.</p>`;
         return;
