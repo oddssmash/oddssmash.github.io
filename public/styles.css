@@ -1086,3 +1086,5 @@ a.gtab { color: var(--ink-2); }
 .sc-net td { border-top: 1.5px solid var(--line-2); }
 .ev { display: inline-block; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; padding: 1px 7px; border-radius: 999px; }
 .ev-strong { background: #2fbf71; color: #06210f; } .ev-medium { background: #f5b82e; color: #2a1c00; } .ev-weak { background: #8a93a6; color: #0b1020; } .ev-noise { background: #5b6476; color: #e6e9f0; }
+.bn { margin: 4px 0 6px; font-size: 15px; }
+.bn-k { font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; padding: 2px 8px; border-radius: 999px; background: #f5b82e; color: #2a1c00; margin-right: 6px; }

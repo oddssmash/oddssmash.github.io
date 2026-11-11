@@ -1597,13 +1597,13 @@ function offArchetypes(p) {
   const pt = Object.fromEntries((p.playstyle?.playTypes?.rows || []).map((x) => [x.id, x.freq || 0]));
   const z = Object.fromEntries((p.zones14?.rows || []).map((x) => [x.id, x.share || 0]));
   const rimShare = (z.rim || 0) + (z.shL || 0) + (z.shC || 0) + (z.shR || 0), three = ["tCL", "tWL", "tT", "tWR", "tCR"].reduce((a, k) => a + (z[k] || 0), 0);
-  const big = /C/.test(p.pos || "") || /F-C|C-F/.test(p.pos || "");
+  const big = /C/.test(p.pos || "") || defArchetypes(p)[0]?.[0] === "Rim protector";
   const sp = S.P?.[String(p.id)]?.cur, apm = sp && sp[1] ? sp[4] / sp[1] * 36 : 0;
   const raw = {
     "Slasher": Math.max(0, rimShare - 35) * 0.9 + (pt.Transition || 0) * 0.3 + (big ? -15 : 0),
     "Sharpshooter": (pt.Spotup || 0) * 0.8 + (pt.OffScreen || 0) * 1.2 + Math.max(0, three - 30) * 0.7,
     "Shot creator": (pt.Isolation || 0) * 1.4 + (pt.PRBallHandler || 0) * 0.5,
-    "Floor general": (pt.PRBallHandler || 0) * 0.6 + Math.max(0, apm - 4) * 4,
+    "Floor general": (pt.PRBallHandler || 0) * 0.6 + Math.max(0, apm - 4) * 6,
     "Post scorer": (pt.Postup || 0) * 1.6,
     "Rim runner": (pt.PRRollman || 0) * 1.1 + (pt.Cut || 0) * 1.0 + (pt.OffRebound || 0) * 1.3,
     "Stretch big": big ? Math.max(0, three - 15) * 1.2 : 0,
@@ -1640,6 +1640,17 @@ function playTypeMatchup(p, oppTid) {
   if (!base) return null;
   return { delta: (adj - base) * possPg, possPg, rows: rows.sort((a, b) => b.freq - a.freq), n };
 }
+// A 2K-style build name generated from his real stats (our archetype mix), not copied from any name list:
+// [defensive tag] + [secondary skill] + [main role], e.g. "2 Way Playmaking Shot Creator".
+function styleName(p) {
+  const oa = offArchetypes(p), da = defArchetypes(p); if (!oa.length) return null;
+  const NOUN = { "Slasher": "Slasher", "Sharpshooter": "Sharpshooter", "Shot creator": "Shot Creator", "Floor general": "Playmaker", "Post scorer": "Post Scorer", "Rim runner": "Rim Runner", "Stretch big": "Stretch Five" };
+  const ADJ = { "Slasher": "Slashing", "Sharpshooter": "Sharpshooting", "Shot creator": "Shot Creating", "Floor general": "Playmaking", "Post scorer": "Post Scoring", "Rim runner": "Rim Running", "Stretch big": "Stretch" };
+  const [main, second] = oa, d = da[0];
+  const tag = d && d[1] >= 0.5 ? (d[0] === "Rim protector" ? "Rim Protecting" : d[0] === "Perimeter stopper" || d[0] === "Switchable" ? "2 Way" : "") : "";
+  const adj = second && second[1] >= 0.18 && ADJ[second[0]] && ADJ[second[0]] !== ADJ[main[0]] ? ADJ[second[0]] : "";
+  return [tag, adj, NOUN[main[0]]].filter(Boolean).join(" ");
+}
 function scenarioCard(p, row, oppTid, L) {
   if (!row) return "";
   const items = [];
@@ -1654,6 +1665,7 @@ function scenarioCard(p, row, oppTid, L) {
   const applied = items.filter((x) => x.used && x.unit === "pts").reduce((a, x) => a + x.v, 0);
   const oa = offArchetypes(p), da = defArchetypes(p);
   return `<div class="sc-card"><h3>Tonight's scenarios vs ${esc(T(oppTid).abbr)}</h3>
+    ${styleName(p) ? `<p class="bn"><span class="bn-k">Build</span> <b>${esc(styleName(p))}</b> <span class="muted small">(generated from his stats in the style of 2K build names)</span></p>` : ""}
     ${oa.length || da.length ? `<p class="small">${oa.length ? `<b>Offence:</b> ${oa.map(([k, v]) => `${esc(k)} ${Math.round(v * 100)}%`).join(" · ")}` : ""}${da.length ? ` &nbsp; <b>Defence:</b> ${da.map(([k, v]) => `${esc(k)} ${Math.round(v * 100)}%`).join(" · ")}` : ""} <span class="muted">(our own labels, from play types, shot locations and defender tracking)</span></p>` : ""}
     <div class="tw"><table class="sc-t"><thead><tr><th>Scenario</th><th class="n">Effect</th><th>Evidence</th><th>Through</th><th>In the projection?</th></tr></thead><tbody>
     ${items.map((x) => `<tr><td>${esc(x.k)}</td><td class="n ${x.v > 0 ? "up" : x.v < 0 ? "down" : ""}">${x.v > 0 ? "+" : ""}${f1(x.v)} ${x.unit}</td><td>${x.ev}</td><td class="small">${x.via}</td><td class="small">${x.used ? "✓ applied" : "shown only (not yet proven)"}</td></tr>`).join("")}
