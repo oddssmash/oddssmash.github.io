@@ -1,0 +1,184 @@
+{
+  "format": 1,
+  "ran": "2026-11-11T05:11:03.555Z",
+  "summary": {
+    "errors": 0,
+    "warnings": 1,
+    "notes": 5,
+    "ok": 9
+  },
+  "checks": [
+    {
+      "id": "name-mapping",
+      "level": "warn",
+      "title": "Names map between sources",
+      "count": 5,
+      "detail": "0 injury entries not on a roster, 2 NBA.com matchup players without an ESPN id (in 1607 matchup files), 3 NBA.com game-log names without an ESPN match, 715 NBA.com ids mapped.",
+      "examples": [
+        "matchups: NBA.com player 1629599 Amir Coffey (PHX) not matched to an ESPN id (rows kept as nba:1629599)",
+        "matchups: NBA.com player 202685 Jonas Valanciunas (DEN) not matched to an ESPN id (rows kept as nba:202685)",
+        "NBA.com game log name \"Lachlan Olbrich\" matches no ESPN name on 33 game days (33 of them with a blank ESPN box row for his team: boxfix.mjs rebuilds that row from this log)",
+        "NBA.com game log name \"Nikola Djurisic\" matches no ESPN name on 2 game days",
+        "NBA.com game log name \"Zeng Zeng\" matches no ESPN name on 1 game day"
+      ]
+    },
+    {
+      "id": "repaired-rows",
+      "level": "note",
+      "title": "Blank ESPN box rows (repaired at load time)",
+      "count": 14,
+      "detail": "14 team-games have a box row with no player; scripts/lib/boxfix.mjs rebuilds it from the team row and the NBA.com game log.",
+      "examples": [
+        "401812692 CHI: players add up to 113, final 119 (blank ESPN row, rebuilt when the model loads it)",
+        "401812719 CHI: players add up to 111, final 117 (blank ESPN row, rebuilt when the model loads it)",
+        "401810150 CHI: players add up to 99, final 101 (blank ESPN row, rebuilt when the model loads it)",
+        "401810372 CHI: players add up to 91, final 93 (blank ESPN row, rebuilt when the model loads it)",
+        "401810547 CHI: players add up to 123, final 125 (blank ESPN row, rebuilt when the model loads it)",
+        "401810560 CHI: players add up to 82, final 91 (blank ESPN row, rebuilt when the model loads it)",
+        "401810577 CHI: players add up to 113, final 115 (blank ESPN row, rebuilt when the model loads it)",
+        "401810633 CHI: players add up to 98, final 105 (blank ESPN row, rebuilt when the model loads it)"
+      ]
+    },
+    {
+      "id": "minutes",
+      "level": "note",
+      "title": "Player minutes add up to the game length",
+      "count": 1,
+      "detail": "Minutes in these box scores are off by more than 10 from 240 (+25 per overtime).",
+      "examples": [
+        "401810358 CHI: player minutes add up to 228, expected about 240"
+      ]
+    },
+    {
+      "id": "out-but-played",
+      "level": "note",
+      "title": "Players listed out did not play",
+      "count": 133,
+      "detail": "0 stale out entries on the current injury list (teams not playing in the next 30 hours). 133 players in the last 30 days played in a game whose stored ESPN list calls them out (that list is saved after the game, so it can include an injury from the game itself).",
+      "examples": [
+        "Isaiah Joe listed Out for 401909088 (2026-10-20) but played 19 min",
+        "Jalen Duren listed Out for 401909088 (2026-10-20) but played 28 min",
+        "Adem Bona listed Out for 401909089 (2026-10-20) but played 10 min",
+        "Jaylin Williams listed Out for 401909090 (2026-10-20) but played 17 min",
+        "Cason Wallace listed Out for 401909090 (2026-10-20) but played 19 min",
+        "Chet Holmgren listed Out for 401909090 (2026-10-20) but played 31 min",
+        "Jalen Williams listed Out for 401909090 (2026-10-20) but played 30 min",
+        "Jalen Suggs listed Out for 401909834 (2026-10-21) but played 32 min"
+      ]
+    },
+    {
+      "id": "conflicts",
+      "level": "note",
+      "title": "Sources agree",
+      "count": 28,
+      "detail": "ESPN vs NBA.com game-log points: 1 differences in 35666 player-games. Matchup tracking: 25 of 1527 games cover less than 80% of a team's points. 0 line-up vs injury-list conflicts for games in the next 30 hours.",
+      "examples": [
+        "late scratch: Jonathan Mogbo (SAC) on NBA.com's inactive list for 401909964, ESPN injury status \"not listed\"",
+        "late scratch: Josh Dix (OKC) on NBA.com's inactive list for 401909965, ESPN injury status \"not listed\"",
+        "401901822 Zach Edey: ESPN 9 pts, NBA.com 10",
+        "matchups 401810087: tracked points cover 55% of a team's score (70/123 away, 62/112 home)",
+        "matchups 401810360: tracked points cover 74% of a team's score (72/97 away, 89/100 home)",
+        "matchups 401810392: tracked points cover 4% of a team's score (4/110 away, 20/87 home)",
+        "matchups 401811015: tracked points cover 74% of a team's score (102/111 away, 102/137 home)",
+        "matchups 401811020: tracked points cover 74% of a team's score (100/114 away, 95/128 home)"
+      ]
+    },
+    {
+      "id": "game-day",
+      "level": "note",
+      "title": "Game-day details (crews, starters) for the next 30 hours",
+      "count": 10,
+      "detail": "12 games in the next 30 hours: 2 with a referee crew, 2 with NBA.com line-ups (2 confirmed).",
+      "examples": [
+        "401909966 WSH at IND: no referee crew yet",
+        "401909967 CLE at NY: no referee crew yet",
+        "401909968 BOS at TOR: no referee crew yet",
+        "401909969 SA at CHI: no referee crew yet",
+        "401909970 DEN at MEM: no referee crew yet",
+        "401909971 LAL at MIL: no referee crew yet",
+        "401909972 BKN at NO: no referee crew yet",
+        "401909973 ORL at UTAH: no referee crew yet"
+      ]
+    },
+    {
+      "id": "core-files",
+      "level": "ok",
+      "title": "Core files readable and complete",
+      "count": 0,
+      "detail": "teams, rosters (30 teams, 10+ players each) and injuries read fine.",
+      "examples": []
+    },
+    {
+      "id": "schedule",
+      "level": "ok",
+      "title": "Schedule is current",
+      "count": 0,
+      "detail": "52 games in the next 7 days; today's schedule refreshed 0 h ago.",
+      "examples": []
+    },
+    {
+      "id": "missing-games",
+      "level": "ok",
+      "title": "Every finished game has a box score",
+      "count": 0,
+      "detail": "1611 finished games, 1603 box scores. 8 known ESPN gaps (8 playoff games of 2025-26, walked by final score only).",
+      "examples": []
+    },
+    {
+      "id": "partial-games",
+      "level": "ok",
+      "title": "Box scores are complete and agree with the final score",
+      "count": 0,
+      "detail": "Every box score's team row and player rows add up to the final score.",
+      "examples": []
+    },
+    {
+      "id": "pbp-vs-box",
+      "level": "ok",
+      "title": "Play-by-play agrees with the box score",
+      "count": 35,
+      "detail": "1603 games compared. Player points differ in 35 of 35784 player-games (0.1%). 7 games have plays that do not add up to the final score (flagged \"gap\" in the file), 0 games had no plays on ESPN.",
+      "examples": [
+        "401812483: plays short of the final score by 0 (home) / -3 (away)",
+        "401810087: plays short of the final score by -4 (home) / -4 (away)",
+        "401810102: plays short of the final score by 0 (home) / 6 (away)",
+        "401810469: plays short of the final score by 9 (home) / 3 (away)",
+        "401898716: plays short of the final score by 3 (home) / 0 (away)",
+        "401901823: plays short of the final score by 0 (home) / 1 (away)",
+        "401901822: plays short of the final score by -1 (home) / 0 (away)"
+      ]
+    },
+    {
+      "id": "injuries-fresh",
+      "level": "ok",
+      "title": "Injury list is fresh",
+      "count": 0,
+      "detail": "ESPN injury list fetched 0 hours ago; 12 games in the next 30 hours.",
+      "examples": []
+    },
+    {
+      "id": "matchups",
+      "level": "ok",
+      "title": "Who-guarded-whom coverage",
+      "count": 0,
+      "detail": "1527 games with NBA.com matchup tracking, 80 with none on NBA.com (mostly preseason). 0 regular-season / play-in / playoff games finished over a day ago still without a file (filled 200 per run, newest first). 0 finished games without an NBA.com game id.",
+      "examples": []
+    },
+    {
+      "id": "odds-isolation",
+      "level": "ok",
+      "title": "Sportsbook lines stay in odds.json only",
+      "count": 0,
+      "detail": "No odds fields in 7518 files: schedule, every box score, play-by-play and matchup file, game-day, injury, roster, news and NBA.com files, and every published file (all folders of public/data) other than odds.json; \"for comparison only\" blocks appear only in public/data/sim/ and board.json.",
+      "examples": []
+    },
+    {
+      "id": "odds-file",
+      "level": "ok",
+      "title": "Odds file (comparison only)",
+      "count": 0,
+      "detail": "11 upcoming games with a line, 3 with player lines; fetched 0 hours ago.",
+      "examples": []
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "courtside-ledger",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Scenario-based NBA game analyzer that grades itself against every real result. No betting odds used.",
+  "scripts": {
+    "fetch": "node scripts/fetch.mjs",
+    "model": "node scripts/model.mjs",
+    "refresh": "node scripts/fetch.mjs && node scripts/model.mjs && node scripts/simulate.mjs && node scripts/lib/simoptional.mjs scripts/insights.mjs && node scripts/live.mjs",
+    "check": "node scripts/diag.mjs",
+    "serve": "node scripts/serve.mjs",
+    "simulate": "node scripts/simulate.mjs",
+    "live": "node scripts/live.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

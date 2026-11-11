@@ -1,0 +1,10 @@
+node_modules/
+public/data/
+dist/
+dist-files.json
+progress-shots/
+.playwright-mcp/
+*.log
+.DS_Store
+.build-in-progress
+.workflow-running

@@ -1,0 +1,69 @@
+name: Refresh data and publish
+
+on:
+  schedule:
+    - cron: "17 */3 * * *" # every 3 hours (live scores update in the browser, so this is only for projections)
+    - cron: "40 23,1,3 * * *" # game-day pre-tip refreshes: about 7:40, 9:40, 11:40 AM Philippine time (UTC+8)
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Keep the downloaded history between runs so only new games are fetched.
+      # The copy committed in the repository is the starting point the first time.
+      - name: Restore data cache
+        uses: actions/cache@v4
+        with:
+          path: data
+          key: nba-data-${{ github.run_id }}
+          restore-keys: nba-data-
+
+      - name: Fetch fresh data
+        run: node scripts/fetch.mjs
+
+      - name: Data checks
+        run: node scripts/checks.mjs --quiet
+
+      - name: Replay history and build projections
+        run: node scripts/model.mjs
+
+      - name: Simulate upcoming games
+        run: node scripts/simulate.mjs
+
+      - name: Insights and live snapshot
+        run: |
+          node scripts/insights.mjs
+          node scripts/live.mjs
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

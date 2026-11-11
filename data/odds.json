@@ -1,0 +1,492 @@
+{
+  "format": 1,
+  "note": "FOR COMPARISON ONLY. Sportsbook lines as ESPN publishes them on its scoreboard (pre-game summary as a fallback). Display-only in the Simulation and High-confidence tabs; never an input to projections, learning, scenarios or the simulation. spreadHome is the home team's line (negative = home favoured); moneylines are American odds; impliedHome is the moneyline win chance with the bookmaker margin removed. games[id].props (games in the next 30 hours, when published): ESPN athlete id -> line for pts, reb, ast, tpm, stl, blk, pra from the same bookmaker; only the line is stored because ESPN does not label which price is over and which under.",
+  "source": "ESPN public scoreboard / summary feeds (site.api.espn.com) for game lines; ESPN public core API propBets (sports.core.api.espn.com) for player lines. The bookmaker is named per game in 'provider'.",
+  "fetched": "2026-11-11T05:10:29.965Z",
+  "props": {
+    "checked": 8,
+    "games": 3,
+    "players": 5
+  },
+  "games": {
+    "401909964": {
+      "date": "2026-11-11T03:00Z",
+      "home": "23",
+      "away": "19",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "ORL -5.5",
+      "spreadHome": 5.5,
+      "total": 222.5,
+      "mlHome": 180,
+      "mlAway": -217,
+      "spreadOddsHome": -108,
+      "spreadOddsAway": -112,
+      "overOdds": -105,
+      "underOdds": -115,
+      "open": {
+        "spreadHome": 5.5,
+        "total": 221.5,
+        "mlHome": 157,
+        "mlAway": -188
+      },
+      "impliedHome": 0.343,
+      "fetched": "2026-11-11T00:19:07.137Z",
+      "props": {
+        "3064440": {
+          "pts": 18.5,
+          "ast": 2.5,
+          "reb": 2.5,
+          "tpm": 2.5,
+          "pra": 24.5
+        },
+        "3155942": {
+          "pts": 14.5,
+          "ast": 5.5,
+          "reb": 12.5,
+          "pra": 33.5
+        },
+        "4065732": {
+          "pts": 13.5,
+          "reb": 4.5,
+          "tpm": 1.5
+        },
+        "4066262": {
+          "pts": 9.5,
+          "ast": 3.5,
+          "tpm": 1.5
+        },
+        "4066320": {
+          "pts": 20.5,
+          "ast": 3.5,
+          "reb": 4.5,
+          "tpm": 2.5,
+          "stl": 1.5,
+          "pra": 27.5
+        },
+        "4277847": {
+          "pts": 13.5,
+          "ast": 1.5,
+          "reb": 8.5,
+          "tpm": 0.5,
+          "pra": 24.5
+        },
+        "4278572": {
+          "pts": 8.5,
+          "reb": 4.5
+        },
+        "4431679": {
+          "pts": 7.5,
+          "ast": 1.5,
+          "reb": 5.5,
+          "blk": 0.5,
+          "pra": 14.5
+        },
+        "4566434": {
+          "pts": 23.5,
+          "ast": 8.5,
+          "reb": 6.5,
+          "tpm": 1.5,
+          "stl": 1.5,
+          "pra": 38.5
+        },
+        "4594327": {
+          "pts": 9.5,
+          "ast": 1.5,
+          "reb": 3.5,
+          "tpm": 1.5,
+          "pra": 14.5
+        },
+        "4702382": {
+          "pts": 13.5,
+          "reb": 3.5,
+          "tpm": 2.5
+        },
+        "4712849": {
+          "pts": 15.5,
+          "ast": 4.5,
+          "reb": 4.5,
+          "tpm": 1.5,
+          "stl": 1.5,
+          "pra": 26.5
+        },
+        "5142620": {
+          "pts": 24.5,
+          "ast": 6.5,
+          "reb": 3.5,
+          "tpm": 2.5,
+          "stl": 0.5,
+          "pra": 35.5
+        },
+        "5239561": {
+          "pts": 8.5,
+          "ast": 2.5,
+          "reb": 2.5,
+          "tpm": 1.5,
+          "pra": 14.5
+        }
+      }
+    },
+    "401909965": {
+      "date": "2026-11-11T04:00Z",
+      "home": "22",
+      "away": "25",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "OKC -1.5",
+      "spreadHome": 1.5,
+      "total": 226.5,
+      "mlHome": 106,
+      "mlAway": -125,
+      "spreadOddsHome": -109,
+      "spreadOddsAway": -111,
+      "overOdds": -110,
+      "underOdds": -110,
+      "open": {
+        "spreadHome": 1.5,
+        "total": 226.5,
+        "mlHome": 103,
+        "mlAway": -122
+      },
+      "impliedHome": 0.466,
+      "fetched": "2026-11-11T00:19:07.137Z",
+      "props": {
+        "3995": {
+          "pts": 13.5,
+          "ast": 4.5,
+          "reb": 3.5,
+          "tpm": 2.5,
+          "pra": 21.5
+        },
+        "6606": {
+          "pts": 18.5,
+          "ast": 4.5,
+          "reb": 3.5,
+          "tpm": 2.5,
+          "pra": 27.5
+        },
+        "2991350": {
+          "pts": 6.5,
+          "ast": 1.5,
+          "reb": 3.5,
+          "tpm": 1.5,
+          "pra": 11.5
+        },
+        "3133626": {
+          "pts": 7.5,
+          "reb": 4.5,
+          "tpm": 1.5,
+          "pra": 14.5
+        },
+        "4066211": {
+          "pts": 5.5,
+          "reb": 6.5
+        },
+        "4222252": {
+          "pts": 8.5,
+          "ast": 3.5,
+          "reb": 9.5,
+          "pra": 23.5
+        },
+        "4278073": {
+          "pts": 32.5,
+          "ast": 5.5,
+          "reb": 3.5,
+          "tpm": 2.5,
+          "stl": 1.5,
+          "pra": 42.5
+        },
+        "4431736": {
+          "pts": 12.5,
+          "ast": 1.5,
+          "reb": 4.5,
+          "tpm": 2.5,
+          "pra": 18.5
+        },
+        "4683021": {
+          "pts": 22.5,
+          "ast": 6.5,
+          "reb": 7.5,
+          "tpm": 1.5,
+          "pra": 36.5
+        },
+        "4683678": {
+          "pts": 10.5,
+          "ast": 2.5,
+          "reb": 2.5,
+          "tpm": 1.5,
+          "pra": 15.5
+        },
+        "4683778": {
+          "pts": 12.5,
+          "reb": 2.5,
+          "tpm": 1.5,
+          "pra": 17.5
+        },
+        "4900671": {
+          "pts": 19.5,
+          "ast": 3.5,
+          "reb": 3.5,
+          "tpm": 0.5,
+          "stl": 1.5,
+          "pra": 27.5
+        },
+        "5105565": {
+          "pts": 10.5,
+          "reb": 10.5,
+          "tpm": 0.5,
+          "blk": 1.5,
+          "pra": 23.5
+        },
+        "5174983": {
+          "pts": 8.5,
+          "ast": 1.5,
+          "reb": 6.5,
+          "pra": 16.5
+        },
+        "5241364": {
+          "pts": 6.5,
+          "tpm": 1.5
+        }
+      }
+    },
+    "401909966": {
+      "date": "2026-11-12T00:00Z",
+      "home": "11",
+      "away": "27",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "IND -3.5",
+      "spreadHome": -3.5,
+      "total": 225.5,
+      "mlHome": -166,
+      "mlAway": 139,
+      "spreadOddsHome": -112,
+      "spreadOddsAway": -108,
+      "overOdds": -110,
+      "underOdds": -110,
+      "open": {
+        "spreadHome": -4.5,
+        "total": 228.5,
+        "mlHome": -161,
+        "mlAway": 135
+      },
+      "impliedHome": 0.599,
+      "fetched": "2026-11-11T05:10:29.965Z"
+    },
+    "401909967": {
+      "date": "2026-11-12T00:00Z",
+      "home": "18",
+      "away": "5",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "NY -3.5",
+      "spreadHome": -3.5,
+      "total": 221.5,
+      "mlHome": -166,
+      "mlAway": 140,
+      "spreadOddsHome": -115,
+      "spreadOddsAway": -106,
+      "overOdds": -110,
+      "underOdds": -110,
+      "open": {
+        "spreadHome": -4.5,
+        "total": 221.5,
+        "mlHome": -177,
+        "mlAway": 148
+      },
+      "impliedHome": 0.6,
+      "fetched": "2026-11-11T05:10:29.965Z"
+    },
+    "401909968": {
+      "date": "2026-11-12T00:00Z",
+      "home": "28",
+      "away": "2",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "BOS -6.5",
+      "spreadHome": 6.5,
+      "total": 216.5,
+      "mlHome": 206,
+      "mlAway": -249,
+      "spreadOddsHome": -108,
+      "spreadOddsAway": -112,
+      "overOdds": -110,
+      "underOdds": -110,
+      "open": {
+        "spreadHome": 6.5,
+        "total": 215.5,
+        "mlHome": 182,
+        "mlAway": -220
+      },
+      "impliedHome": 0.314,
+      "fetched": "2026-11-11T05:10:29.965Z"
+    },
+    "401909969": {
+      "date": "2026-11-12T01:00Z",
+      "home": "4",
+      "away": "24",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "SA -15.5",
+      "spreadHome": 15.5,
+      "total": 240.5,
+      "mlHome": 750,
+      "mlAway": -1200,
+      "spreadOddsHome": -111,
+      "spreadOddsAway": -109,
+      "overOdds": -109,
+      "underOdds": -111,
+      "open": {
+        "spreadHome": 14.5,
+        "total": 237.5,
+        "mlHome": 451,
+        "mlAway": -610
+      },
+      "impliedHome": 0.113,
+      "fetched": "2026-11-11T05:10:29.965Z",
+      "props": {
+        "2595516": {
+          "pts": 19.5,
+          "tpm": 2.5
+        },
+        "4397189": {
+          "pts": 11.5,
+          "tpm": 1.5
+        },
+        "4711294": {
+          "pts": 13.5,
+          "tpm": 1.5
+        },
+        "4871145": {
+          "pts": 13.5,
+          "tpm": 1.5
+        },
+        "5095151": {
+          "pts": 19.5,
+          "tpm": 2.5
+        }
+      }
+    },
+    "401909970": {
+      "date": "2026-11-12T01:00Z",
+      "home": "29",
+      "away": "7",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "DEN -4.5",
+      "spreadHome": 4.5,
+      "total": 227.5,
+      "mlHome": 133,
+      "mlAway": -158,
+      "spreadOddsHome": -114,
+      "spreadOddsAway": -106,
+      "overOdds": -111,
+      "underOdds": -109,
+      "open": {
+        "spreadHome": 4.5,
+        "total": 228.5,
+        "mlHome": 131,
+        "mlAway": -156
+      },
+      "impliedHome": 0.412,
+      "fetched": "2026-11-11T05:10:29.965Z"
+    },
+    "401909971": {
+      "date": "2026-11-12T01:00Z",
+      "home": "15",
+      "away": "13",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "LAL -10.5",
+      "spreadHome": 10.5,
+      "total": 233.5,
+      "mlHome": 473,
+      "mlAway": -650,
+      "spreadOddsHome": -105,
+      "spreadOddsAway": -115,
+      "overOdds": -106,
+      "underOdds": -114,
+      "open": {
+        "spreadHome": 10.5,
+        "total": 233.5,
+        "mlHome": 473,
+        "mlAway": -650
+      },
+      "impliedHome": 0.168,
+      "fetched": "2026-11-11T05:10:29.965Z"
+    },
+    "401909972": {
+      "date": "2026-11-12T01:00Z",
+      "home": "3",
+      "away": "17",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "NO -4.5",
+      "spreadHome": -4.5,
+      "total": 228.5,
+      "mlHome": -191,
+      "mlAway": 160,
+      "spreadOddsHome": -110,
+      "spreadOddsAway": -110,
+      "overOdds": -107,
+      "underOdds": -113,
+      "open": {
+        "spreadHome": -4.5,
+        "total": 230.5,
+        "mlHome": -164,
+        "mlAway": 138
+      },
+      "impliedHome": 0.631,
+      "fetched": "2026-11-11T05:10:29.965Z"
+    },
+    "401909974": {
+      "date": "2026-11-12T02:30Z",
+      "home": "10",
+      "away": "9",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "HOU -5.5",
+      "spreadHome": -5.5,
+      "total": 222.5,
+      "mlHome": -217,
+      "mlAway": 180,
+      "spreadOddsHome": -110,
+      "spreadOddsAway": -110,
+      "overOdds": -105,
+      "underOdds": -115,
+      "open": {
+        "spreadHome": -5.5,
+        "total": 222.5,
+        "mlHome": -189,
+        "mlAway": 158
+      },
+      "impliedHome": 0.657,
+      "fetched": "2026-11-11T05:10:29.965Z"
+    },
+    "401909975": {
+      "date": "2026-11-12T03:00Z",
+      "home": "22",
+      "away": "25",
+      "provider": "Draft Kings",
+      "providerId": "100",
+      "details": "OKC -2.5",
+      "spreadHome": 2.5,
+      "total": 225.5,
+      "mlHome": 111,
+      "mlAway": -132,
+      "spreadOddsHome": -111,
+      "spreadOddsAway": -109,
+      "overOdds": -107,
+      "underOdds": -113,
+      "open": {
+        "spreadHome": 2.5,
+        "total": 224.5,
+        "mlHome": 111,
+        "mlAway": -132
+      },
+      "impliedHome": 0.454,
+      "fetched": "2026-11-11T00:19:07.137Z"
+    }
+  }
+}

@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Courtside Ledger - NBA game analyzer</title>
+  <meta name="description" content="Scenario-based NBA projections that grade themselves against every real result. Betting odds never feed the projections.">
+  <!-- Dark is the default for every visitor. The toggle stores "light" or "dark" in localStorage and app.js keeps this tag in step. -->
+  <meta name="color-scheme" content="dark light">
+  <meta name="theme-color" id="theme-color" content="#0d0d0d">
+  <script>
+    // Apply a saved light preference before first paint so the page never flashes the wrong theme.
+    try {
+      if (localStorage.getItem("theme") === "light") {
+        document.documentElement.dataset.theme = "light";
+        document.getElementById("theme-color").setAttribute("content", "#f9f9f7");
+      }
+    } catch (e) { /* storage blocked: stay on the dark default */ }
+  </script>
+  <link rel="preconnect" href="https://a.espncdn.com">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233987e5'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23fff' stroke-width='2'/%3E%3Cpath d='M7 16h18M16 7v18' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <button class="skip" id="skip" type="button">Skip to content</button>
+  <header class="top">
+    <a class="brand" href="#/games" aria-label="Courtside Ledger home">
+      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><circle cx="16" cy="16" r="9" fill="none" stroke="#fff" stroke-width="2"/><path d="M7 16h18M16 7v18" stroke="#fff" stroke-width="2"/></svg>
+      <span>Courtside Ledger</span>
+    </a>
+    <nav class="nav" id="nav" aria-label="Sections"></nav>
+    <a class="icon-btn" id="bell" href="#/today" aria-label="What changed today" title="What changed today"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 16V11a6 6 0 1112 0v5l1.5 2h-15zM10 20a2 2 0 004 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></a>
+    <button class="icon-btn" id="search-btn" type="button" aria-label="Search players and teams" title="Search players and teams (/)" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><circle cx="10.5" cy="10.5" r="6.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M20 20l-4.9-4.9" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg>
+    </button>
+    <button class="icon-btn" id="theme" type="button" aria-label="Switch to light theme" title="Switch to light theme">
+      <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="currentColor" d="M12 3a9 9 0 1 0 0 18V3z"/><circle cx="12" cy="12" r="8.25" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+    </button>
+  </header>
+  <main id="app" tabindex="-1"><p class="loading">Loading the latest data...</p></main>
+  <footer class="foot">
+    <p id="updated"></p>
+    <p>Statistical projections for analysis and entertainment. Not betting advice. Sportsbook odds and lines never feed the projections.</p>
+    <p>All dates and times are Philippine time (Asia/Manila). Player photos and team logos are loaded from ESPN's public image server.</p>
+  </footer>
+  <dialog class="srch" id="srch" aria-labelledby="srch-h">
+    <div class="srch-top">
+      <h2 class="vh" id="srch-h">Search players and teams</h2>
+      <input class="field" id="srch-q" type="search" placeholder="Player or team name" aria-label="Search players and teams" autocomplete="off" enterkeyhint="go">
+      <button class="icon-btn" id="srch-x" type="button" aria-label="Close search"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg></button>
+    </div>
+    <div class="srch-out" id="srch-out" aria-live="polite"></div>
+  </dialog>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <div id="tip" class="tip" role="status" hidden></div>
+  <script type="module" src="app.js"></script>
+</body>
+</html>

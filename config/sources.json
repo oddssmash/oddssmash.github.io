@@ -1,0 +1,22 @@
+{
+  "_note": "Commentary and news sources. Only the headline, a short summary and the link are stored. Add or remove entries freely. 'general': true means the channel covers many sports, so only NBA-related items are kept. TikTok and Facebook are not listed because they do not offer a public feed that can be read without logging in.",
+  "feeds": [
+    { "name": "CBS Sports", "kind": "news", "url": "https://www.cbssports.com/rss/headlines/nba/" },
+    { "name": "Yahoo Sports", "kind": "news", "url": "https://sports.yahoo.com/nba/rss/" },
+    { "name": "RotoWire", "kind": "news", "url": "https://www.rotowire.com/rss/news.php?sport=NBA" },
+    { "name": "RealGM Wiretap", "kind": "news", "url": "https://basketball.realgm.com/rss/wiretap/0/0.xml" },
+    { "name": "Hoops Rumors", "kind": "blog", "url": "https://www.hoopsrumors.com/feed" },
+    { "name": "SB Nation NBA", "kind": "blog", "url": "https://www.sbnation.com/rss/nba/index.xml" },
+    { "name": "ClutchPoints", "kind": "blog", "url": "https://clutchpoints.com/nba/feed" },
+    { "name": "Reddit r/nba (top of day)", "kind": "community", "url": "https://www.reddit.com/r/nba/top/.rss?t=day" },
+    { "name": "Reddit r/nbadiscussion (top of week)", "kind": "community", "url": "https://www.reddit.com/r/nbadiscussion/top/.rss?t=week" },
+    { "name": "Reddit r/NBAanalytics (top of week)", "kind": "community", "url": "https://www.reddit.com/r/NBAanalytics/top/.rss?t=week" }
+  ],
+  "youtube": [
+    { "name": "NBA", "handle": "NBA" },
+    { "name": "Thinking Basketball", "handle": "ThinkingBasketball" },
+    { "name": "Hoop Venue", "handle": "HoopVenue" },
+    { "name": "ESPN", "handle": "ESPN", "general": true },
+    { "name": "Bleacher Report", "handle": "BleacherReport", "general": true }
+  ]
+}
