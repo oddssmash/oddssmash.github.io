@@ -1756,6 +1756,18 @@ function teamScout(t) {
 // His per-game production (this season, blended with last while the sample is small) x the pace of the matchup
 // x the opponent's current-season defence; chosen defenders adjust his scoring by how shooters do against them
 // (NBA.com closest-defender tracking, weighted by his shot distances). Display only: the game-day model is separate.
+// Live player search: matches any part of the name (accents ignored) as you type and shows tappable results.
+// Replaces <datalist>, which phones show poorly and which needed the exact full name.
+const fold = (x) => String(x || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const pickerHTML = (id, ph = "Type a player name") => `<div class="pk-s"><input class="field" id="${id}" type="search" autocomplete="off" placeholder="${esc(ph)}"><div class="pk-res" id="${id}-res" role="listbox"></div></div>`;
+function bindPicker(input, list, onPick) {
+  if (!input) return; const res = document.getElementById(input.id + "-res");
+  const show = () => { const q = fold(input.value).trim(); if (q.length < 2) { res.innerHTML = ""; return; }
+    const hits = list.filter((x) => fold(x.n).includes(q)).sort((a, b) => fold(a.n).indexOf(q) - fold(b.n).indexOf(q) || (b.cur?.[2] || 0) - (a.cur?.[2] || 0)).slice(0, 8);
+    res.innerHTML = hits.length ? hits.map((x) => `<button type="button" class="pk-hit" data-pid="${esc(x.id)}">${esc(x.n)} <span class="muted">${esc(T(x.team).abbr || "")}${x.cur ? ` · ${f1(x.cur[2])} ppg` : ""}</span></button>`).join("") : `<div class="small muted pk-none">No player matches "${esc(input.value)}"</div>`; };
+  input.addEventListener("input", show);
+  res.addEventListener("click", (e) => { const b = e.target.closest("[data-pid]"); if (!b) return; const q = list.find((x) => String(x.id) === b.dataset.pid); if (!q) return; input.value = ""; res.innerHTML = ""; onPick(q); });
+}
 function seasonLine(sp) {
   const c = sp?.cur, pv = sp?.prev; if (!c && !pv) return null;
   const wc = c ? Math.min(1, (c[0] || 0) / 15) : 0, mix = (i) => (c && pv ? wc * c[i] + (1 - wc) * pv[i] : (c || pv)[i]);
@@ -1803,9 +1815,9 @@ async function teamVersus(t) {
   const others = (S.teams || []).filter((x) => x.id !== t.id).sort((a, b) => a.name.localeCompare(b.name));
   const drawCtl = () => {
     ctl.innerHTML = st.vs === "team" ? `<select class="field" id="tv-team">${others.map((x) => `<option value="${esc(x.id)}"${x.id === st.opp ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`
-      : `<input class="field" id="tv-pin" list="tv-pl" placeholder="Type a player name" value="${esc(st.pl?.n || "")}"><datalist id="tv-pl">${plist.map((q) => `<option value="${esc(q.n)}">`).join("")}</datalist>`;
+      : `${pickerHTML("tv-pin")}${st.pl ? `<p class="small">Selected: <b>${esc(st.pl.n)}</b></p>` : ""}`;
     ctl.querySelector("#tv-team")?.addEventListener("change", (e) => { st.opp = e.target.value; draw(); });
-    ctl.querySelector("#tv-pin")?.addEventListener("change", (e) => { const q = plist.find((x) => x.n === e.target.value); if (q) { st.pl = q; draw(); } });
+    bindPicker(ctl.querySelector("#tv-pin"), plist, (q) => { st.pl = q; drawCtl(); draw(); });
   };
   const draw = async () => {
     if (st.vs === "team") {
@@ -2179,11 +2191,11 @@ async function vScout(id, labTid) {
       const el = document.getElementById("mm-ctl"); if (!el) return;
       if (mm.vs === "team") el.innerHTML = `<select class="field" id="mm-team">${others.map((t) => `<option value="${esc(t.id)}"${t.id === mm.team ? " selected" : ""}>${esc(t.name)}${t.id === nextOpp ? " (next game)" : ""}</option>`).join("")}</select>`;
       else if (mm.vs === "style") el.innerHTML = `<select class="field" id="mm-style">${tags.map((t) => `<option${t === mm.style ? " selected" : ""}>${esc(t)}</option>`).join("")}</select>`;
-      else el.innerHTML = `<label class="small" for="mm-pin">${mm.side === "off" ? "Add up to 3 defenders" : "Choose a shooter"}</label><input class="field" id="mm-pin" list="mm-pl" placeholder="Type a player name"><datalist id="mm-pl">${plist.map((q) => `<option value="${esc(q.n)}">`).join("")}</datalist>
+      else el.innerHTML = `<label class="small" for="mm-pin">${mm.side === "off" ? "Add up to 3 defenders" : "Choose a shooter"}</label>${pickerHTML("mm-pin")}
         <div class="chips" id="mm-chips">${mm.players.map((q) => `<button class="chip" type="button" data-mm-rm="${esc(q.id)}">${esc(q.n)} ✕</button>`).join("")}</div>`;
       el.querySelector("#mm-team")?.addEventListener("change", (e) => { mm.team = e.target.value; draw(); });
       el.querySelector("#mm-style")?.addEventListener("change", (e) => { mm.style = e.target.value; draw(); });
-      el.querySelector("#mm-pin")?.addEventListener("change", (e) => { const q = plist.find((x) => x.n === e.target.value); if (!q) return; if (mm.side === "def") mm.players = [q]; else if (!mm.players.some((x) => x.id === q.id)) mm.players = [...mm.players, q].slice(-3); ctl(); draw(); });
+      bindPicker(el.querySelector("#mm-pin"), plist, (q) => { if (mm.side === "def") mm.players = [q]; else if (!mm.players.some((x) => x.id === q.id)) mm.players = [...mm.players, q].slice(-3); ctl(); draw(); });
       el.querySelectorAll("[data-mm-rm]").forEach((b) => b.addEventListener("click", () => { mm.players = mm.players.filter((x) => String(x.id) !== b.dataset.mmRm); ctl(); draw(); }));
     };
     const teamsFor = () => (mm.vs === "team" ? [S.T[mm.team]].filter(Boolean) : (S.teams || []).filter((t) => t.style?.tags?.includes(mm.style)));

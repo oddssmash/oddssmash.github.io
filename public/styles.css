@@ -1103,3 +1103,8 @@ a.gtab { color: var(--ink-2); }
 .pv { margin: 6px 0 12px; padding: 10px; border: 1.5px solid #2fbf71; border-radius: 12px; background: color-mix(in srgb, #2fbf71 6%, transparent); }
 .pv h3 { margin-top: 0; }
 .pv-parts li { padding: 3px 0; }
+.pk-s { position: relative; }
+.pk-res { display: grid; gap: 4px; margin: 6px 0; }
+.pk-hit { text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: color-mix(in srgb, var(--ink) 4%, transparent); color: inherit; font-size: 15px; cursor: pointer; }
+.pk-hit:hover, .pk-hit:focus { border-color: var(--accent); }
+.pk-none { padding: 6px 2px; }
