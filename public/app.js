@@ -3347,7 +3347,7 @@ const n0 = (v) => (v === undefined || v === null || v === "" || v === "--" ? 0 :
 const clockS = (c) => { const m = String(c || "0:00").split(":"); return m.length === 2 ? n0(m[0]) * 60 + n0(m[1]) : n0(m[0]); };
 const remShare = (period, clock) => (period <= 4 ? Math.max(0, ((4 - period) * 720 + clockS(clock)) / 2880) : Math.max(0, clockS(clock) / 2880));
 async function espnJSON(path) {
-  const r = await fetch(`${ESPN_API}/${path}`, { cache: "no-store" });
+  const r = await fetch(`${ESPN_API}/${path}${path.includes("?") ? "&" : "?"}_=${Math.floor(Date.now() / 4000)}`, { cache: "no-store" }); // cache-buster: ESPN's CDN otherwise serves copies minutes old
   if (!r.ok) throw new Error(`ESPN ${r.status}`);
   return r.json();
 }
@@ -3403,9 +3403,12 @@ function liveModel(g, L) {
     for (const p of (t.players || []).filter((x) => x.min >= 8)) {
       const c = L.box.get(String(p.id)) || { min: 0, pts: 0, reb: 0, ast: 0, tpm: 0, pf: 0, dnp: 1 };
       const why = [];
-      let restMin = Math.max(0, p.min - c.min);
-      // If he is running ahead of or behind his expected minutes, scale with the clock instead.
-      restMin = Math.min(restMin, p.min * rem * 1.25) || p.min * rem;
+      // Minutes left: his usual share of the game, blended with tonight's actual rotation (counts more as the game goes on).
+      const shPre = Math.min(1, p.min / 48), shNow = Math.min(1, c.min / Math.max(1, elapsed * 48));
+      const wMin = c.min > 0 ? Math.min(0.65, elapsed * 0.9) : 0;
+      let restMin = rem * 48 * ((1 - wMin) * shPre + wMin * shNow);
+      if (wMin > 0.2 && shNow > shPre * 1.25) why.push(`playing more than usual tonight (${c.min} min so far)`);
+      else if (wMin > 0.2 && shNow < shPre * 0.7 && c.min > 0) why.push(`playing less than usual tonight (${c.min} min so far)`);
       if (c.dnp || c.ej || c.pf >= 6) { restMin = 0; why.push(c.pf >= 6 ? "fouled out" : c.ej ? "ejected" : "has not played"); }
       else if (c.min === 0 && elapsed > 0.45) { restMin = 0; why.push("has not played yet: treated as out"); }
       else {
@@ -3424,7 +3427,7 @@ function liveModel(g, L) {
     }
   }
   const ex = liveExtras(g, L, { home, away, rem, elapsed, lead, preM, preTot, restH, restA, projH, projA, margin, sd, pHome, live48, blowout, closeLate, ot });
-  for (const p of players) p.props = livePlayerProps(p);
+  for (const p of players) { p.props = livePlayerProps(p); p.restOut = p.restMin === 0; }
   return { rem, lead, projH, projA, projTot: projH + projA, margin, sd, pHome, whyTeam, players, blowout, closeLate, ...ex };
 }
 const half = (v) => Math.round(v - 0.5) + 0.5;
@@ -3436,11 +3439,11 @@ function livePlayerProps(p) {
     const line = half(pre), proj = p.live[k], cur = p.cur[k] || 0;
     const sdK = k === "pts" ? Math.max(0.6, (((p.pre.hi ?? pre + 7) - (p.pre.lo ?? pre - 7)) / 2.56) * frac) : Math.max(0.35, base * Math.sqrt(Math.max(0.5, pre)) * frac);
     const pOver = cur > line ? 1 : p.restMin === 0 ? 0 : 1 - pNorm((line - proj) / sdK);
-    out[k] = { line, proj, cur, pOver };
+    out[k] = { line, proj, cur, pOver, sd: sdK };
   }
   const pra = (p.live.pts || 0) + (p.live.reb || 0) + (p.live.ast || 0), praPre = (p.pre.pts || 0) + (p.pre.reb || 0) + (p.pre.ast || 0), praCur = (p.cur.pts || 0) + (p.cur.reb || 0) + (p.cur.ast || 0);
   const praLine = half(praPre), praSd = Math.max(0.8, 1.25 * Math.sqrt(Math.max(1, praPre)) * frac * 1.1);
-  out.pra = { line: praLine, proj: pra, cur: praCur, pOver: praCur > praLine ? 1 : p.restMin === 0 ? 0 : 1 - pNorm((praLine - pra) / praSd) };
+  out.pra = { sd: praSd, line: praLine, proj: pra, cur: praCur, pOver: praCur > praLine ? 1 : p.restMin === 0 ? 0 : 1 - pNorm((praLine - pra) / praSd) };
   return out;
 }
 // Quarter, half, total, team total, spread and situation reads for a game in progress.
@@ -3462,7 +3465,7 @@ function liveExtras(g, L, c) {
     const pH_ = status === "final" ? (aH > aA ? 1 : aH < aA ? 0 : 0.5) : 1 - pNorm(-m / qsd);
     const tLine = half(qH[q] + qA[q]);
     const pOver = status === "final" ? (aH + aA > tLine ? 1 : 0) : 1 - pNorm((tLine - (pH + pA)) / tsd);
-    return { q: q + 1, status, aH, aA, pH, pA, pHome: pH_, tLine, pOver };
+    return { q: q + 1, status, aH, aA, pH, pA, pHome: pH_, tLine, pOver, qsd, tsd };
   });
   const halfRow = (a, b) => {
     const st = a.status === "final" && b.status === "final" ? "final" : a.status === "next" && b.status === "next" ? "next" : "live";
@@ -3481,7 +3484,7 @@ function liveExtras(g, L, c) {
   const team = (proj, cur, pre) => {
     const line = half(pre), at = (x) => (cur > x ? 1 : 1 - pNorm((x - proj) / sdT));
     const m0 = Math.floor(proj / 10) * 10;
-    return { proj, line, pOver: at(line), miles: [m0 - 10, m0, m0 + 10].filter((x) => x > cur).map((x) => ({ x, p: at(x - 0.5) })) };
+    return { proj, cur, sdT, line, pOver: at(line), miles: [m0 - 10, m0, m0 + 10].filter((x) => x > cur).map((x) => ({ x, p: at(x - 0.5) })) };
   };
   const tH = team(projH, L.hs, g.pred.hs), tA = team(projA, L.as, g.pred.as);
   // Spread: our pre-game line and live alternatives
@@ -3540,6 +3543,7 @@ function liveEngineCard(g, L, M) {
     <div class="pr-row"><span class="pr-k">Live total</span><span class="pr-v"><b>${f1(M.projTot)}</b><i>pre-game ${f1(g.pred.hs + g.pred.as)} · now ${esc(L.hs + L.as)}</i></span></div>
     <div class="pr-row"><span class="pr-k">Team totals</span><span class="pr-v"><b>${esc(T(away).abbr)} ${f1(M.projA)} · ${esc(T(home).abbr)} ${f1(M.projH)}</b><i>projected finals</i></span></div>
     ${liveMarkets(g, L, M)}
+    ${S.mkt && S.mkt.id === g.id ? marketCard(g, L, M, S.mkt) : ""}
     <p class="small muted" style="margin-top:8px">Starts from our pre-game projection and scenario library, then uses the live score, time left, pace and each player's line so far. Remaining minutes use his normal scoring rate, so a hot or cold start is expected to even out. Lines are the pre-game prop lines; no betting odds are used.</p></div>`;
 }
 function liveMarkets(g, L, M) {
@@ -3579,6 +3583,122 @@ function liveMarkets(g, L, M) {
       ${p.why.length ? `<div class="small" style="color:var(--warn)">${esc(p.why.join("; "))}</div>` : ""}</div>`).join("")}</div>
       <p class="small muted">Each chip: projected final, our pre-game line, and the chance he goes over it.</p>` : ""}`;
 }
+// ---------------- Betting market comparison (display only: never used by our projections or learning)
+const ESPN_CORE = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba";
+const amP = (a) => { const v = Number(String(a ?? "").replace("+", "")); return !v ? null : v < 0 ? -v / (-v + 100) : 100 / (v + 100); };
+const noVig = (a, b) => { const x = amP(a), y = amP(b); return x == null || y == null ? null : x / (x + y); };
+const amTxt = (a) => (a == null || a === "" ? "-" : (Number(a) > 0 ? "+" : "") + Number(a));
+function parseProps(pb, tid) {
+  const groups = new Map();
+  for (const x of pb?.items || []) {
+    const ath = String(x.athlete?.$ref || "").match(/athletes\/(\d+)/)?.[1] || "", team = tid(x) || "";
+    const tgt = x.current?.target?.value ?? x.odds?.total?.value ?? "";
+    const key = [x.type?.name, ath, team, tgt].join("|");
+    if (!groups.has(key)) groups.set(key, { type: x.type?.name, ath, team, line: Number(tgt), odds: [] });
+    groups.get(key).odds.push(Number(x.odds?.american?.value));
+  }
+  return [...groups.values()];
+}
+async function marketFetch(id, keepProps) {
+  const bust = `_=${Math.floor(Date.now() / 5000)}`; // ESPN's CDN caches odds for up to 15 minutes without this
+  const base = `${ESPN_CORE}/events/${id}/competitions/${id}/odds`;
+  const j = await fetch(`${base}?lang=en&region=us&${bust}`, { cache: "no-store" }).then((r) => r.json());
+  const items = j.items || [];
+  const liveIt = items.find((x) => /live/i.test(x.provider?.name || "")), preIt = items.find((x) => !/live/i.test(x.provider?.name || ""));
+  const it = liveIt || preIt;
+  if (!it) return null;
+  const tid = (o) => String(o?.team?.$ref || "").match(/teams\/(\d+)/)?.[1];
+  const side = (o) => ({ ml: Number(o?.current?.moneyLine?.american ?? o?.moneyLine), sp: Number(o?.current?.pointSpread?.american ?? NaN), spo: Number(o?.current?.spread?.american ?? o?.spreadOdds), tid: tid(o) });
+  const lines = (x) => (x ? { total: Number(x.overUnder), over: Number(x.current?.over?.american ?? x.overOdds), under: Number(x.current?.under?.american ?? x.underOdds), away: side(x.awayTeamOdds), home: side(x.homeTeamOdds) } : null);
+  const m = { id, live: !!liveIt, book: (it.provider?.name || "Sportsbook").replace(/\s*-\s*Live Odds/i, ""), at: new Date().toISOString(), ...lines(it), pre: liveIt ? lines(preIt) : null, props: keepProps?.props || null, preProps: keepProps?.preProps || null };
+  const pb = async (pid) => (pid ? fetch(`${base}/${pid}/propBets?lang=en&region=us&limit=1000&${bust}`, { cache: "no-store" }).then((r) => r.json()) : null);
+  if (!m.props) { try { m.props = parseProps(await pb(it.provider?.id), tid); } catch { m.props = []; } }
+  // Pre-game props barely change once the game starts, so fetch them once per game.
+  if (!m.preProps && liveIt && preIt) { try { m.preProps = parseProps(await pb(preIt.provider?.id), tid); } catch { m.preProps = []; } }
+  return m;
+}
+function marketCard(g, L, M, m) {
+  const H = T(g.home).abbr, A = T(g.away).abbr;
+  const homeId = String(g.home), awayId = String(g.away);
+  const rows = [];
+  const diffCls = (d) => (Math.abs(d) >= 0.1 ? "big" : Math.abs(d) >= 0.05 ? "mid" : "");
+const pre = m.pre;
+  const baseTxt = (b) => (b ? `<tr class="mk-base"><td colspan="5"><span class="mk-pre">Pre-game</span> ${b}</td></tr>` : "");
+  const row = (k, book, ours, mkt, note, base) => {
+    const d = ours != null && mkt != null ? ours - mkt : null;
+    rows.push(`<tr><td>${k}</td><td class="n">${book}</td><td class="n">${mkt != null ? pct(mkt) : "-"}</td><td class="n"><b>${ours != null ? pct(ours) : "-"}</b></td><td class="n mk-d ${d != null ? diffCls(d) : ""}">${d != null ? (d > 0 ? "+" : "") + Math.round(d * 100) : ""}</td></tr>${baseTxt(base)}${note ? `<tr class="mk-note"><td colspan="5">${note}</td></tr>` : ""}`);
+  };
+  const ourPre = { h: g.pred.hs, a: g.pred.as, pH: g.pred.pHome };
+  // Moneyline
+  const mH = noVig(m.home.ml, m.away.ml);
+  const preH = pre ? noVig(pre.home.ml, pre.away.ml) : null;
+  const mlBase = (isH) => (preH != null ? `${amTxt(isH ? pre.home.ml : pre.away.ml)}: book ${pct(isH ? preH : 1 - preH)} · our pre-game ${pct(isH ? ourPre.pH : 1 - ourPre.pH)} → now ${pct(isH ? M.pHome : 1 - M.pHome)}` : "");
+  if (mH != null) { row(`${esc(H)} to win`, amTxt(m.home.ml), M.pHome, mH, "", mlBase(true)); row(`${esc(A)} to win`, amTxt(m.away.ml), 1 - M.pHome, 1 - mH, "", mlBase(false)); }
+  // Spread (home line)
+  const hLine = Number.isFinite(m.home.sp) ? m.home.sp : null;
+  if (hLine != null) {
+    const pCov = 1 - pNorm((-hLine - M.margin) / M.sd);
+    const mk = noVig(m.home.spo, m.away.spo);
+    const pl = pre && Number.isFinite(pre.home.sp) ? pre.home.sp : null;
+    const sb = pl != null ? `${esc(H)} ${pl > 0 ? "+" : ""}${pl} (moved ${hLine - pl > 0 ? "+" : ""}${f1(hLine - pl)}): book ${pct(noVig(pre.home.spo, pre.away.spo) ?? 0.5)} · our pre-game margin ${esc(ourPre.h >= ourPre.a ? H : A)} by ${f1(Math.abs(ourPre.h - ourPre.a))} · we now cover it ${pct(1 - pNorm((-pl - M.margin) / M.sd))}` : "";
+    row(`${esc(H)} ${hLine > 0 ? "+" : ""}${hLine}`, amTxt(m.home.spo), pCov, mk, `Our projected margin now: ${esc(M.margin >= 0 ? H : A)} by ${f1(Math.abs(M.margin))}`, sb);
+  }
+  // Total
+  if (Number.isFinite(m.total)) {
+    const T_ = M.totals, pO = L.hs + L.as > m.total ? 1 : 1 - pNorm((m.total - T_.projTot) / T_.sdTot);
+    const pt = pre && Number.isFinite(pre.total) ? pre.total : null;
+    const tb = pt != null ? `${pt} (moved ${m.total - pt > 0 ? "+" : ""}${f1(m.total - pt)}): book over ${pct(noVig(pre.over, pre.under) ?? 0.5)} · our pre-game total ${f1(ourPre.h + ourPre.a)} · we now say over ${pct(L.hs + L.as > pt ? 1 : 1 - pNorm((pt - T_.projTot) / T_.sdTot))}` : "";
+    row(`Over ${m.total}`, amTxt(m.over), pO, noVig(m.over, m.under), `Our projected total now: ${f1(T_.projTot)}`, tb);
+  }
+  const P = m.props || [];
+  const pair = (x) => (x.odds.length >= 2 ? noVig(x.odds[0], x.odds[1]) : null);
+  // Team totals
+  for (const x of P.filter((x) => x.type === "Team Total Points")) {
+    const k = x.team === homeId ? "h" : x.team === awayId ? "a" : null; if (!k) continue;
+    const t = M.teamTot[k]; const ours = t.cur > x.line ? 1 : 1 - pNorm((x.line - t.proj) / t.sdT);
+    const px = (m.preProps || []).find((y) => y.type === "Team Total Points" && y.team === x.team && y.odds.length >= 2);
+    const base = px ? `${px.line}: book over ${pct(pair(px) ?? 0.5)} · our pre-game ${f1(k === "h" ? ourPre.h : ourPre.a)} · we now say over ${pct(t.cur > px.line ? 1 : 1 - pNorm((px.line - t.proj) / t.sdT))}` : "";
+    row(`${esc(k === "h" ? H : A)} over ${x.line}`, amTxt(x.odds[0]), ours, pair(x), "", base);
+  }
+  // Quarters (current and next)
+  for (const q of (M.quarters || []).filter((q) => q.status !== "final")) {
+    const name = ["1st", "2nd", "3rd", "4th"][q.q - 1] + " Quarter";
+    const tot = P.find((x) => x.type === `${name} Total`);
+    if (tot) { const ours = 1 - pNorm((tot.line - (q.pH + q.pA)) / q.tsd); row(`Q${q.q} over ${tot.line}`, amTxt(tot.odds[0]), ours, pair(tot)); }
+    const mls = P.filter((x) => x.type === `${name} Moneyline`);
+    const hm = mls.find((x) => x.team === homeId), am = mls.find((x) => x.team === awayId);
+    if (hm && am) row(`Q${q.q} ${esc(H)} wins`, amTxt(hm.odds[0]), q.pHome, noVig(hm.odds[0], am.odds[0]));
+    else if (mls.length) { const x = mls.find((y) => y.odds.length >= 2); if (x) row(`Q${q.q} ${esc(H)} wins`, amTxt(x.odds[0]), q.pHome, pair(x)); }
+  }
+  // Overtime
+  const ot = P.find((x) => x.type === "Will There Be Overtime?");
+  if (ot && ot.odds.length >= 2) row("Overtime", amTxt(ot.odds[0]), M.pOT, pair(ot));
+  // Player props at the bookmaker's live lines
+  const TYPES = { "Total Points": "pts", "Total Rebounds": "reb", "Total Assists": "ast", "Total 3-Point Field Goals": "tpm", "Total Points, Rebounds, and Assists": "pra" };
+  const LAB = { pts: "PTS", reb: "REB", ast: "AST", tpm: "3PM", pra: "PRA" };
+  const prow = [];
+  for (const pl of M.players) {
+    for (const x of P.filter((y) => y.ath === String(pl.id) && TYPES[y.type] && y.odds.length >= 2)) {
+      const k = TYPES[x.type], o = pl.props?.[k]; if (!o) continue;
+      const ours = o.cur > x.line ? 1 : pl.restOut ? 0 : 1 - pNorm((x.line - o.proj) / o.sd);
+      const mk = pair(x); if (mk == null) continue;
+      const px = (m.preProps || []).filter((y) => y.ath === x.ath && y.type === x.type && y.odds.length >= 2).sort((a, b) => Math.abs(pair(a) - 0.5) - Math.abs(pair(b) - 0.5))[0];
+      const preOurs = px ? (o.cur > px.line ? 1 : pl.restOut ? 0 : 1 - pNorm((px.line - o.proj) / o.sd)) : null;
+      const preVal = k === "pra" ? (pl.pre.pts || 0) + (pl.pre.reb || 0) + (pl.pre.ast || 0) : pl.pre[k] || 0;
+      prow.push({ pl, k, line: x.line, odds: x.odds[0], ours, mk, d: ours - mk, proj: o.proj, cur: o.cur, preLine: px?.line, preMk: px ? pair(px) : null, preOurs, preVal });
+    }
+  }
+  prow.sort((a, b) => Math.abs(b.d) - Math.abs(a.d));
+  const ptab = prow.slice(0, 15).map((x) => `<tr><td>${esc(shortName(x.pl.n))} <span class="muted">${LAB[x.k]}</span><br><span class="muted small">now ${esc(f1(x.cur))} · proj ${f1(x.proj)}</span></td><td class="n">o${esc(x.line)}<br><span class="muted small">${amTxt(x.odds)}</span></td><td class="n">${pct(x.mk)}</td><td class="n"><b>${pct(x.ours)}</b></td><td class="n mk-d ${diffCls(x.d)}">${x.d > 0 ? "+" : ""}${Math.round(x.d * 100)}</td></tr>
+    <tr class="mk-base"><td colspan="5"><span class="mk-pre">Pre-game</span> ${x.preLine != null ? `book o${esc(x.preLine)} (${pct(x.preMk ?? 0.5)}) · ` : ""}our pre-game ${f1(x.preVal)}${x.preLine != null ? ` · we now say over o${esc(x.preLine)} ${pct(x.preOurs)}` : ""}${x.preLine != null ? ` · line moved ${x.line - x.preLine > 0 ? "+" : ""}${f1(x.line - x.preLine)}` : ""}</td></tr>`).join("");
+  return `<div class="mk">
+    <h3>Market comparison <span class="mk-badge">${m.live ? "live odds" : "pre-game odds"} · ${esc(m.book)}</span></h3>
+    <p class="small muted">Live line first: the bookmaker's price turned into a fair chance (their margin removed) next to our chance at the same line. The <b>Pre-game</b> line under each one shows the bookmaker's pre-game line, our own pre-game baseline, and our chance at that line now, so you can see how the game has moved both. <b>Gap</b> = ours minus theirs, in percentage points; 10+ is a real disagreement. Shown for comparison only: odds never feed our projections or learning.</p>
+    <div class="tw"><table class="mk-t"><thead><tr><th>Market</th><th class="n">Price</th><th class="n">Book</th><th class="n">Ours</th><th class="n">Gap</th></tr></thead><tbody>${rows.join("")}</tbody></table></div>
+    ${ptab ? `<h3>Player props vs the book <span class="mk-badge">biggest gaps first</span></h3><div class="tw"><table class="mk-t"><thead><tr><th>Player</th><th class="n">Line</th><th class="n">Book</th><th class="n">Ours</th><th class="n">Gap</th></tr></thead><tbody>${ptab}</tbody></table></div>
+    <p class="small muted">Over side at the bookmaker's current live line. Our chance uses our live projection and range for that player.</p>` : ""}
+    <p class="small muted">Odds from ESPN's DraftKings feed, updated about every 15-30 seconds. Not betting advice; for adults where betting is legal.</p></div>`;
+}
 async function liveQuick(id) {
   // Score, clock and period only, from the small scoreboard feed.
   const ymd = (o) => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(Date.now() + o * 864e5)).replace(/-/g, "");
@@ -3601,6 +3721,7 @@ async function startLive(g) {
     if (!last || tick % LIVE_BOX_EVERY === 0 || last.src !== "live") L = await liveFetch(g.id);
     else { try { const q = await liveQuick(g.id); L = q ? { ...last, ...q, fetched: new Date().toISOString() } : last; } catch { L = last; } }
     tick++; if (L) last = L;
+    if (L && L.state === "in" && (tick % LIVE_BOX_EVERY === 1 || !S.mkt || S.mkt.id !== g.id)) { try { S.mkt = await marketFetch(g.id, !S.mkt || S.mkt.id !== g.id ? null : { props: tick % (LIVE_BOX_EVERY * 2) === 1 ? null : S.mkt.props, preProps: S.mkt.preProps }); } catch { /* market feed is optional */ } }
     if (!L || L.state === "pre" || !L.state) return;
     if (L.state === "post") { clearInterval(S.liveTimer); }
     const html = L.state === "post" ? liveCard({ ...(await liveOf(g.id) || {}), state: "post", hs: L.hs, as: L.as, home: g.home, away: g.away, preH: g.pred.hs, preA: g.pred.as, called: (L.hs > L.as) === (g.pred.hs > g.pred.as) }) : liveEngineCard(g, L, liveModel(g, L));
