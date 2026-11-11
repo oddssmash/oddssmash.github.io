@@ -2995,6 +2995,25 @@ const up = await load("upcoming.json").catch(() => []);
   const decOf = (a) => { const v = Number(a); return !v ? null : v > 0 ? 1 + v / 100 : 1 + 100 / -v; };
   const evOf = (p, price) => { const d = decOf(price); return d == null || p == null ? null : p * d - 1; };
   const QUAL = { gap: 0.05, ev: 0.03 }; // both needed to call it a qualifying edge
+  // Gold = worth a look: a qualifying edge, decimal odds 1.60+, our chance 55%+, a gap under 12 points (bigger gaps usually mean
+  // late news), the pick holding in 60%+ of the simulated game scripts (weighted by likelihood), and tonight's scenario library not against it.
+  const GOLD = { minOdds: 1.6, minP: 0.55, maxGap: 0.12, minHold: 0.6 };
+  const robustOf = (x) => {
+    const sim = SIM[x.gid], gm = GAME[x.gid]; if (!sim || !gm) return { hold: null, libFor: 0, libAgainst: 0 };
+    const H = T(gm.home).abbr, A = T(gm.away).abbr, pickHome = x.pick.startsWith(H + " "), pickTeam = pickHome ? String(gm.home) : x.pick.startsWith(A + " ") ? String(gm.away) : null;
+    const lineOf = () => { const m = x.pick.match(/([+-]?\d+(?:\.\d+)?)\s*$/); return m ? Number(m[1]) : null; };
+    let w = 0, ok = 0;
+    for (const sc of (sim.scenarios || []).filter((y) => y.freq >= 0.03 && y.pHome != null)) {
+      let holds = null;
+      if (x.kind === "Moneyline" && pickTeam) holds = (pickHome ? sc.pHome : 1 - sc.pHome) >= 0.5;
+      else if (x.kind === "Spread" && pickTeam) { const l = lineOf(); if (l != null) holds = (pickHome ? sc.margin : -sc.margin) + l > 0; }
+      else if (x.kind === "Total") { const l = lineOf(); if (l != null && sc.total != null) holds = x.pick.startsWith("Over") ? sc.total > l : sc.total < l; }
+      if (holds == null) continue; w += sc.freq; ok += holds ? sc.freq : 0;
+    }
+    let libFor = 0, libAgainst = 0;
+    if (pickTeam) for (const sc of gm.scenarios?.list || []) { if (!sc.fav || sc.mixed) continue; if (String(sc.fav) === pickTeam) libFor++; else libAgainst++; }
+    return { hold: w ? ok / w : null, libFor, libAgainst };
+  };
   const ODDS = await load("odds.json").catch(() => null);
   const priceFor = (gid, kind, pick, H) => { const o = ODDS?.games?.[gid]; if (!o) return null; if (kind === "Moneyline") return pick.startsWith(H) ? o.mlHome : o.mlAway; if (kind === "Spread") return pick.startsWith(H) ? o.spreadOddsHome : o.spreadOddsAway; if (kind === "Total") return pick.startsWith("Over") ? o.overOdds : o.underOdds; return null; };
   const gameMain = () => {
@@ -3009,7 +3028,7 @@ const up = await load("upcoming.json").catch(() => []);
         out.push({ ...base, kind: "Spread", pick: takeTeam ? `${team} ${l > 0 ? "+" : ""}${l}` : `${other} ${-l > 0 ? "+" : ""}${-l}`, p: Math.max(q, 1 - q), book: takeTeam ? c.spread.bookProb : 1 - c.spread.bookProb, ours: `our margin ${gm.pred.hs >= gm.pred.as ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}` }); }
       if (c?.total?.ourProb != null) { const q = c.total.ourProb; out.push({ ...base, kind: "Total", pick: `${q >= 0.5 ? "Over" : "Under"} ${c.total.bookLine}`, p: Math.max(q, 1 - q), book: q >= 0.5 ? c.total.bookProb : 1 - c.total.bookProb, ours: `our total ${f1(gm.pred.hs + gm.pred.as)}` }); }
     }
-    for (const x of out) { x.price = priceFor(x.gid, x.kind, x.pick, T(x.home).abbr); x.ev = evOf(x.p, x.price); x.qual = x.book != null && x.ev != null && x.p - x.book >= QUAL.gap && x.ev >= QUAL.ev; }
+    for (const x of out) { x.price = priceFor(x.gid, x.kind, x.pick, T(x.home).abbr); x.ev = evOf(x.p, x.price); x.qual = x.book != null && x.ev != null && x.p - x.book >= QUAL.gap && x.ev >= QUAL.ev; x.dec = decOf(x.price); Object.assign(x, robustOf(x)); x.gold = x.qual && x.dec != null && x.dec >= GOLD.minOdds && x.p >= GOLD.minP && x.p - x.book < GOLD.maxGap && x.hold != null && x.hold >= GOLD.minHold && x.libAgainst <= x.libFor; }
     return out.sort((a, b) => b.p - a.p);
   };
   const mainLines = () => {
@@ -3071,10 +3090,11 @@ const up = await load("upcoming.json").catch(() => []);
       ${S.pkKind === "main" ? (() => {
         const ml = mainLines(), shown = ml.filter((x) => x.p >= 0.55).slice(0, 60);
         const gml = gameMain();
-        const gcard = (x) => `<div class="card pick ml"><div class="pick-h">${teamLogo(x.home, { size: "sm" })}<span><b>${esc(x.kind)}</b><span class="small muted"> ${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
+        const gcard = (x) => `<div class="card pick ml${x.gold ? " gold" : ""}">${x.gold ? `<div class="gold-tag">★ Worth a look: edge + odds ${esc(x.dec.toFixed(2))} + ${pct(x.p)} to hit</div>` : ""}<div class="pick-h">${teamLogo(x.home, { size: "sm" })}<span><b>${esc(x.kind)}</b><span class="small muted"> ${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.6 ? "lean" : x.p >= 0.53 ? "slight lean" : "coin-flip"}</span>${meter(x.p)}
           <div class="pick-l"><b>${esc(x.pick)}</b> <span class="small muted">sportsbook main line</span></div>
           <div class="pick-alt"><span>${esc(x.ours)}</span>${x.book != null ? `<span>book's fair chance ${pct(x.book)}</span>` : ""}<span class="${x.book != null && x.p - x.book >= 0.05 ? "up" : ""}">gap ${x.book != null ? (x.p - x.book > 0 ? "+" : "") + Math.round((x.p - x.book) * 100) : "-"}</span>${x.price != null ? `<span>odds ${esc(decOdds(x.price))}</span>` : ""}${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}</div>
+          ${x.hold != null ? `<div class="small">Scenario check: holds in <b>${pct(x.hold)}</b> of the simulated game scripts${x.libFor || x.libAgainst ? ` · scenario library: ${x.libFor} for, ${x.libAgainst} against` : ""}</div>` : ""}
           <div class="small ${x.qual ? "qual" : "muted"}">${x.qual ? "✓ Statistical edge: our chance beats the book's by 5+ points and EV is +3% or more." : "No qualifying edge: our chance and the price are too close (we need a 5-point gap and +3% EV)."}</div>
           ${x.book != null && Math.abs(x.p - x.book) >= 0.12 ? `<div class="small" style="color:var(--warn)">⚠ Big disagreement (${Math.round(Math.abs(x.p - x.book) * 100)} points). Gaps this large often mean the bookmaker has late news we do not (injury, rest, lineup). Check the latest news before trusting it; our game totals miss by about 15 points on average.</div>` : ""}
           <div class="pick-m small muted">${x.date ? esc(timePH(x.date)) + " · " : ""}<a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
@@ -3083,7 +3103,8 @@ const up = await load("upcoming.json").catch(() => []);
           <div class="pick-l"><b>${x.over ? "Over" : "Under"} ${esc(x.line)} ${esc(x.word)}</b> <span class="small muted">sportsbook main line</span></div>
           <div class="pick-alt"><span>Our median ${esc(x.median ?? "-")}${x.mean != null ? ` · average ${f1(x.mean)}` : ""}</span>${x.thr.map(([t, q]) => `<span>${esc(t)}+: ${pct(q)}</span>`).join("")}</div>
           <div class="pick-m small muted">${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}${x.date ? ` · ${esc(timePH(x.date))}` : ""} · <a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
-        return `<h2 class="pk-sec">Game lines</h2>
+        return `${gml.some((x) => x.gold) ? `<div class="gold-strip"><b>★ Gold picks</b>${gml.filter((x) => x.gold).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(x.pick)}</span> <i>${esc(T(x.away).abbr)}@${esc(T(x.home).abbr)} · odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · holds in ${pct(x.hold)} of scenarios</i></a>`).join("")}<span class="small muted">Gold = edge vs the bookmaker (5+ points, EV +3%), decimal odds 1.60+, our chance 55%+, gap under 12 points, holds in 60%+ of the simulated game scripts and tonight's scenario library is not against it. Statistical comparison, not betting advice.</span></div>` : `<div class="note small">No gold picks on this day: nothing combines a real edge, odds of 1.60+, a 55%+ chance and support across our scenarios.</div>`}
+          <h2 class="pk-sec">Game lines</h2>
           ${gml.length && !gml.some((x) => x.qual) ? `<div class="note"><b>No qualifying edge today.</b> On every game line our chance is within 5 points of the bookmaker's fair chance or the expected value is under +3%. A high chance alone is not an edge.</div>` : ""}
           ${gml.length ? gml.map(gcard).join("") : `<p class="empty">No sportsbook game lines for this day yet (they usually post a day or two before).</p>`}
           <h2 class="pk-sec">Player props</h2><p class="small muted">EV (expected value) = our chance × the decimal price − 1, per unit staked: it uses our chance, never the book's. Player prop prices are not published in the free feed, so props show our chance only. Statistical comparison, not betting advice.</p>
