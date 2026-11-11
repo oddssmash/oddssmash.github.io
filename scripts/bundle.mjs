@@ -59,7 +59,7 @@ async function __bundled(p) {
   const html = fs.readFileSync(path.join(SRC, "index.html"), "utf8");
   const body = html.slice(html.indexOf("<body>") + 6, html.indexOf("</body>"))
     .replace("Player photos and team logos are loaded from ESPN's public image server.", "Player photos and team logos are not shown in this private preview; initials and team colours appear instead.");
-  fs.writeFileSync(path.join(OUT, "index.html"), `<title>Courtside Ledger</title>
+  fs.writeFileSync(path.join(OUT, "index.html"), `<title>BEAT THE ODDS</title>
 <link rel="stylesheet" href="styles.css">
 <script>try { document.documentElement.dataset.theme = localStorage.getItem("theme") === "light" ? "light" : "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
 ${body.trim()}
