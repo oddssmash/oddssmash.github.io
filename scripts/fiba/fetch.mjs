@@ -117,5 +117,25 @@ await pool(soon, 4, async (g) => {
   const a = pick("playersTeamA"), b = pick("playersTeamB");
   if (a.length || b.length) { writeJSON(path.join(RD, `${g.id}.json`), { id: g.id, fetched: new Date().toISOString(), a, b }); rosters++; }
 });
+// ---------------------------------------------------------------- FIBA roster trackers (national teams)
+// Before each qualifier window FIBA publishes a "roster tracker" built from what each federation announces:
+// final 12s and preliminary pools. Read the newest tracker for each qualifier event every run.
+const trackers = [];
+for (const ev of EVENTS.filter((e) => e.kind === "nt" && /qualifiers/.test(e.slug))) {
+  const html = await page(`https://www.fiba.basketball/en/events/${ev.slug}/news`); if (!html) continue;
+  const links = [...new Set([...html.replace(/\\+"/g, '"').matchAll(/\/en\/events\/[a-z0-9-]+\/news\/[a-z0-9-]*roster-tracker[a-z0-9-]*/g)].map((m) => m[0]))];
+  const best = links.map((l) => ({ l, w: +(l.match(/window-(\d+)/)?.[1] || 0) })).sort((a, b) => b.w - a.w)[0]; if (!best) continue;
+  const art = await page(`https://www.fiba.basketball${best.l}`); if (!art) continue;
+  const text = [...flight(art).matchAll(/"value":"((?:[^"\\]|\\.)*)"/g)].map((m) => { try { return JSON.parse('"' + m[1] + '"'); } catch { return ""; } }).join("\n");
+  const teams = {};
+  // "Country / Final Roster: a, b, c (Announcement" or "Country / Preliminary squad: a, b,\n c (Announcement"; names can wrap over lines
+  for (const m of text.matchAll(/(?:^|\n)([A-Z][A-Za-z .'-]{2,40})\n\s*(Final|Preliminary)\s*\n?\s*(?:Roster|squad|team)\s*\n?\s*:\s*([\s\S]*?)(?=\(\s*(?:\n|$)|\nAnnouncement|\n[A-Z][A-Za-z .'-]{2,40}\n\s*(?:Final|Preliminary)|\nDisclaimer|$)/gi)) {
+    const names = m[3].replace(/\n/g, " ").replace(/\(.*$/, "").replace(/\s+-\s+Domestic.*$/i, "").replace(/\s+-\s*$/, "").split(",").map((x) => x.trim()).filter((x) => x && x.length < 40 && !/to be announced/i.test(x));
+    if (names.length) teams[m[1].trim()] = { status: m[2].toLowerCase(), players: names };
+  }
+  trackers.push({ event: ev.slug, window: best.w, url: `https://www.fiba.basketball${best.l}`, teams });
+  console.log(`roster tracker ${ev.short} window ${best.w}: ${Object.entries(teams).map(([k, v]) => `${k} (${v.status} ${v.players.length})`).join(", ") || "nothing announced yet"}`);
+}
+writeJSON(path.join(FD, "trackers.json"), { fetched: new Date().toISOString(), trackers });
 console.log(`announced rosters found for ${rosters} of ${soon.length} games in the next 21 days`);
 writeJSON(path.join(FD, "fetch-meta.json"), { fetched: new Date().toISOString(), events: EVENTS.length, source: "fiba.basketball public event and game pages (schedule, box scores, play-by-play with shot locations). No betting data." });

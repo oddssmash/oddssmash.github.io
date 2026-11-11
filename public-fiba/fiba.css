@@ -53,3 +53,7 @@ table.ft .n { text-align: right; font-variant-numeric: tabular-nums; white-space
 .vs-list:empty { display: none; }
 .vs-hit { display: block; width: 100%; text-align: left; min-height: 44px; padding: 10px 14px; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--ink); cursor: pointer; font: inherit; }
 .vs-hit:last-child { border-bottom: 0; } .vs-hit:hover, .vs-hit:focus-visible { background: var(--surface-2); }
+
+.menu-i { display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center; color: inherit; margin-bottom: 8px; } .menu-i:hover { text-decoration: none; } .menu-ic { font-size: 22px; } .menu-c { color: var(--muted); font-size: 20px; }
+tr.sub td { padding-top: 0; border-top: 0; }
+

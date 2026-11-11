@@ -27,8 +27,8 @@ const face = (n, px = 40) => `<span class="pf" style="width:${px}px;height:${px}
 
 // ---------------------------------------------------------------- chrome
 const NAV = [["games", "Games", "M4 5h16v14H4zM4 10h16M9 5v14"], ["picks", "Picks", "M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"],
-  ["players", "Players", "M10.5 17a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM20 20l-4.9-4.9M10.5 7.5v6M7.5 10.5h6"], ["teams", "Teams", "M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"], ["results", "Results", "M5 12l4 4L19 6"]];
-const TAB = { games: "games", game: "games", picks: "picks", players: "players", player: "players", teams: "teams", team: "teams", results: "results", accuracy: "results" };
+  ["players", "Players", "M10.5 17a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM20 20l-4.9-4.9M10.5 7.5v6M7.5 10.5h6"], ["teams", "Teams", "M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"], ["more", "More", "M4 7h16M4 12h16M4 17h16"]];
+const TAB = { games: "games", game: "games", picks: "picks", players: "players", player: "players", teams: "teams", team: "teams", results: "more", accuracy: "more", more: "more", how: "more", sources: "more", news: "more" };
 function drawNav(active) {
   const nav = document.getElementById("nav");
   if (!nav.childElementCount) nav.innerHTML = NAV.map(([k, l, d]) => `<a href="#/${k}" data-tab="${k}"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg></span><span class="nav-l">${l}</span></a>`).join("");
@@ -68,9 +68,9 @@ async function vGame(id) {
   const g = await load(`games/${id}.json`);
   const A = g.a, B = g.b, p = g.proj, fa = p.pA >= 0.5, fav = fa ? A : B;
   const side = (s) => g.players.filter((x) => x.side === s);
-  const ptable = (s, t) => `<div class="card"><h2>${badge(t, g.kind, 24)} ${esc(t.name)}</h2><div class="tw"><table class="ft"><thead><tr><th>Player</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Range</th><th class="n">Reb</th><th class="n">Ast</th><th class="n">3PM</th><th class="n">Our line</th></tr></thead><tbody>
-    ${side(s).map((x) => `<tr><td>${x.isNew ? `${esc(x.n)} <span class="ztag cold" title="${esc(x.src)}">NEW</span>` : `<a href="#/player/${esc(x.pid)}">${esc(x.n)}</a>`} <span class="muted small">${esc(x.pos)}</span>${x.src && !x.isNew ? `<span class="small muted" style="display:block">${esc(x.src)}</span>` : ""}</td><td class="n">${f0(x.min)}</td><td class="n"><b>${f1(x.pts)}</b></td><td class="n muted">${f0(x.lo)}-${f0(x.hi)}</td><td class="n">${f1(x.reb)}</td><td class="n">${f1(x.ast)}</td><td class="n">${f1(x.f3m)}</td><td class="n">${f1(x.line)} <span class="${x.pOver >= 0.5 ? "up" : "down"}">${x.pOver >= 0.5 ? "O" : "U"} ${pct(Math.max(x.pOver, 1 - x.pOver))}</span></td></tr>`).join("")}</tbody></table></div>
-    <p class="small muted">${g.announced?.[s] ? `Roster: ${esc(g.rosterSource?.[s] || "official roster posted by FIBA")}. Players marked NEW have no FIBA games in our data yet, so they start from what players at their position usually produce, in a bench role, until they play.` : `Roster and roles from ${esc(t.name)}'s last game in our data${g.rosterFrom[s] ? ` (${esc(dayShort(g.rosterFrom[s]))})` : ""}; this switches to the official 12 as soon as FIBA posts them (usually a day or two before tip-off).`} "Our line" is set at his average; O/U is the side our projection favours and how often it happened in 10,000 simulated games.</p></div>`;
+  const ptable = (s, t) => `<div class="card"><h2>${badge(t, g.kind, 24)} ${esc(t.name)}</h2><div class="tw"><table class="ft"><thead><tr><th>Player</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Range</th><th class="n">Reb</th><th class="n">Ast</th><th class="n">3PM</th><th class="n">Line (his avg)</th></tr></thead><tbody>
+    ${side(s).map((x) => `<tr><td>${x.isNew ? `${esc(x.n)} <span class="ztag cold" title="${esc(x.src)}">NEW</span>` : `<a href="#/player/${esc(x.pid)}">${esc(x.n)}</a>`} <span class="muted small">${esc(x.pos)}</span>${x.src && !x.isNew ? `<span class="small muted" style="display:block">${esc(x.src)}</span>` : ""}</td><td class="n">${f0(x.min)}</td><td class="n"><b>${f1(x.pts)}</b></td><td class="n muted">${f0(x.lo)}-${f0(x.hi)}</td><td class="n">${f1(x.reb)}</td><td class="n">${f1(x.ast)}</td><td class="n">${f1(x.f3m)}</td><td class="n">${x.line == null ? `<span class="muted small">${x.min < 10 ? "under 10 min" : "-"}</span>` : `${f1(x.line)} <span class="${x.pOver >= 0.5 ? "up" : "down"}">${x.pOver >= 0.5 ? "O" : "U"} ${pct(Math.max(x.pOver, 1 - x.pOver))}</span>${x.flagged ? ` <span class="ztag cold" title="Projection is over 30% from his average with no minutes change: kept out of picks">CHECK</span>` : ""}`}</td></tr>${x.lineWhy && x.line != null ? `<tr class="sub"><td colspan="8" class="small muted">Why ${f1(x.pts)} vs his ${f1(x.avgPts)} average: ${esc(x.lineWhy)}</td></tr>` : ""}`).join("")}</tbody></table></div>
+    <p class="small muted">${g.announced?.[s] ? `Roster: ${esc(g.rosterSource?.[s] || "official roster posted by FIBA")}. Players marked NEW have no FIBA games in our data yet, so they start from what players at their position usually produce, in a bench role, until they play.` : `Roster and roles from ${esc(t.name)}'s last game in our data${g.rosterFrom[s] ? ` (${esc(dayShort(g.rosterFrom[s]))})` : ""}; this switches to the official 12 as soon as FIBA posts them (usually a day or two before tip-off).`} The line is set at his average (shown for 10+ projected minutes); O/U is the side our projection favours and how often it happened in 10,000 simulated games. When the projection differs from his average, the reason is under his row; CHECK marks a big gap with no minutes change, kept out of the picks.</p></div>`;
   app.innerHTML = `<a class="back" href="#/games">‹ Games</a>
     <p class="small muted" style="margin:0">${esc(g.compName)}${g.round ? " · " + esc(g.round) : ""}${g.group ? " · Group " + esc(g.group) : ""} · ${esc(dayLabel(g.date))}, ${esc(timeOf(g.date, g.timed))} PH${g.venue ? " · " + esc(g.venue) : ""}${g.city ? ", " + esc(g.city) : ""}</p>
     <h1>${esc(fav.name)} by ${f1(Math.abs(p.a - p.b))}</h1>
@@ -129,20 +129,22 @@ async function vPlayers() {
   app.innerHTML = `<h1>Players</h1><p class="lead">Every player in our FIBA data: averages, hot and cold zones from his shot locations, and his projection for the next game on his team page or game page.</p>
     <input class="field" id="q" type="search" placeholder="Search by player or team" aria-label="Search players" autocomplete="off" value="${esc(S.q)}">
     <div class="filters" role="group" aria-label="Team type" style="margin-top:8px"><button class="fbtn" data-k="" aria-pressed="${!S.kind}">All</button><button class="fbtn" data-k="nt" aria-pressed="${S.kind === "nt"}">National teams</button><button class="fbtn" data-k="club" aria-pressed="${S.kind === "club"}">Clubs</button></div>
+    <select class="field" id="af" aria-label="Filter by archetype" style="margin-bottom:8px"><option value="">Any archetype</option>${[...new Set(all.flatMap((p) => p.arch || []))].filter((a) => a !== "Not enough games yet").sort().map((a) => `<option${S.af === a ? " selected" : ""}>${esc(a)}</option>`).join("")}</select>
     <select class="field" id="zf" aria-label="Filter by hot or cold zone"><option value="">Any zone profile</option><optgroup label="Hot zone">${meta.zones.map((z) => `<option value="hot:${z.id}"${S.zf === "hot:" + z.id ? " selected" : ""}>Hot: ${esc(z.label)}</option>`).join("")}</optgroup><optgroup label="Cold zone">${meta.zones.map((z) => `<option value="cold:${z.id}"${S.zf === "cold:" + z.id ? " selected" : ""}>Cold: ${esc(z.label)}</option>`).join("")}</optgroup></select>
     <p class="small muted" id="pcount" style="margin:10px 0 8px"></p><div class="tgrid" id="plist"></div>
     <p class="small muted" style="margin-top:12px">HOT and COLD: at least 15 shots in the zone, 4+ points of FG% away from the FIBA average there, and far enough from it to be more than chance.</p>`;
   const draw = () => {
     const q = S.q.trim().toLowerCase(), [zk, zid] = S.zf ? S.zf.split(":") : [];
-    let f = all.filter((p) => (!S.kind || p.kind === S.kind) && (!q || p.n.toLowerCase().includes(q) || (p.teamName || "").toLowerCase().includes(q)) && (!zk || (p[zk] || []).includes(zid)));
+    let f = all.filter((p) => (!S.kind || p.kind === S.kind) && (!q || p.n.toLowerCase().includes(q) || (p.teamName || "").toLowerCase().includes(q)) && (!zk || (p[zk] || []).includes(zid)) && (!S.af || (p.arch || []).includes(S.af)));
     const rows = f.slice(0, 60);
     document.getElementById("pcount").textContent = f.length > rows.length ? `Showing the top ${rows.length} of ${f.length.toLocaleString()} players by points per game. Search to narrow it down.` : `${f.length} players`;
-    document.getElementById("plist").innerHTML = rows.map((p) => `<a class="titem" href="#/player/${esc(p.pid)}">${face(p.n, 44)}<span><span class="t1">${esc(p.n)}</span><span class="t2">${esc(p.teamName || "")} · ${esc(p.pos || "")} · ${p.gp} games</span>
+    document.getElementById("plist").innerHTML = rows.map((p) => `<a class="titem" href="#/player/${esc(p.pid)}">${face(p.n, 44)}<span><span class="t1">${esc(p.n)}</span><span class="t2">${esc(p.teamName || "")} · ${esc(p.pos || "")} · ${p.gp} games${p.arch?.length ? " · " + esc(p.arch.join(", ")) : ""}</span>
       <span class="t2 spots">${p.hot.length ? `<span class="ztag hot">HOT</span> ${esc(p.hot.map((z) => ZW[z]).join(", "))} ` : ""}${p.cold.length ? `<span class="ztag cold">COLD</span> ${esc(p.cold.map((z) => ZW[z]).join(", "))}` : ""}${!p.hot.length && !p.cold.length ? "No hot or cold zone on record" : ""}</span></span>
       <span class="t3"><b>${f1(p.pts)}</b> pts<br><span class="muted small">${f1(p.reb)} reb · ${f1(p.ast)} ast</span></span></a>`).join("") || `<p class="empty">No player matches.</p>`;
   };
   document.getElementById("q").addEventListener("input", (e) => { S.q = e.target.value; draw(); });
   document.getElementById("zf").addEventListener("change", (e) => { S.zf = e.target.value; draw(); });
+  document.getElementById("af").addEventListener("change", (e) => { S.af = e.target.value; draw(); });
   app.querySelectorAll("[data-k]").forEach((b) => b.addEventListener("click", () => { S.kind = b.dataset.k; app.querySelectorAll("[data-k]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); draw(); }));
   draw();
 }
@@ -166,7 +168,7 @@ async function vPlayer(pid) {
   const p = await load(`players/${pid}.json`);
   const hot = p.zones.filter((z) => z.tag === "hot"), cold = p.zones.filter((z) => z.tag === "cold");
   app.innerHTML = `<a class="back" href="#/players">‹ Players</a>
-    <div class="ehead">${face(p.n, 64)}<div><h1 style="margin:0">${esc(p.n)}</h1><p class="small muted" style="margin:0">${esc(p.pos || "")}${p.no ? " · #" + esc(p.no) : ""} · ${p.teams.map((t) => `<a href="#/team/${esc(t.tid)}">${esc(t.name)}</a> (${t.gp})`).join(", ")}</p></div></div>
+    <div class="ehead">${face(p.n, 64)}<div><h1 style="margin:0">${esc(p.n)}</h1>${p.arch?.length ? `<p class="small" style="margin:2px 0">${p.arch.map((a) => `<span class="chip">${esc(a)}</span>`).join(" ")}</p>` : ""}<p class="small muted" style="margin:0">${esc(p.pos || "")}${p.no ? " · #" + esc(p.no) : ""} · ${p.teams.map((t) => `<a href="#/team/${esc(t.tid)}">${esc(t.name)}</a> (${t.gp})`).join(", ")}</p></div></div>
     <div class="statgrid sg4" style="margin:12px 0"><div class="stat"><b>${f1(p.pts)}</b><span>Points</span></div><div class="stat"><b>${f1(p.reb)}</b><span>Rebounds</span></div><div class="stat"><b>${f1(p.ast)}</b><span>Assists</span></div><div class="stat"><b>${f1(p.min)}</b><span>Minutes</span></div></div>
     <div class="card" id="vs"></div>
     <div class="card"><h2>Shooting</h2><p>FG ${p.shooting.fg ?? "-"}% on ${f1(p.shooting.fga)} a game · three ${p.shooting.three ?? "-"}% on ${f1(p.shooting.f3a)} · free throws ${p.shooting.ft ?? "-"}% on ${f1(p.shooting.fta)}.</p>
@@ -306,14 +308,61 @@ async function vTeam(tid) {
 // ---------------------------------------------------------------- results + accuracy
 async function vResults() {
   const [res, acc] = await Promise.all([load("results.json"), load("accuracy.json")]);
-  app.innerHTML = `<h1>Results and accuracy</h1><p class="lead">Every FIBA game in our data, projected only from games before it and then graded. This is how the model learns: after each game the ratings and player rates update, and the learning settings are re-chosen by replaying all history.</p>
+  const ptc = await pretipCard();
+  app.innerHTML = `<a class="back" href="#/more">‹ More</a><h1>Results and accuracy</h1><p class="lead">Every FIBA game in our data, projected only from games before it and then graded. The settings behind that replay are re-chosen from all history each run, which flatters it a little; the saved-before-tip-off record below is the clean test.</p>${ptc}<h2>The replay</h2>
     <div class="statgrid sg4"><div class="stat"><b>${pct(acc.winner)}</b><span>Winners right</span></div><div class="stat"><b>${acc.brier}</b><span>Brier (lower is better)</span></div><div class="stat"><b>${f1(acc.marginMAE)}</b><span>Margin miss (pts)</span></div><div class="stat"><b>${f1(acc.playerPtsMAE)}</b><span>Player pts miss</span></div></div>
     <p class="small muted">${acc.graded} graded games. ${esc(acc.rule)} Player points: ${acc.playerGraded.toLocaleString()} graded player-games.</p>
     <div class="card"><h2>Calibration</h2><table class="ft"><thead><tr><th>We said</th><th class="n">Games</th><th class="n">Favourite won</th></tr></thead><tbody>${acc.calibration.map((b) => `<tr><td>${b.lo}-${b.hi}%</td><td class="n">${b.n}</td><td class="n">${b.rate == null ? "-" : pct(b.rate)}</td></tr>`).join("")}</tbody></table></div>
-    <div class="card"><h2>By competition</h2><table class="ft"><thead><tr><th>Competition</th><th class="n">Games</th><th class="n">Winners</th><th class="n">Margin miss</th></tr></thead><tbody>${acc.byComp.map((c) => `<tr><td>${esc(c.comp)}</td><td class="n">${c.n}</td><td class="n">${pct(c.winner)}</td><td class="n">${f1(c.marginMAE)}</td></tr>`).join("")}</tbody></table></div>
+    <div class="card"><h2>By competition</h2><table class="ft"><thead><tr><th>Competition</th><th class="n">Games</th><th class="n">Winners</th><th class="n">Margin miss</th></tr></thead><tbody>${acc.byComp.map((c) => `<tr><td>${esc(c.comp)}${c.low ? ` <span class="chip warn">low confidence: only ${c.n} graded</span>` : ""}</td><td class="n">${c.n}</td><td class="n">${pct(c.winner)}</td><td class="n">${f1(c.marginMAE)}</td></tr>`).join("")}</tbody></table></div>
     <div class="card"><h2>What the model learned</h2><p class="small">Update speed ${acc.learned.k}, home court ${acc.learned.hca?.nt ?? acc.learned.hca} pts for national teams and ${acc.learned.hca?.club ?? acc.learned.hca} for clubs, ratings fade halfway in ${acc.learned.hl} days, result spread ${acc.learned.sd} pts.</p><p class="small muted">${esc(acc.learned.note)} ${acc.grid} combinations tried.</p></div>
     <h2>Latest results</h2><div class="tgrid">${res.slice(0, 80).map((r) => { const won = r.a.score > r.b.score; return `<div class="titem rs"><span class="rs-c ${r.graded ? (r.right ? "ok" : "no") : ""}" aria-label="${r.graded ? (r.right ? "Called it" : "Missed") : "Not graded (thin record)"}">${r.graded ? (r.right ? "✓" : "✗") : "·"}</span>
       <span><span class="t1">${won ? "<b>" : ""}${esc(r.a.name)} ${r.a.score}${won ? "</b>" : ""} - ${!won ? "<b>" : ""}${r.b.score} ${esc(r.b.name)}${!won ? "</b>" : ""}</span><span class="t2">${esc(dayShort(r.date))} · ${esc(r.comp)} · we said ${f0(r.proj.a)}-${f0(r.proj.b)}, ${esc(r.proj.pA >= 0.5 ? r.a.code : r.b.code)} ${pct(Math.max(r.proj.pA, 1 - r.proj.pA))}</span>${r.why ? `<span class="t2 why">${esc(r.why)}</span>` : ""}</span><span></span></div>`; }).join("")}</div>`;
+}
+
+// ---------------------------------------------------------------- More, how it works, sources, news
+async function vMore() {
+  const meta = await load("meta.json");
+  const item = (href, ic, t, d) => `<a class="card menu-i" href="${href}"><span class="menu-ic" aria-hidden="true">${ic}</span><span><b>${t}</b><span class="small muted" style="display:block">${d}</span></span><span class="menu-c" aria-hidden="true">›</span></a>`;
+  app.innerHTML = `<h1>More</h1>
+    <h3>Track record</h3>${item("#/results", "📋", "Results and accuracy", `Every graded game, the saved-before-tip-off record, calibration and accuracy by competition (${meta.games.toLocaleString()} games).`)}
+    <h3>News</h3>${item("#/news", "📰", "News and talk", "Headlines about the teams and players in upcoming games, with roster news marked.")}
+    <h3>About</h3>${item("#/how", "⚙️", "How it works", "How projections, simulations, lines and the learning work for FIBA.")}${item("#/sources", "🔗", "Data sources", "Where every number comes from, and what is not read.")}
+    ${item("../nba/", "🏀", "Switch to NBA", "The NBA section of ODDSSMASH.")}`;
+}
+function vMissing() { app.innerHTML = `<div class="card"><h2>This page does not exist in the FIBA section</h2><p class="muted">The link may be from the NBA side or out of date.</p><p><a class="go" href="#/games">FIBA games ›</a> <a class="go" href="#/more">More ›</a></p></div>`; }
+async function vHow() {
+  const [acc, meta] = await Promise.all([load("accuracy.json"), load("meta.json")]);
+  app.innerHTML = `<a class="back" href="#/more">‹ More</a><h1>How it works</h1>
+    <div class="card"><h2>Team ratings</h2><p>Every FIBA game in our data is replayed in date order. Each team has an offence, defence and pace rating (points per 100 possessions against average, adjusted for who they played). Before each game the model projects it from what was known then; after the final the ratings move toward what happened. Ratings fade back toward average between windows. National teams and clubs are rated separately.</p>
+      <p>Thin records are pulled toward average: a team's rating is blended with ${acc.learned.k0} games' worth of an average team, so a side with 5 games is only partly trusted. Confidence is capped at medium until both teams have 10 games, and at low in a competition with fewer than 20 graded games.</p></div>
+    <div class="card"><h2>After-game learning</h2><p>The update speed, home edge (separately for national teams and clubs), fade between windows, the pull toward average and the spread of results are chosen by replaying all history and keeping the settings with the best Brier score (${acc.grid} combinations). Because that replay can be flattered by re-learning, the last projection before each tip-off is also saved and never recomputed: see the saved-before-tip-off record on the Results page.</p></div>
+    <div class="card"><h2>Players and rosters</h2><p>Each player has per-minute rates learned game by game, one record across national team and club games, so a player's club form carries to his national team. Minutes come from his recent role and are scaled so a team adds up to 200. Rosters: the 12 FIBA posts for the game first, then an announced lineup (for example a federation's 12-man list), then the team's last game. A player new to our data starts from what players at his position produce, in a bench role, until he plays.</p></div>
+    <div class="card"><h2>Simulations and lines</h2><p>Each game is simulated 10,000 times. Our spread and total sit at the projection; player lines sit at his average and are shown for 10+ projected minutes. Picks list the sides our simulations favour at 60% or better. No sportsbook data is used or shown.</p></div>
+    <div class="card"><h2>Zones and archetypes</h2><p>Shot locations from FIBA's play-by-play are sorted into rim, paint, mid-range, corner three and above-the-break three. HOT/COLD needs 15+ shots and a gap from the FIBA average that is bigger than chance. Archetypes (Primary scorer, Floor general, Sharpshooter, Stretch big, Slasher, Rim runner, Glass cleaner, Rim protector, Ball hawk and more) come from his per-36 rates ranked against FIBA players with 5+ games, and where he shoots.</p></div>`;
+}
+async function vSources() {
+  const N = await load("news.json").catch(() => null);
+  app.innerHTML = `<a class="back" href="#/more">‹ More</a><h1>Data sources</h1>
+    <div class="card"><h2>Game data</h2><ul class="dots"><li><b>fiba.basketball</b> event and game pages: schedules, box scores (minutes and all counting stats), play-by-play with shot locations, and the rosters FIBA posts before games (checked every refresh for the next 21 days).</li><li><b>Announced lineups</b> not yet on FIBA's pages (for example a federation's 12-man list), entered by the site owner with the source named on the game page.</li><li><b>Flags</b> from FIBA's image server.</li></ul></div>
+    <div class="card"><h2>News and talk</h2><ul class="dots"><li>Google News searches for every team playing in the next 10 days, plus competition-wide searches.</li><li>Reddit searches (r/basketball, r/PBA and site-wide FIBA searches).</li><li>FIBA's YouTube channel.</li></ul><p class="small muted">Headlines never change a projection; roster headlines are marked so they can be checked against the posted roster.${N ? ` Last checked ${esc(new Date(N.fetched).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))} PH.` : ""}</p></div>
+    <div class="card"><h2>Not read</h2><p>Facebook pages, Instagram and X need a login, so they cannot be read automatically. Score sites such as AiScore do not allow automated reading. Sportsbook odds are not used for FIBA.</p></div>
+    <div class="card"><h2>Competitions</h2><ul class="dots">${(await load("meta.json")).comps.map((c) => `<li>${esc(c.name)} <span class="muted small">(${c.kind === "nt" ? "national teams" : "clubs"}, ${c.games} games in our data)</span></li>`).join("")}</ul><p class="small muted">The European Basketball Champions League runs on its own site and is not covered yet.</p></div>`;
+}
+async function vNews() {
+  const N = await load("news.json"), teams = await load("teams.json"), nm = Object.fromEntries(teams.map((t) => [t.tid, t.name]));
+  const f = S.newsRoster ? N.items.filter((x) => x.roster) : N.items;
+  const ago = (d) => { const h = (Date.now() - Date.parse(d)) / 3600000; return h < 24 ? `${Math.max(1, Math.round(h))}h ago` : `${Math.round(h / 24)}d ago`; };
+  app.innerHTML = `<a class="back" href="#/more">‹ More</a><h1>News and talk</h1><p class="lead">${esc(N.note)}</p>
+    <div class="filters" role="group" aria-label="Filter"><button class="fbtn" data-nr="" aria-pressed="${!S.newsRoster}">All</button><button class="fbtn" data-nr="1" aria-pressed="${!!S.newsRoster}">Roster news</button></div>
+    <div class="card"><ul class="plain news">${f.slice(0, 120).map((x) => `<li>${x.roster ? `<span class="ztag hot">ROSTER</span> ` : ""}<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a> <span class="small muted">${esc(x.outlet)} · ${esc(ago(x.date))}${x.teams.length ? " · " + x.teams.map((t) => esc(nm[t] || t)).join(", ") : ""}</span></li>`).join("") || `<li class="muted">Nothing yet.</li>`}</ul></div>`;
+  app.querySelectorAll("[data-nr]").forEach((b) => b.addEventListener("click", () => { S.newsRoster = !!b.dataset.nr; vNews(); }));
+}
+// the frozen record: projections saved before tip-off, graded after
+async function pretipCard() {
+  const PT = await load("pretip.json").catch(() => null); if (!PT) return "";
+  const n = PT.graded;
+  return `<div class="card"><h2>The honest test: projections saved before tip-off</h2><p class="small muted">Each game's last projection before tip-off is frozen with the settings used and graded after the final. Nothing here is recomputed later, so it cannot be flattered by re-learning. The record started on ${esc(dayShort(PT.started))}.</p>
+    ${n ? `<div class="statgrid sg4"><div class="stat"><b>${pct(PT.winner)}</b><span>Winners${n < 30 ? " (early sample)" : ""}</span></div><div class="stat"><b>${PT.brier}</b><span>Brier</span></div><div class="stat"><b>${f1(PT.marginMAE)}</b><span>Margin miss</span></div><div class="stat"><b>${n}</b><span>graded · ${PT.waiting} waiting</span></div></div>${n < 30 ? `<p class="small muted">Only ${n} games so far: an early record moves a lot.</p>` : ""}` : `<p class="small">No saved game has finished yet: ${PT.waiting} projections are saved and waiting for their finals.</p>`}</div>`;
 }
 
 // ---------------------------------------------------------------- router + back links
@@ -323,7 +372,7 @@ async function route() {
   if (st.length > 1 && st[st.length - 2] === h) st.pop(); else if (st[st.length - 1] !== h) st.push(h);
   const [, view = "games", arg] = h.split("/");
   drawNav(TAB[view] || "games");
-  try { await ({ games: vGames, game: vGame, picks: vPicks, players: vPlayers, player: vPlayer, teams: vTeams, team: vTeam, results: vResults }[view] || vGames)(decodeURIComponent(arg || "")); }
+  try { await ({ games: vGames, game: vGame, picks: vPicks, players: vPlayers, player: vPlayer, teams: vTeams, team: vTeam, results: vResults, accuracy: vResults, more: vMore, how: vHow, sources: vSources, news: vNews }[view] || vMissing)(decodeURIComponent(arg || "")); }
   catch (e) { if (seq === S.seq) app.innerHTML = `<div class="card"><h2>Could not load this page</h2><p class="muted">${esc(e.message)}</p><p><a class="go" href="#/games">Back to games</a></p></div>`; }
   if (st.length > 1) app.querySelectorAll("a.back").forEach((a) => (a.textContent = "‹ Back"));
   if (S.last !== h) window.scrollTo(0, 0);
