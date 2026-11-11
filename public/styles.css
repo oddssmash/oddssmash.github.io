@@ -30,6 +30,10 @@
   --focus: #86b6ef;    /* focus ring */
   --shadow: 0 8px 24px rgba(0, 0, 0, .5);
 
+  /* brand kit: forest green, metallic silver, neon blue */
+  --brand: #0b5d34; --brand-deep: #053d22; --brand-hi: #13804a;
+  --silver: #c3c8cd; --silver-metal: linear-gradient(100deg, #8b9198 0%, #e9ecef 38%, #a9afb5 55%, #f4f6f7 72%, #8f959c 100%);
+  --neon: #1fb6ff; --on-accent: #02131d;
   --radius: 16px; --radius-sm: 12px;
   --pad: 14px;         /* card padding; .tw and open player rows bleed by this much */
   --tap: 44px;         /* minimum tap target */
@@ -38,14 +42,14 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --page: #f9f9f7; --surface: #fcfcfb; --surface-2: #f0efec;
+  --page: #f7f5f0; --surface: #fdfcfa; --surface-2: #efece6;
   --ink: #0b0b0b; --ink-2: #52514e; --muted: #696762;
   --line: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11, 11, 11, .1);
-  --accent: #2a78d6; --accent-ink: #1c5cab; --accent-wash: #e6f0fc;
+  --accent: #0072d6; --accent-ink: #0058a8; --accent-wash: #e2f1fd; --on-accent: #fff;
   --good: #0ca30c; --good-ink: #006300; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b; --crit-ink: #b02a2a;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300;
   --pos: #2a78d6; --neg: #e34948;
-  --line-2: #b4b3a8; --press: #f3f2ef; --face: #e4e3dd; --focus: #1c5cab;
+  --line-2: #b4b3a8; --press: #f1eee8; --face: #e4e1d9; --focus: #0058a8;
   --shadow: 0 8px 24px rgba(0, 0, 0, .14);
 }
 @media (min-width: 480px) { :root { --pad: 16px; } }
@@ -85,7 +89,8 @@ main:focus, main:focus-visible { outline: none; }
 }
 .brand { display: inline-flex; align-items: center; gap: 10px; min-height: var(--tap); font-size: 16px; font-weight: 700; color: var(--ink); letter-spacing: -.015em; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
-.brand svg { flex: none; }
+.brand img { flex: none; display: block; height: 40px; width: auto; border-radius: 10px; box-shadow: 0 0 0 1px rgba(195, 200, 205, .55); }
+.brand .brand-mark { display: none; }
 .icon-btn { margin-left: auto; flex: none; width: var(--tap); height: var(--tap); display: grid; place-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; cursor: pointer; color: var(--ink-2); transition: border-color .12s, color .12s; }
 .icon-btn:active { background: var(--surface-2); }
 @media (hover: hover) { .icon-btn:hover { border-color: var(--line-2); color: var(--ink); } }
@@ -623,7 +628,7 @@ details.prop-why .pw-l img, details.prop-why .pw-l svg, details.prop-why .pw-l >
 /* ---------- Lab (batch 3): simulation, board, season, insights, compare ---------- */
 /* Seven tabs in the phone bar now (Lab added before More). */
 .nav { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-@media (min-width: 760px) and (max-width: 899px) { .brand span { display: none; } .nav a { padding: 0 10px; } }
+@media (min-width: 760px) and (max-width: 899px) { .brand .brand-full { display: none; } .brand .brand-mark { display: block; } .nav a { padding: 0 10px; } }
 .lab-g { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-bottom: 12px; }
 @media (min-width: 620px) { .lab-g { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .lab-g .card { margin: 0; }
@@ -774,31 +779,34 @@ a.gtab { color: var(--accent-ink); }
 [hidden] { display: none !important; }
 
 /* ==========================================================================
-   Redesign (owner mockup): deep navy, glowing blue edges, pill tabs.
+   Brand kit (official ODDSSMASH logo): forest-green surfaces, metallic silver edges, neon blue accent and glow.
    Chart colours --s1..--s6 unchanged; re-validated against the navy surfaces
-   (#101a2e) with the dataviz validator: all checks pass.
+   (#101a2e); the forest surfaces have the same lightness, so contrast holds.
    ========================================================================== */
 :root:not([data-theme="light"]) {
-  --page: #060b18; --surface: #0e1729; --surface-2: #16223a;
-  --line: #1d2b48; --axis: #2b3c60; --line-2: #3a5288; --press: #13203a; --face: #1c2a46;
-  --ink: #eef3ff; --ink-2: #b9c4dc; --muted: #8291b0;
-  --accent: #2f7cf6; --accent-ink: #8ab8ff; --accent-wash: #10264a;
-  --glow: 0 0 0 1px rgba(64, 132, 255, .28), 0 6px 22px rgba(20, 70, 160, .28);
+  --page: #04100a; --surface: #0a1c13; --surface-2: #11291d;
+  --line: #1b3a2a; --axis: #2a5040; --line-2: #3d6b54; --press: #0e2418; --face: #173427;
+  --ink: #eef5f0; --ink-2: #b9cbc0; --muted: #839a8d;
+  --accent: #1fb6ff; --accent-ink: #7fd5ff; --accent-wash: #062a3b; --focus: #7fd5ff;
+  --glow: 0 0 0 1px rgba(31, 182, 255, .2), 0 6px 22px rgba(11, 93, 52, .35);
 }
-:root:not([data-theme="light"]) body { background: radial-gradient(1200px 600px at 50% -200px, #0f2148 0%, var(--page) 60%) fixed, var(--page); }
-:root:not([data-theme="light"]) .card, :root:not([data-theme="light"]) .menu-i, :root:not([data-theme="light"]) .titem { border-color: rgba(64, 132, 255, .22); box-shadow: var(--glow); }
-:root:not([data-theme="light"]) .top { background: rgba(6, 11, 24, .92); border-bottom-color: rgba(64, 132, 255, .2); }
-:root:not([data-theme="light"]) .nav { background: rgba(9, 15, 30, .97); border-top-color: rgba(64, 132, 255, .25); }
+:root:not([data-theme="light"]) body { background: radial-gradient(1200px 600px at 50% -200px, #0b3d24 0%, var(--page) 60%) fixed, var(--page); }
+:root:not([data-theme="light"]) .card, :root:not([data-theme="light"]) .menu-i, :root:not([data-theme="light"]) .titem { border-color: rgba(31, 182, 255, .18); box-shadow: var(--glow); }
+:root:not([data-theme="light"]) .top { background: rgba(4, 16, 10, .92); border-bottom-color: rgba(195, 200, 205, .22); }
+:root:not([data-theme="light"]) .nav { background: rgba(6, 20, 13, .97); border-top-color: rgba(195, 200, 205, .25); }
 .nav a[aria-current="page"] { color: #fff; }
-.nav a[aria-current="page"] svg { color: var(--accent); filter: drop-shadow(0 0 6px rgba(47, 124, 246, .7)); }
+.nav a[aria-current="page"] svg { color: var(--accent); filter: drop-shadow(0 0 6px rgba(31, 182, 255, .75)); }
 
 /* pill tabs */
 .gtabs { background: transparent; border: 0; gap: 6px; }
-:root:not([data-theme="light"]) .gtabs { background: rgba(6, 11, 24, .94); }
+:root:not([data-theme="light"]) .gtabs { background: rgba(4, 16, 10, .94); }
 .gtab { background: var(--surface-2); color: var(--ink-2); border-radius: 12px; }
-.gtab[aria-selected="true"] { background: var(--accent); color: #fff; box-shadow: 0 0 14px rgba(47, 124, 246, .55); }
+.gtab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); font-weight: 650; box-shadow: 0 0 14px rgba(31, 182, 255, .5); }
 a.gtab { color: var(--ink-2); }
-.fbtn[aria-pressed="true"] { background: var(--accent); color: #fff; border-color: var(--accent); box-shadow: 0 0 12px rgba(47, 124, 246, .45); }
+.fbtn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); font-weight: 650; border-color: var(--accent); box-shadow: 0 0 12px rgba(31, 182, 255, .4); }
+/* metallic silver rule under the header */
+.top::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--silver-metal); opacity: .6; pointer-events: none; }
+:root[data-theme="light"] .top::after { opacity: .95; }
 
 /* game cards (home) */
 .gc { display: block; padding: 14px; color: inherit; }

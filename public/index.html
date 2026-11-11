@@ -9,26 +9,32 @@
   <meta name="description" content="Scenario-based NBA projections that grade themselves against every real result. Betting odds never feed the projections.">
   <!-- Dark is the default for every visitor. The toggle stores "light" or "dark" in localStorage and app.js keeps this tag in step. -->
   <meta name="color-scheme" content="dark light">
-  <meta name="theme-color" id="theme-color" content="#0d0d0d">
+  <meta name="theme-color" id="theme-color" content="#04100a">
   <script>
     // Apply a saved light preference before first paint so the page never flashes the wrong theme.
     try {
       if (localStorage.getItem("theme") === "light") {
         document.documentElement.dataset.theme = "light";
-        document.getElementById("theme-color").setAttribute("content", "#f9f9f7");
+        document.getElementById("theme-color").setAttribute("content", "#f7f5f0");
       }
     } catch (e) { /* storage blocked: stay on the dark default */ }
   </script>
   <link rel="preconnect" href="https://a.espncdn.com">
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%233987e5'/%3E%3Ccircle cx='16' cy='16' r='9' fill='none' stroke='%23fff' stroke-width='2'/%3E%3Cpath d='M7 16h18M16 7v18' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E">
+  <link rel="icon" type="image/png" sizes="32x32" href="brand/icon-32.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="brand/icon-192.png">
+  <link rel="apple-touch-icon" href="brand/icon-180.png">
+  <meta property="og:title" content="ODDSSMASH">
+  <meta property="og:description" content="Scenario-based NBA projections that grade themselves against every real result.">
+  <meta property="og:image" content="https://oddssmash.github.io/brand/og.jpg">
+  <meta property="og:url" content="https://oddssmash.github.io/">
+  <meta name="twitter:card" content="summary_large_image">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <button class="skip" id="skip" type="button">Skip to content</button>
   <header class="top">
     <a class="brand" href="#/games" aria-label="ODDSSMASH home">
-      <svg viewBox="0 0 32 32" width="28" height="28" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><circle cx="16" cy="16" r="9" fill="none" stroke="#fff" stroke-width="2"/><path d="M7 16h18M16 7v18" stroke="#fff" stroke-width="2"/></svg>
-      <span>ODDSSMASH</span>
+      <img class="brand-full" src="brand/logo-lockup.png" alt="" width="176" height="40"><img class="brand-mark" src="brand/icon-192.png" alt="" width="40" height="40">
     </a>
     <nav class="nav" id="nav" aria-label="Sections"></nav>
     <a class="icon-btn" id="bell" href="#/today" aria-label="What changed today" title="What changed today"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 16V11a6 6 0 1112 0v5l1.5 2h-15zM10 20a2 2 0 004 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></a>
