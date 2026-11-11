@@ -225,7 +225,7 @@ export function createHistory() {
           if (lopsided) { const s = won ? bl.win : bl.lose; s.n++; s.min += dMin; s.pts += dPts; }
           else { bl.base.n++; bl.base.min += dMin; bl.base.pts += dPts; }
           if (act <= 0) { if (proj >= 24 && !lopsided) rotation = true; continue; }
-          if (key5.has(pid) && pf >= 6) foulTrouble = true; // fouls out, as in the simulation
+          if (key5.has(pid) && pf >= 4 && !lopsided && proj - act >= 5) foulTrouble = true; // as in the simulation: 4+ fouls and 5+ minutes lost
           if (proj >= 15) {
             H.foul.playerGames++;
             { const lam = playerRates(pid, row.pos).pfPm * proj; let c = 0, t = Math.exp(-lam); for (let k = 0; k < 5; k++) { c += t; t *= lam / (k + 1); } H.foul.pred5 += 1 - c; }

@@ -681,9 +681,11 @@ function wireSearch() {
 // ---------------------------------------------------------------- model trust meter
 // trustChip(t)            short chip for a list row, only when the label is not "typical"
 // trustBlock(t, opts)     full meter: recent miss against the typical miss, the lean, and the honest reading
+// Trust labels describe how well WE have projected him, never the player himself.
+const trustWord = (l) => ({ "keeps missing": "our projections off lately", "reads well": "we read him well lately", typical: "typical accuracy" })[l] || l || "";
 const TRUST = {
-  "reads well": ["good", "The model has read this well lately"],
-  "keeps missing": ["bad", "The model keeps missing lately"],
+  "reads well": ["good", "We have read him well lately"],
+  "keeps missing": ["bad", "Our projections have been off for him lately"],
   typical: ["info", "Typical accuracy lately"],
   "too few games": ["", "Too few games to judge"],
 };
@@ -1160,7 +1162,7 @@ async function vGame(id) {
     </section>` : ""}
 
     ${g.upset.reasons.length ? `<div class="card"><h2>${g.upset.flag ? "⚠ Upset watch" : "Things that favour the underdog"}</h2>
-      <p class="small muted">The underdog wins this about ${pct(g.upset.dogP)} of the time by the numbers.</p>
+      <p class="small muted">The underdog wins this about ${pct(g.upset.dogP)} of the time by the numbers.${S.learning?.upsetShrink?.applied ? ` Flagged games have been close to coin flips (the favourite won about 47% of them), so the win chance shown for this game is already pulled ${Math.round((S.learning.upsetShrink.shrink || 0) * 100)}% of the way toward 50%, a rule learned game by game from past flagged games only.` : ""}</p>
       <ul class="dots">${g.upset.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul></div>` : ""}
 
     ${g.scenarios?.list?.length ? `<section class="card" id="g-scn" tabindex="-1" aria-labelledby="g-scn-h"><h2 id="g-scn-h">Provable scenarios</h2>
@@ -1396,7 +1398,7 @@ async function vResults() {
     const n = rows.length, hit = rows.filter((r) => r.correct).length;
     const flagged = rows.filter((r) => r.upsetFlag), fh = flagged.filter((r) => r.upset).length;
     app.innerHTML = `<h1>Projected vs what really happened</h1>
-      <p class="lead">Every game since October 2025 was projected using only what was known before tip-off, then graded against the final score. Nothing here was fitted after the fact.</p>
+      <p class="lead">Every game since October 2025 was projected walk-forward from the games before it, then graded against the final score. The replay can still know a little more than a real forecast (starting line-ups, this season's 2K ratings, settings tuned on these seasons): see the <a href="#/accuracy">Accuracy report</a>, which also grades the predictions saved before tip-off. Preseason is included here, so the headline differs slightly from the Accuracy report's.</p>
       <div class="filters" role="group" aria-label="Filter results">
         ${[["all", "All games"], ...phases, ["upsets", "Misses only"]].map(([k, l]) => `<button class="fbtn" type="button" data-f="${esc(k)}" aria-pressed="${S.resFilter === k}">${esc(l)}</button>`).join("")}
       </div>
@@ -1788,7 +1790,10 @@ function propMainRef(p, simMain) {
 // lists, parlays and gold picks: this is where data errors hide.
 function devCheck(gm, pid, fam) {
   const row = gm?.teams?.flatMap((t) => (t.players || []).map((p) => ({ ...p, _t: t }))).find((p) => String(p.id) === String(pid));
-  const b = seasonLine(S.P?.[String(pid)]); if (!row || !b) return null;
+  // Compare with THIS season's average once he has 5+ games (at this point in the season that is close to his last
+  // 10); the blend with last season is built from much the same numbers as the projection, so it would hide gaps.
+  const sp = S.P?.[String(pid)], c = sp?.cur, b0 = seasonLine(sp); if (!row || !b0) return null;
+  const b = c && c[0] >= 5 ? { g: c[0], min: c[1], pts: c[2], reb: c[3], ast: c[4] } : b0;
   const proj = fam === "pra" ? row.pts + row.reb + row.ast : row[fam], avg = fam === "pra" ? b.pts + b.reb + b.ast : b[fam];
   if (proj == null || avg == null || avg < 4) return null;
   const dev = (proj - avg) / avg; if (Math.abs(dev) <= 0.3) return null;
@@ -1798,7 +1803,7 @@ function devCheck(gm, pid, fam) {
   if ((row.wwD || []).some((w) => Math.abs(w.pts) >= 1) || Math.abs(row.adj?.absence || 0) >= 1) reasons.push("teammates out");
   if ((row._t.out || []).some((o) => o.star)) reasons.push("a star teammate is out");
   if (row.ix?.returning) reasons.push("returning from absence");
-  return { dev, proj, avg, reasons, unexplained: !reasons.length };
+  return { dev, proj, avg, basis: c && c[0] >= 5 ? `this season (${c[0]} games)` : "this season blended with last", reasons, unexplained: !reasons.length };
 }
 function tooFarBelow(p, simMain) {
   if (!p.player) return false; if (isLowLine(p)) return true;
@@ -2480,7 +2485,10 @@ async function vPlayer(id) {
 // ---------------------------------------------------------------- More: takes, sources, method
 const VERDICT = { "Numbers agree": "good", "Numbers disagree": "bad", "Not confirmed by the numbers": "warn" };
 // One headline. Players the feed tagged (and we track) are shown as faces; a checked take shows the player it was checked against.
-function takeRow(t) {
+// Feed titles sometimes arrive with HTML entities (&#8217; and so on): decode them before display.
+const unent = (x) => String(x || "").replace(/&#(d+);/g, (_, n) => String.fromCodePoint(Number(n))).replace(/&#x([0-9a-f]+);/gi, (_, n) => String.fromCodePoint(parseInt(n, 16))).replace(/&amp;/g, "&").replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'").replace(/&lt;/g, "<").replace(/&gt;/g, ">");
+function takeRow(t0) {
+  const t = { ...t0, title: unent(t0.title), summary: unent(t0.summary) };
   const who = (t.athletes || []).map((id) => S.P[id]).filter(Boolean);
   const summary = plain(t.summary);
   return `<div class="take"><a href="${safeUrl(t.url)}" target="_blank" rel="noopener noreferrer">${esc(plain(t.title))}</a>
@@ -2613,7 +2621,10 @@ async function vMore(tab) {
   if (tab === "takes") {
     const takes = await load("takes.json");
     const kind = S.kind || "all";
-    const rows = takes.filter((t) => kind === "all" || (kind === "checked" ? t.checks.some((c) => VERDICT[c.verdict]) : t.kind === kind)).slice(0, 80);
+    // Keep only items that name a player or a team; drop promos, "top 10 plays" reels and generic news pages.
+    const PROMO = /get your latest|top d+ plays|top plays|subscribe|watch live|best of|mixtape|full episode|podcast episode|daily recap/i;
+    const relevant = (t) => ((t.teams || []).length || (t.athletes || []).length) && !PROMO.test(t.title || "");
+    const rows = takes.filter(relevant).filter((t) => kind === "all" || (kind === "checked" ? t.checks.some((c) => VERDICT[c.verdict]) : t.kind === kind)).slice(0, 80);
     body = `<p class="lead">Headlines from sports news desks, blogs, YouTube analysts and r/nba. When a take praises or doubts a player, it is checked against his recent numbers first. Takes never move a projection by themselves; only reported minutes limits do.</p>
       <div class="filters" role="group" aria-label="Filter takes">${[["all", "All"], ["checked", "Checked against numbers"], ["news", "News"], ["blog", "Blogs"], ["video", "YouTube"], ["community", "Reddit"]].map(([k, l]) => `<button class="fbtn" type="button" data-kind="${k}" aria-pressed="${kind === k}">${l}</button>`).join("")}</div>
       <div class="card">${rows.map(takeRow).join("") || `<p class="empty">Nothing in this filter right now.</p>`}</div>
@@ -2643,7 +2654,7 @@ async function vMore(tab) {
         <li><b>Honest percentages.</b> The win chance is tuned so that 70% really means about 70%.</li>
       </ol></div>
       <div class="card"><h2>How it learns</h2><p>The whole history is replayed in order, starting October 2025: 2025-26 preseason, regular season, play-in and playoffs, then 2026-27 preseason and season to date. Each game is projected using only what was known before tip-off, compared with the result, and the gap is split into causes (minutes, shot volume, shot-making, pace, overtime, turnovers, who actually played). Those gaps update the situation library and the personal matchup records before the next game is projected.</p>
-        <p>So nothing is fitted with hindsight, and the accuracy shown on the Results and Why pages is what you would really have seen.</p></div>
+        <p>Each game is projected only from the games before it. The replay can still be slightly flattered (it knows starting line-ups and inactives, uses this season's 2K ratings for past games, and its settings were tested on these same seasons), so the cleanest measure is the record of predictions saved before tip-off on the <a href="#/accuracy">Accuracy report</a>.</p></div>
       <div class="card"><h2>Limits worth knowing</h2><ul class="dots">
         <li>Starting lineups and late scratches are only known close to tip-off. Projections update each time the data refreshes.</li>
         <li>About one game in three is called wrong. Basketball has real randomness, mostly shot-making on the night.</li>
@@ -3112,7 +3123,7 @@ function trustSummary(TR) {
     <p class="small muted">${esc(TR.note || "")}</p>
     <div class="chips">${Object.entries(TR.players.counts || {}).map(([k, v]) => `<span class="chip">${esc(k)}: ${num(v)} players</span>`).join("")}</div>
     ${TR.persistence?.t ? `<p class="note">${esc(TR.persistence.t)}</p>` : ""}
-    <div class="grid two"><div><h3>Model keeps missing</h3><ul class="plain small">${(TR.players.keepsMissing || []).slice(0, 8).map(li).join("")}</ul></div><div><h3>Model reads well</h3><ul class="plain small">${(TR.players.readsWell || []).slice(0, 8).map(li).join("")}</ul></div></div>
+    <div class="grid two"><div><h3>Our projections off lately</h3><ul class="plain small">${(TR.players.keepsMissing || []).slice(0, 8).map(li).join("")}</ul></div><div><h3>Model reads well</h3><ul class="plain small">${(TR.players.readsWell || []).slice(0, 8).map(li).join("")}</ul></div></div>
     <p class="small muted">The labels describe the model's recent record on each player, not the player.</p></section>`;
 }
 async function insightGame(I, id) {
@@ -3160,7 +3171,7 @@ async function insightGame(I, id) {
 
     ${brk.length ? `<section class="card"><h2>Breakout watch in this game</h2>${brk.map(breakoutRow).join("")}<p class="small"><a class="go" href="#/breakout">All breakout candidates ›</a></p></section>` : ""}
     ${tn && (tn.teams?.length || tn.players?.length) ? `<section class="card"><h2>Trust meter tonight</h2><ul class="plain small">
-      ${(tn.teams || []).filter((t) => t && t.tid).map((t) => `<li class="spread"><span>${teamName(t.tid)}</span><span>${esc(t.label)} · miss ${f1(t.mae)} pts${t.games ? ` <span class="muted">(${esc(t.games)} g)</span>` : ""}</span></li>`).join("")}
+      ${(tn.teams || []).filter((t) => t && t.tid).map((t) => `<li class="spread"><span>${teamName(t.tid)}</span><span>${esc(trustWord(t.label))} · miss ${f1(t.mae)} pts${t.games ? ` <span class="muted">(${esc(t.games)} g)</span>` : ""}</span></li>`).join("")}
       ${(tn.players || []).map((p) => `<li class="spread"><span>${playerChip(p.id, p.n, { href: `#/player/${p.id}` })}</span><span>${esc(p.label === "keeps missing" ? "model keeps missing" : p.label === "reads well" ? "model reads well" : p.label)} <span class="muted">(${esc(p.games)} g)</span></span></li>`).join("")}</ul>
       ${I.trust?.persistence?.t ? `<p class="small muted">${esc(I.trust.persistence.t)}</p>` : ""}</section>` : ""}
     ${insightNote(I)}`;
@@ -3180,13 +3191,17 @@ async function vBreakout() {
   const I = await load("insights.json"), B = I.breakout || {};
   S.brk = S.brk || "opportunity";
   const tabs = [["opportunity", "More minutes or role"], ["matchup", "Matchup"], ["hotStreaks", "Hot streaks"]];
+  // Keep only real breakouts: more points projected AND either a named cause (absence, return, starting role...) or a
+  // minutes jump of 6+ (the group that came true about two thirds of the time; 4-6 minute jumps were near coin flips).
+  const named = (r) => (r.reasons || []).some((x) => x.k && x.k !== "rotation");
+  const keep = (r) => (r.ptsJump ?? 1) > 0 && (named(r) || (r.minJump ?? 0) >= 6 || S.brk !== "opportunity");
   const draw = (focusSel) => {
-    const list = B[S.brk] || [], ev = B.evidence || {};
+    const all = B[S.brk] || [], list = all.filter(keep), ev = B.evidence || {}, dropped = all.length - list.length;
     app.innerHTML = `${labBack}<h1>Breakout watch</h1>
       <p class="lead">Players whose minutes or role should jump in their next game: a teammate out, a new starter, minutes returning, or a matchup that suits them. Each player appears once.</p>
-      <div class="filters" role="group" aria-label="Kind">${tabs.map(([k, l]) => `<button class="fbtn" type="button" data-bk="${k}" aria-pressed="${S.brk === k}">${l} <span class="cnt">${(B[k] || []).length}</span></button>`).join("")}</div>
+      <div class="filters" role="group" aria-label="Kind">${tabs.map(([k, l]) => `<button class="fbtn" type="button" data-bk="${k}" aria-pressed="${S.brk === k}">${l} <span class="cnt">${(B[k] || []).filter(keep).length}</span></button>`).join("")}</div>
       ${S.brk === "hotStreaks" && ev.hotStreak?.t ? `<p class="note"><b>Hot streaks usually fade.</b> ${esc(ev.hotStreak.t)}</p>` : ""}
-      <div class="card">${list.map(breakoutRow).join("") || `<p class="empty">Nobody in this list right now.</p>`}</div>
+      <div class="card">${list.map(breakoutRow).join("") || `<p class="empty">Nobody in this list right now.</p>`}${dropped ? `<p class="small muted">${dropped} more left out: a minutes jump under 6 with no named cause (those came true only about half the time), or no gain in projected points.</p>` : ""}</div>
       ${ev.minutes?.buckets?.length ? `<section class="card"><h2>How often projected minute jumps really happen</h2>
         <div class="tw"><table><thead><tr><th>Projection vs his last 5 games</th><th class="n">Player-games</th><th class="n">Really played 3+ more</th></tr></thead><tbody>${ev.minutes.buckets.map((b) => `<tr><td>${esc(b.label)}</td><td class="n">${num(b.games)}</td><td class="n">${pct(b.hitRate)}</td></tr>`).join("")}</tbody></table></div>
         <p class="small muted">${esc(ev.minutes.rule || "")}</p></section>` : ""}
@@ -3574,7 +3589,7 @@ const up = await load("upcoming.json").catch(() => []);
       ${fl?.tight4th && !fl.tight4th.small ? `<li>Tight 4th quarters: ${fl.tight4th.vsUsual36 > 0 ? "+" : ""}${f1(fl.tight4th.vsUsual36)} pts per 36 vs his usual (${fl.tight4th.games} games)</li>` : ""}
       ${fl?.ahead && !fl.ahead.small ? `<li>When far ahead: ${fl.ahead.vsUsual36 > 0 ? "+" : ""}${f1(fl.ahead.vsUsual36)} per 36 · when far behind: ${fl.behind ? (fl.behind.vsUsual36 > 0 ? "+" : "") + f1(fl.behind.vsUsual36) : "-"} per 36</li>` : ""}
       </ul>`);
-    if (pl?.trust) parts.push(`<h4>How well we read him</h4><p>${esc(pl.trust.label || "")}: our recent projections missed by ${f1(pl.trust.mae)} points against a typical ${f1(pl.trust.typical)} (${esc(pl.trust.games)} games)${pl.trust.lean ? `, ${esc(pl.trust.lean)}` : ""}.</p>`);
+    if (pl?.trust) parts.push(`<h4>How well we read him</h4><p>${esc(trustWord(pl.trust.label))}: our recent projections missed by ${f1(pl.trust.mae)} points against a typical ${f1(pl.trust.typical)} (${esc(pl.trust.games)} games)${pl.trust.lean ? `, ${esc(pl.trust.lean)}` : ""}.</p>`);
     const lib = (gm?.scenarios?.list || []).filter((sc) => (pl && sc.t.includes(pl.n)) || String(sc.fav) === String(pl?.tid)).slice(0, 5);
     if (lib.length) parts.push(`<h4>Scenario library for this game</h4><ul class="dots small">${lib.map((sc) => `<li>${esc(sc.t)} <span class="muted">(${esc(sc.sample || "")} sample)</span></li>`).join("")}</ul>`);
     const risks = [];
@@ -3730,7 +3745,7 @@ const up = await load("upcoming.json").catch(() => []);
           ${x.hold != null ? `<div class="small">Scenario check: his average is on our side in <b>${pct(x.hold)}</b> of the game scripts (likelihood-weighted robustness check, not a probability)</div>` : ""}
           ${x.price != null ? `<div class="small ${x.qual ? "qual" : "muted"}">${x.wrong ? `⚠ Big difference: ${Math.round(Math.abs(x.gap) * 100)} percentage points from the bookmaker's chance. Check the latest news first.` : x.qual ? "✓ Meaningful difference (3-10 percentage points above the bookmaker)." : "No qualifying edge at this price."}</div>` : ""}
           <div class="pick-alt"><span>Our median ${esc(x.median ?? "-")}${x.mean != null ? ` · average ${f1(x.mean)}` : ""}</span>${x.thr.map(([t, q]) => `<span>${esc(t)}+: ${pct(q)}</span>`).join("")}</div>
-          ${x.dv ? `<div class="small" style="color:${x.dv.unexplained ? "var(--warn)" : "inherit"}">${x.dv.unexplained ? "⚠ Check this one:" : "Note:"} we project ${f1(x.dv.proj)} vs his season average ${f1(x.dv.avg)} (${x.dv.dev > 0 ? "+" : ""}${Math.round(x.dv.dev * 100)}%). ${x.dv.unexplained ? "No injury, minutes or role reason explains a gap this size, so it is kept out of gold picks, 85%+ lists and parlays." : `Reason: ${esc(x.dv.reasons.join(", "))}.`}</div>` : ""}
+          ${x.dv ? `<div class="small" style="color:${x.dv.unexplained ? "var(--warn)" : "inherit"}">${x.dv.unexplained ? "⚠ Check this one:" : "Note:"} we project ${f1(x.dv.proj)} vs his average ${f1(x.dv.avg)} ${esc(x.dv.basis)} (${x.dv.dev > 0 ? "+" : ""}${Math.round(x.dv.dev * 100)}%). ${x.dv.unexplained ? "No injury, minutes or role reason explains a gap this size, so it is kept out of gold picks, 85%+ lists and parlays." : `Reason: ${esc(x.dv.reasons.join(", "))}.`}</div>` : ""}
           ${propWhy(x)}
           <div class="pick-m small muted">${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}${x.date ? ` · ${esc(timePH(x.date))}` : ""} · <a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
         return `${gml.some((x) => x.gold) || ml.some((x) => x.gold) ? `<div class="gold-strip"><b>★ Gold picks</b>${gml.filter((x) => x.gold).map((x) => `<details class="gs-i"><summary><span>${esc(x.pick)}</span> <i>${esc(T(x.away).abbr)}@${esc(T(x.home).abbr)} · odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · robust in ${pct(x.hold)} of scripts</i></summary><p class="small">${goldGameSum(x)}</p><a class="go small" href="#/game/${esc(x.gid)}">Game page ›</a> <button class="btn sm" type="button" data-gs-go="g|${esc(x.gid)}|${esc(x.kind)}">Full analysis ›</button></details>`).join("")}${ml.filter((x) => x.gold).slice(0, 12).map((x) => `<details class="gs-i"><summary><span>${esc(shortName(x.pl.n))} ${x.over ? "over" : "under"} ${esc(x.line)} ${esc(x.word)}</span> <i>odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · robust in ${pct(x.hold)} of scripts</i></summary><p class="small">${goldPropSum(x)}</p><a class="go small" href="#/game/${esc(x.gid)}">Game page ›</a> <button class="btn sm" type="button" data-gs-go="p|${esc(x.gid)}|${esc(x.pl.id)}|${esc(x.fam)}">Full analysis ›</button></details>`).join("")}<span class="small muted">Gold = our chance 3-10 points above the bookmaker's main line at a price that is worth it by our numbers, decimal odds 1.60+, our chance 55%+, robust in 60%+ of the game scripts and tonight's scenario library not against it. Statistical comparison, not betting advice.</span></div>` : `<div class="note small">No gold picks on this day: nothing combines a meaningful difference (3-10 points), odds of 1.60+, a 55%+ chance and support across our scenarios.</div>`}
@@ -4237,7 +4252,7 @@ function scoutTop(p) {
   const strengths = (p.scout?.strengths || p.scout?.str || []).slice(0, 4).map((x) => { const t = typeof x === "string" ? x : x.t || x.txt || x.label || ""; const c = t.indexOf(":"); return c > 0 && c < 34 ? t.slice(0, c) : t; }).filter(Boolean);
   return `<div class="card scout-top"><div class="scout-row">
       ${l ? `<div class="statgrid sg4" style="flex:1"><div class="stat"><b>${f1(l.pts)}</b><span>PPG</span></div><div class="stat"><b>${f1(l.reb)}</b><span>RPG</span></div><div class="stat"><b>${f1(l.ast)}</b><span>APG</span></div><div class="stat"><b>${f1(l.min)}</b><span>MPG</span></div></div>` : ""}
-      ${trust != null ? `<div class="trust-card"><span class="small muted">Trust meter</span><b>${trust}%</b>${meter(trust / 100)}<span class="small muted">${esc(tr.label || "")}</span></div>` : ""}
+      ${trust != null ? `<div class="trust-card"><span class="small muted">Trust meter</span><b>${trust}%</b>${meter(trust / 100)}<span class="small muted">${esc(trustWord(tr.label))}</span></div>` : ""}
     </div>${strengths.length ? `<h3>Strengths</h3><ul class="check">${strengths.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
     <p class="small muted" style="margin-top:8px">${l ? `${esc(l.gp)} games ${l === p.cur ? "this season" : "last season"}.` : ""} Trust meter: how closely the model has read him lately (100% = his misses are no bigger than usual for players like him).</p></div>`;
 }

@@ -75,7 +75,9 @@ export function seasonSim(opts) {
 
   // ratings: opponent-adjusted net rating as the prior, pulled toward the model's own projected margins
   const byId = new Map(teams.map((t) => [String(t.id), t]));
-  const prior = Object.fromEntries(TEAMS.map((t) => [t, Number(byId.get(t)?.ratings?.adjNet) || 0]));
+  // early-season ratings are regressed toward the league average by games played (REG_K games of average-team prior)
+  const REG_K = Number(process.env.CL_SEASON_REG_K ?? 8), gpT = (t) => W[t] + L[t];
+  const prior = Object.fromEntries(TEAMS.map((t) => [t, (Number(byId.get(t)?.ratings?.adjNet) || 0) * (REG_K ? gpT(t) / (gpT(t) + REG_K) : 1)]));
   const h = opts.homeAdv;
   const upById = new Map((upcoming || []).map((u) => [String(u.id), u]));
   const obs = (upcoming || []).filter((u) => u.pred && CONF[String(u.home)] && CONF[String(u.away)]).map((u) => ({ h: String(u.home), a: String(u.away), m: u.pred.hs - u.pred.as }));
@@ -112,6 +114,11 @@ export function seasonSim(opts) {
       tau = Math.sqrt(Math.max(0.25, vb - va / 20)); tauN = means.length;
     }
   }
+  // The block estimate above is small because the walk-forward model keeps re-learning; a season simulated from TODAY's
+  // ratings needs the uncertainty of a team's true level over the rest of the season: about 3 points early, shrinking as
+  // games accumulate (15 games of prior weight), never below 1.5 (injuries and trades). Per team, by games played this season.
+  const TAU_PRIOR = Number(process.env.CL_TAU_PRIOR ?? 4), TAU_K = Number(process.env.CL_TAU_K ?? 20), TAU_FLOOR = Number(process.env.CL_TAU_FLOOR ?? 2);
+  const tauTeam = TEAMS.map((t) => Math.max(TAU_FLOOR, Math.sqrt(tau * tau + TAU_PRIOR ** 2 * TAU_K / (TAU_K + W[t] + L[t]))));
 
   // remaining meetings without dates
   const E = (a, b) => (DIV[a] === DIV[b] ? 4 : CONF[a] === CONF[b] ? 3.6 : 2);
@@ -151,7 +158,7 @@ export function seasonSim(opts) {
     return a === 4 ? hi : lo;
   };
   for (let n = 0; n < N; n++) {
-    for (let i = 0; i < T; i++) { delta[i] = tau * rng.normal(); wins[i] = W[TEAMS[i]]; }
+    for (let i = 0; i < T; i++) { delta[i] = tauTeam[i] * rng.normal(); wins[i] = W[TEAMS[i]]; }
     h2hSim.clear();
     const addH = (w, l) => { const k = w * 64 + l; h2hSim.set(k, (h2hSim.get(k) || 0) + 1); };
     for (const f of futureP) { const hw = rng.next() < Phi((f.m + delta[f.h] - delta[f.a]) / sigma); const w = hw ? f.h : f.a; wins[w]++; addH(w, hw ? f.a : f.h); }
@@ -213,7 +220,7 @@ export function seasonSim(opts) {
     method: {
       ratings: `Team strength in points per game: opponent-adjusted net rating (teams.json) pulled toward the model's own projected margins for the ${obs.length} games it has projected (each projected game counts as much as a third of the prior). Home court ${r1(h)} points.`,
       games: `Each game: win chance from the strength gap and a normal spread of ${r1(sigma)} points (the walk-forward margin error). The model's own win chance is used for the ${futureP.filter((f) => f.src === "model").length} scheduled games it has already projected.`,
-      uncertainty: `Each simulated season also draws a lasting strength shift per team, standard deviation ${r1(tau)} points, measured from 20-game blocks of the walk-forward margin errors in 2025-26 (${tauN} blocks): a team can turn out better or worse than today's rating for the rest of the year.`,
+      uncertainty: `Each simulated season also draws a lasting strength shift per team: about ${r1(tauTeam.reduce((x, y) => x + y, 0) / tauTeam.length)} points on average now (4 points of prior uncertainty shrinking as games are played, never below 2; early ratings are also regressed toward average with 8 games of prior; the 2025-26 block estimate of ${r1(tau)} points is the part that remains late in a season), measured from 20-game blocks of the walk-forward margin errors in 2025-26 (${tauN} blocks): a team can turn out better or worse than today's rating for the rest of the year.`,
       tiebreak: "Ties: head-to-head wins (played and simulated), then a coin flip. The other official tiebreakers (division, conference record) are not modelled.",
       playoffs: "Seeds 1-6 go straight in; 7-10 play the play-in (7 v 8, 9 v 10, then the loser of 7/8 v the winner of 9/10). Best-of-seven series with 2-2-1-1-1 home court for the higher seed; the Finals home court goes to the better record.",
     },

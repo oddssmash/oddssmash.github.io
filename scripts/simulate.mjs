@@ -337,7 +337,9 @@ const oddsCopied = publishOddsCopy(odds);
 {
   const sigma = Math.sqrt(params.cov.hh + params.cov.aa - 2 * params.cov.ha);
   const pages = results.slice(-200).map((r) => loadPage(r.id)).filter(Boolean);
-  const homeAdv = pages.length ? pages.reduce((a, p) => a + (Number(p.homeAdv) || 0), 0) / pages.length : 2;
+  // home court: the model's current learned value (the same number the Why page shows), else the recent per-game average
+  const learnedHome = readJSON(path.join(PUBLIC_DATA, "learning.json"), null)?.params?.at(-1)?.homeAdv;
+  const homeAdv = Number.isFinite(learnedHome) ? learnedHome : pages.length ? pages.reduce((a, p) => a + (Number(p.homeAdv) || 0), 0) / pages.length : 2;
   const season = seasonSim({ teams: teamsPub, upcoming, results, sigma, homeAdv, N: cfg.seasonN, seed: hashSeed(cfg.seed, "season") });
   writeJSON(path.join(PUBLIC_DATA, "season.json"), { format: 1, generated, dataUpdated, seed: hashSeed(cfg.seed, "season"), note: "Rest-of-season simulation from current ratings and the remaining schedule. Statistical only; no betting data.", ...season });
   lap("season.json written");

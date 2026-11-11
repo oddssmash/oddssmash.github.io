@@ -398,8 +398,9 @@ export function simulate(G, params, N, rng, opt = {}) {
       for (const i of T[side].key3) if (ev[i] === 2) { ek = i; break; }
       out.exitKey[s * 2 + side] = ek;
       if (ek >= 0) f |= side ? FLAG.injA : FLAG.injH;
-      for (const i of T[side].key5) if (pf[i] >= 6) { f |= side ? FLAG.foulA : FLAG.foulH; break; } // a top-5 player fouls out (tightened from 5 fouls)
       const lops = Math.abs(mg) >= 15;
+      // foul trouble that changes the game: a top-5 player with 4+ fouls loses 5+ minutes against his projection (no blowout)
+      if (!lops) for (const i of T[side].key5) if (pf[i] >= 4 && G.projMin[i] - acc[i * S] >= 5) { f |= side ? FLAG.foulA : FLAG.foulH; break; }
       let rot = false;
       for (const i of T[side].idx) {
         // a starter (24+ projected minutes) sits, or a rotation player's (15+) minutes move by 15+ (tightened from 10/10)

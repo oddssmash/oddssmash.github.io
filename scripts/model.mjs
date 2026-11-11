@@ -15,6 +15,14 @@ import { clamp, round, mean, sd, phi, posGroup, phaseOf, tsa, ew, normName, regr
 // Roster rule (see ensemble): pull toward the player-by-player margin when it differs from the team systems.
 const ROSTER_PULL = Number(process.env.CL_ROSTER_PULL ?? 0), ROSTER_GAP = Number(process.env.CL_ROSTER_GAP ?? 3), ROSTER_EARLY = Number(process.env.CL_ROSTER_EARLY ?? 0);
 const EFF_K = Number(process.env.CL_EFF_K ?? 400), EFF_HL = Number(process.env.CL_EFF_HL ?? 40);
+// Upset-watch calibration: in flagged games the favourite has won less often than its stated chance, so the win chance
+// is pulled toward 50% by a shrink learned walk-forward from past flagged games only (grid search on squared error).
+// Back-test (2026-11-11): Brier 0.2072 -> 0.2038 over every game since October 2025; winners called unchanged.
+const UPSET_GRID = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], UPSET_ON = process.env.CL_UPSET_SHRINK !== "0";
+const upsetLearn = { n: 0, se: UPSET_GRID.map(() => 0) };
+const upsetShrink = () => (upsetLearn.n < 100 ? 0 : UPSET_GRID[upsetLearn.se.indexOf(Math.min(...upsetLearn.se))]);
+const upsetAdj = (p) => 0.5 + (p - 0.5) * (1 - upsetShrink());
+function upsetLearnGame(rawP, homeWon) { upsetLearn.n++; UPSET_GRID.forEach((c, i) => { const p = 0.5 + (rawP - 0.5) * (1 - c); upsetLearn.se[i] += (p - (homeWon ? 1 : 0)) ** 2; }); }
 import { teamBox, repairBlankRows, markCupFinals, scoreOnlyGames } from "./lib/boxfix.mjs";
 import { loadPbp } from "./lib/zonedata.mjs";
 import { buildContext } from "./lib/context.mjs";
@@ -829,7 +837,13 @@ function finishGame(g, H, A, known) {
   // Roster check: the player-by-player system is the only one built from tonight's actual players. When it differs from
   // the team-level systems by ROSTER_GAP+ points, the roster or rotation has likely changed, so the blend moves toward it.
   let rosterShift = 0;
-  const earlyOK = !ROSTER_EARLY || Math.min(totals[0].S?.sched?.seasonGames ?? 99, totals[1].S?.sched?.seasonGames ?? 99) <= ROSTER_EARLY;
+  // Trigger = a roster change, not the calendar: the first ROSTER_EARLY games of a season, or a star newly out (he played
+  // in one of his team's last 3 games but is out tonight). Never in the playoffs.
+  const newStarOut = (side) => (side.S?.teamOut || []).some((o) => { if (!o.star) return false; const pl = P.get(String(o.id)), tm = getT(side.S.tid);
+    const recent = tm.recs.filter((r) => r.date < g.date).slice(-3); if (!recent.length || !pl) return false;
+    const last = pl.recs.filter((r) => r.date < g.date && r.min > 0).at(-1)?.date; return !!last && last >= recent[0].date; });
+  const rosterChange = (side) => side.S?.phase?.stype !== 3 && ((side.S?.sched?.seasonGames ?? 99) <= ROSTER_EARLY || newStarOut(side));
+  const earlyOK = !ROSTER_EARLY || rosterChange(totals[0]) || rosterChange(totals[1]);
   if (ROSTER_PULL > 0 && earlyOK) {
     const teamAvg = (models.efficiency + models.elo + models.adjusted + models.luckAdjusted) / 4, gap = models.players - teamAvg;
     if (Math.abs(gap) >= ROSTER_GAP) { rosterShift = ROSTER_PULL * (models.players - ensemble); ensemble += rosterShift; }
@@ -1243,11 +1257,14 @@ for (const g of walk) {
       for (const n of g.officials || []) { const r = (learn.refs[n] ||= { n: 0, tot: 0, home: 0 }); r.n++; r.tot += g.hs + g.as - (pred.h.pts + pred.a.pts - pred.ref.tot); r.home += actMargin - (pred.margin - pred.ref.home); }
     }
 
+    const upsetWatch = upsetSignals(pred, H, A); // pre-game information only
+    const rawPHome = pred.pHome;
+    if (UPSET_ON && upsetWatch.flag) pred.pHome = upsetAdj(rawPHome);
     const favHome = pred.pHome >= 0.5;
     const correct = (actMargin > 0) === favHome;
     const dogProb = favHome ? 1 - pred.pHome : pred.pHome;
     const upset = !correct;
-    const upsetWatch = upsetSignals(pred, H, A);
+    if (upsetWatch.flag) upsetLearnGame(rawPHome, actMargin > 0); // learn only after the game is graded
     const sum = {
       id: g.id, date: g.date, phase: phase.label, pk: phase.key, home: g.home, away: g.away,
       pred: { hs: round(pred.h.pts), as: round(pred.a.pts), pHome: round(pred.pHome, 3) },
@@ -1361,6 +1378,7 @@ for (const e of futureEvents) {
   const H = projectTeam(g, e.home, e.away, true, kH), A = projectTeam(g, e.away, e.home, false, kA);
   const pred = finishGame(g, H, A, { starters: null, newsLimit: new Set([...kH.newsLimit, ...kA.newsLimit]) });
   const up = upsetSignals(pred, H, A);
+  if (UPSET_ON && up.flag) pred.pHome = upsetAdj(pred.pHome);
   const sideOut = (side, inj) => side.proj.sort((a, b) => b.proj.pts - a.proj.pts).map((x) => ({
     id: x.id, n: x.n, pos: x.pos, role: x.role, r2k: x.r2k, min: round(x.proj.min), pts: round(x.proj.pts), reb: round(x.proj.reb), ast: round(x.proj.ast), tpm: round(x.proj.tpm),
     stl: round(x.proj.stl), blk: round(x.proj.blk), scen: x.scen.map((s) => ({ s, pts: round(learn.scen[scenKey(s, x.role, "pts")]?.w || 0, 2), n: learn.scen[scenKey(s, x.role, "pts")]?.n || 0 })),
@@ -1937,6 +1955,7 @@ writeJSON(path.join(OUT, "learning.json"), {
   params: learn.history,
   factors: factorReport,
   inloop: inloopReport(),
+  upsetShrink: { applied: UPSET_ON, shrink: upsetShrink(), flaggedGames: upsetLearn.n, note: "In upset-watch games the win chance is pulled toward 50% by this share, learned walk-forward from past flagged games only. Back-test: Brier 0.2072 -> 0.2038 over every game since October 2025, winners called unchanged (67.0%)." },
   efficiency: { applied: EFF_K > 0, k: EFF_K, halfLife: EFF_HL, note: "Scoring rate = shot volume (recent games, half-life 10) x shooting efficiency (points per true shot attempt over a long window, half-life " + EFF_HL + " games, shrunk toward his position average with " + EFF_K + " attempts of league shooting). A hot or cold week moves the volume, not the efficiency. Walk-forward test (2026-11-11), players projected 15+ minutes: points error 4.949 -> 4.933 (2025-26 regular season) and 4.950 -> 4.922 (2026-27); game-level Brier score unchanged." },
 });
 writeJSON(path.join(OUT, "meta.json"), {
