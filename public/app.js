@@ -2970,11 +2970,21 @@ const up = await load("upcoming.json").catch(() => []);
   const isPlayer = (p) => !!p.player;
   // The main line for a player prop: the sportsbook's line when there is one (used only as the line to test;
   // our chance is our own model), otherwise our simulation's main line.
+  // Our chance he goes over a line, from his 10,000 simulated games: the exact threshold count when the line sits on
+  // the grid, otherwise a normal fit to his simulated mean and spread (dist = [mean, median, sd, p10, p25, p75, p90]).
+  const simOver = (pl, fam, line) => {
+    const hit = (pl.thr?.[fam] || []).find(([x]) => x === Math.floor(line) + 1); if (hit) return hit[1];
+    const d = pl.dist?.[fam]; if (!d || !(d[2] > 0)) return null;
+    return Math.min(0.995, Math.max(0.005, 1 - pNorm((line - d[0]) / d[2])));
+  };
   const refLine = (gid, pid, fam) => {
     const sim = SIM[gid]; if (!sim) return null;
     const cp = (sim.comparison?.props || []).find((x) => String(x.id) === String(pid) && x.stat === fam);
-    if (cp) return { line: cp.bookLine, src: "book", pOver: cp.ourProbOver, median: cp.ourMedian };
     const pl = sim.players?.find((x) => String(x.id) === String(pid)); const m = pl?.props?.[fam];
+    // the bookmaker's latest posted line (read when Picks opens) wins over the line saved at the last refresh
+    let live = null; try { live = PROPODDS[gid]?.get(`${pid}|${fam}`); } catch { /* prices not loaded yet */ }
+    if (live && pl && (!cp || cp.bookLine !== live.line)) { const pO = simOver(pl, fam, live.line); if (pO != null) return { line: live.line, src: "book", pOver: pO, median: pl.dist?.[fam]?.[1] }; }
+    if (cp) return { line: cp.bookLine, src: "book", pOver: cp.ourProbOver, median: cp.ourMedian };
     return m ? { line: m.line, src: "ours", pOver: m.pOver, median: pl.dist?.[fam]?.[1] } : null;
   };
   // A pick far below the main line (e.g. 10+ points for a 22.5-point scorer) is near-automatic: hidden by default.
@@ -3068,6 +3078,91 @@ const up = await load("upcoming.json").catch(() => []);
     }
     return w ? ok / w : null;
   };
+  // ---------------- "Why gold?" — every angle behind a main-line pick, from our model and simulations
+  const tick = (ok) => (ok ? '<b class="up">✓</b>' : '<b class="down">✗</b>');
+  const goldTests = (x) => `<ul class="plain gw-tests">
+      <li>${tick(x.gap != null && x.gap >= QUAL.gap)} Edge: our ${pct(x.p)} vs the book's fair ${x.book != null ? pct(x.book) : "-"} (gap ${x.gap != null ? (x.gap > 0 ? "+" : "") + Math.round(x.gap * 100) : "-"}; needs +5)</li>
+      <li>${tick(x.ev != null && x.ev >= QUAL.ev)} Expected value ${x.ev != null ? (x.ev > 0 ? "+" : "") + (x.ev * 100).toFixed(1) + "%" : "-"} (needs +3%)</li>
+      <li>${tick(x.dec != null && x.dec >= GOLD.minOdds)} Odds ${x.dec != null ? x.dec.toFixed(2) : "-"} (needs 1.60+)</li>
+      <li>${tick(x.p >= GOLD.minP)} Our chance ${pct(x.p)} (needs 55%+)</li>
+      <li>${tick(x.gap != null && x.gap < GOLD.maxGap)} Gap under 12 points (bigger gaps usually mean late news we do not have)</li>
+      <li>${tick(x.hold != null && x.hold >= GOLD.minHold)} Holds in ${x.hold != null ? pct(x.hold) : "-"} of the simulated game scripts (needs 60%+)</li>
+      ${x.libFor != null ? `<li>${tick(x.libAgainst <= x.libFor)} Scenario library: ${x.libFor} for, ${x.libAgainst} against</li>` : ""}
+    </ul>`;
+  const scenName = (sc) => sc.label.replace(/\s*\(.*\)\s*$/, "");
+  function propWhy(x) {
+    const gm = GAME[x.gid], sim = SIM[x.gid];
+    const pl = gm?.teams?.flatMap((t) => (t.players || []).map((p) => ({ ...p, tid: t.tid }))).find((p) => String(p.id) === String(x.pl.id));
+    const opp = gm?.teams?.find((t) => t.tid !== pl?.tid);
+    const d = x.pl.dist?.[x.fam] || [], side = x.over ? "Over" : "Under";
+    const summary = `${side} ${x.line}: we project ${esc(x.median ?? "-")} (80% range ${esc(d[3] ?? "-")}-${esc(d[6] ?? "-")}) in about ${f0(x.pl.proj?.min || pl?.min || 0)} minutes. We say ${pct(x.p)}, the book ${x.book != null ? pct(x.book) : "-"}${x.hold != null ? `; holds in ${pct(x.hold)} of the game scripts` : ""}${x.ev != null ? `; EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}% at ${x.dec.toFixed(2)}` : ""}.`;
+    const parts = [];
+    parts.push(`<h4>Gold tests</h4>${goldTests(x)}`);
+    parts.push(`<h4>Our projection</h4><p>${f0(x.pl.proj?.min || pl?.min || 0)} minutes · average ${f1(x.mean)} · median ${esc(x.median ?? "-")} · 80% range ${esc(d[3] ?? "-")} to ${esc(d[6] ?? "-")} ${x.word}.${x.thr.length ? ` Chance of reaching: ${x.thr.map(([t, q]) => `${t}+ ${pct(q)}`).join(", ")}.` : ""}</p>${pl ? `<p class="small muted">${propReason(pl)}</p>` : ""}`);
+    // full scenario-by-scenario analysis
+    const rows = (sim?.scenarios || []).filter((sc) => sc.freq >= 0.01).map((sc) => {
+      const row = (sc.players || []).find((p) => String(p[0]) === String(x.pl.id)); if (!row) return null;
+      const v = x.fam === "pts" ? row[1] : x.fam === "reb" ? row[3] : x.fam === "ast" ? row[4] : x.fam === "pra" ? row[1] + row[3] + row[4] : null;
+      return { sc, v, min: row[2], ok: v == null ? null : x.over ? v > x.line : v < x.line };
+    }).filter(Boolean).sort((a, b) => b.sc.freq - a.sc.freq);
+    if (rows.length) parts.push(`<h4>Scenario by scenario (10,000 simulations)</h4><div class="tw"><table class="gw-t"><thead><tr><th>Game script</th><th class="n">Likely</th><th class="n">His ${esc(x.word)}</th><th class="n">Min</th><th class="n">${side} ${esc(x.line)}</th></tr></thead><tbody>
+      ${rows.map((y) => `<tr><td>${esc(scenName(y.sc))}</td><td class="n">${pct(y.sc.freq)}</td><td class="n">${y.v != null ? f1(y.v) : "-"}</td><td class="n">${f0(y.min)}</td><td class="n">${y.ok == null ? "-" : tick(y.ok)}</td></tr>`).join("")}</tbody></table></div>
+      <p class="small muted">His average in each slice of the simulations. Slices overlap, so likelihoods do not add to 100%. The scenario check weights each slice by how often it happens.</p>`);
+    if (pl?.scen?.length) parts.push(`<h4>Learned scenario effects tonight</h4><ul class="plain">${pl.scen.map((sc) => `<li class="spread"><span>${esc(sc.s)} <span class="muted">(${num(sc.n)} player-games)</span></span><span class="num ${sc.pts > 0 ? "up" : sc.pts < 0 ? "down" : ""}">${sc.pts > 0 ? "+" : ""}${f1(sc.pts)} pts</span></li>`).join("")}</ul><p class="small muted">Effects learned after every game from how players in his role did in the same situation.</p>`);
+    if (pl?.adj) { const a = pl.adj; parts.push(`<h4>Matchup adjustments</h4><ul class="plain">
+      <li class="spread"><span>Pace of tonight's game</span><span class="num">${a.pace != null ? (a.pace >= 1 ? "+" : "") + ((a.pace - 1) * 100).toFixed(1) + "%" : "-"}</span></li>
+      <li class="spread"><span>${esc(T(opp?.tid).abbr || "Opponent")} defence</span><span class="num">${a.defense != null ? (a.defense >= 1 ? "+" : "") + ((a.defense - 1) * 100).toFixed(1) + "%" : "-"}</span></li>
+      ${a.absence ? `<li class="spread"><span>Absences around him</span><span class="num">${a.absence > 0 ? "+" : ""}${f1(a.absence)}</span></li>` : ""}
+      ${a.bias ? `<li class="spread"><span>His recent gap to our projections (learned)</span><span class="num">${a.bias > 0 ? "+" : ""}${f1(a.bias)}</span></li>` : ""}
+      </ul>`); }
+    if (pl?.dm?.defenders?.length) parts.push(`<h4>Who guards him</h4><ul class="plain">${pl.dm.defenders.slice(0, 4).map((df) => `<li class="spread"><span>${esc(df.n)} <span class="muted">(${esc(df.pos || "")}, ${f0(df.share)}% of his matchups${df.fromMeetings ? ", from past meetings" : ""})</span></span><span class="num ${df.vsExpPct > 0 ? "up" : df.vsExpPct < 0 ? "down" : ""}">${df.vsExpPct != null ? (df.vsExpPct > 0 ? "+" : "") + f1(df.vsExpPct) + "% vs usual" : ""}</span></li>`).join("")}</ul>${pl.dm.meetings ? `<p class="small muted">${esc(pl.dm.meetings)} previous meetings on record; scorer type ${esc(pl.dm.scorerType || "-")}.</p>` : ""}`);
+    if (pl?.zm) parts.push(`<h4>Hot and cold zones vs this defence</h4><p>Main zone: ${esc(ZONE_FALLBACK[pl.zm.zone] || pl.zm.zone)} (${esc(pl.zm.tag)}): he shoots ${esc(pl.zm.pct)}% there (league ${esc(pl.zm.lgPct)}%); ${esc(T(opp?.tid).abbr)} allows ${esc(pl.zm.oppPct)}% (${esc(pl.zm.oppTag)}).</p>`);
+    if (pl?.fx?.length) parts.push(`<h4>Opponent factors applied</h4><ul class="plain">${pl.fx.map((q) => `<li class="spread"><span>${esc(q.label)}</span><span class="num">${q.v > 0 ? "+" : ""}${f1(q.v)} ${esc(q.stat)}</span></li>`).join("")}</ul>`);
+    if (pl?.wwD?.length) parts.push(`<h4>Teammates out tonight</h4><ul class="plain">${pl.wwD.slice(0, 4).map((w) => `<li class="spread"><span>${esc(w.n)} out <span class="muted">(without: ${esc(w.without?.ppg ?? "-")} ppg in ${esc(w.without?.n ?? "-")} games; with: ${esc(w.with?.ppg ?? "-")})</span></span><span class="num">${w.pts > 0 ? "+" : ""}${f1(w.pts)}</span></li>`).join("")}</ul>`);
+    const bo = pl?.ix?.blowout, fl = pl?.ix?.flow;
+    if (bo) parts.push(`<h4>Blowout and game-flow habits</h4><ul class="plain">
+      <li>Chance his team wins by 15+: ${pct(bo.winBy15)}${bo.ifWinBig ? ` → he usually plays ${bo.ifWinBig.min > 0 ? "+" : ""}${f1(bo.ifWinBig.min)} min, ${bo.ifWinBig.pts > 0 ? "+" : ""}${f1(bo.ifWinBig.pts)} pts (${bo.ifWinBig.games} games)` : ""}</li>
+      <li>Chance his team loses by 15+: ${pct(bo.loseBy15)}${bo.ifLoseBig ? ` → ${bo.ifLoseBig.min > 0 ? "+" : ""}${f1(bo.ifLoseBig.min)} min, ${bo.ifLoseBig.pts > 0 ? "+" : ""}${f1(bo.ifLoseBig.pts)} pts (${bo.ifLoseBig.games} games)` : ""}</li>
+      ${fl?.tight4th && !fl.tight4th.small ? `<li>Tight 4th quarters: ${fl.tight4th.vsUsual36 > 0 ? "+" : ""}${f1(fl.tight4th.vsUsual36)} pts per 36 vs his usual (${fl.tight4th.games} games)</li>` : ""}
+      ${fl?.ahead && !fl.ahead.small ? `<li>When far ahead: ${fl.ahead.vsUsual36 > 0 ? "+" : ""}${f1(fl.ahead.vsUsual36)} per 36 · when far behind: ${fl.behind ? (fl.behind.vsUsual36 > 0 ? "+" : "") + f1(fl.behind.vsUsual36) : "-"} per 36</li>` : ""}
+      </ul>`);
+    if (pl?.trust) parts.push(`<h4>How well we read him</h4><p>${esc(pl.trust.label || "")}: our recent projections missed by ${f1(pl.trust.mae)} points against a typical ${f1(pl.trust.typical)} (${esc(pl.trust.games)} games)${pl.trust.lean ? `, ${esc(pl.trust.lean)}` : ""}.</p>`);
+    const lib = (gm?.scenarios?.list || []).filter((sc) => (pl && sc.t.includes(pl.n)) || String(sc.fav) === String(pl?.tid)).slice(0, 5);
+    if (lib.length) parts.push(`<h4>Scenario library for this game</h4><ul class="dots small">${lib.map((sc) => `<li>${esc(sc.t)} <span class="muted">(${esc(sc.sample || "")} sample)</span></li>`).join("")}</ul>`);
+    const risks = [];
+    if (pl?.q) risks.push("Listed questionable: if he sits, the pick fails (unders are void at most books, but check).");
+    if (bo && (x.over ? bo.winBy15 + bo.loseBy15 >= 0.35 : false)) risks.push(`Blowout chance ${pct(bo.winBy15 + bo.loseBy15)}: blowouts cut starters' minutes, which hurts an over.`);
+    const fo = (sim?.scenarios || []).find((sc) => sc.id === (x.pl.side === 0 ? "foulH" : "foulA")); if (fo) risks.push(`His team has foul trouble in ${pct(fo.freq)} of simulations.`);
+    risks.push("Shooting variance: a hot or cold night alone can move points by 6-8.");
+    parts.push(`<h4>Risks</h4><ul class="dots small">${risks.map((t) => `<li>${esc(t)}</li>`).join("")}</ul>`);
+    if (x.bk) parts.push(`<h4>Bookmaker</h4><p>${esc(x.bk)} · fair chance for our side ${pct(x.book)} (margin removed). Odds only set the line and price; they never change our numbers.</p>`);
+    return `<div class="gw"><p class="gw-sum">${summary}</p><details class="gw-more"><summary>Full analysis: every angle ›</summary>${parts.join("")}</details></div>`;
+  }
+  function gameWhy(x) {
+    const gm = GAME[x.gid], sim = SIM[x.gid]; if (!gm) return "";
+    const H = T(gm.home).abbr, A = T(gm.away).abbr, l = (x.pick.match(/([+-]?\d+(?:\.\d+)?)\s*$/) || [])[1], line = l != null ? Number(l) : null;
+    const pickHome = x.pick.startsWith(H + " "), pickTeam = pickHome ? String(gm.home) : x.pick.startsWith(A + " ") ? String(gm.away) : null;
+    const summary = `${esc(x.pick)}: ${esc(x.ours)}. We say ${pct(x.p)}, the book ${x.book != null ? pct(x.book) : "-"}${x.hold != null ? `; holds in ${pct(x.hold)} of the game scripts` : ""}${x.ev != null ? `; EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}% at ${x.dec?.toFixed(2)}` : ""}.`;
+    const parts = [`<h4>Gold tests</h4>${goldTests(x)}`];
+    parts.push(`<h4>Our projection</h4><p>${esc(A)} ${f1(gm.pred.as)} - ${f1(gm.pred.hs)} ${esc(H)} · ${esc(H)} wins ${pct(gm.pred.pHome)} · pace ${f1(gm.pred.pace)} · close game ${pct(gm.pred.close)} · blowout ${pct(gm.pred.blowout)}.</p>`);
+    const rows = (sim?.scenarios || []).filter((sc) => sc.freq >= 0.01 && sc.pHome != null).sort((a, b) => b.freq - a.freq).map((sc) => {
+      let ok = null;
+      if (x.kind === "Moneyline" && pickTeam) ok = (pickHome ? sc.pHome : 1 - sc.pHome) >= 0.5;
+      else if (x.kind === "Spread" && pickTeam && line != null) ok = (pickHome ? sc.margin : -sc.margin) + line > 0;
+      else if (x.kind === "Total" && line != null) ok = x.pick.startsWith("Over") ? sc.total > line : sc.total < line;
+      return { sc, ok };
+    });
+    if (rows.length) parts.push(`<h4>Scenario by scenario (10,000 simulations)</h4><div class="tw"><table class="gw-t"><thead><tr><th>Game script</th><th class="n">Likely</th><th class="n">${esc(H)} wins</th><th class="n">Margin</th><th class="n">Total</th><th class="n">Pick</th></tr></thead><tbody>
+      ${rows.map((y) => `<tr><td>${esc(scenName(y.sc))}</td><td class="n">${pct(y.sc.freq)}</td><td class="n">${pct(y.sc.pHome)}</td><td class="n">${y.sc.margin >= 0 ? esc(H) : esc(A)} ${f1(Math.abs(y.sc.margin))}</td><td class="n">${f0(y.sc.total)}</td><td class="n">${y.ok == null ? "-" : tick(y.ok)}</td></tr>`).join("")}</tbody></table></div>`);
+    const keys = (gm.keys?.teams || []).find((k) => String(k.tid) === pickTeam);
+    if (keys?.win?.length) parts.push(`<h4>Why ${esc(T(pickTeam).abbr)} has the edge</h4><ul class="dots small">${keys.win.slice(0, 5).map((w) => `<li>${esc(typeof w === "string" ? w : w.t || w.txt || "")}</li>`).join("")}</ul>`);
+    const lib = gm.scenarios?.list || [];
+    if (lib.length) parts.push(`<h4>Scenario library for this game</h4><ul class="dots small">${lib.slice(0, 8).map((sc) => `<li>${pickTeam && sc.fav ? (String(sc.fav) === pickTeam ? tick(true) : tick(false)) + " " : ""}${esc(sc.t)} <span class="muted">(${esc(sc.sample || "")} sample)</span></li>`).join("")}</ul>`);
+    const outs = gm.teams.flatMap((t) => (t.out || []).map((o) => `${o.n || o} (${T(t.tid).abbr})`));
+    const qs = gm.teams.flatMap((t) => (t.players || []).filter((p) => p.q).map((p) => `${p.n} (${T(t.tid).abbr})`));
+    parts.push(`<h4>Risks</h4><ul class="dots small">${outs.length ? `<li>Out: ${esc(outs.join(", "))} (already in the projection)</li>` : ""}${qs.length ? `<li>Questionable, projected to play: ${esc(qs.join(", "))}</li>` : ""}<li>Shooting variance is the biggest single source of misses (about 9 points per team per game).</li></ul>`);
+    return `<div class="gw"><p class="gw-sum">${summary}</p><details class="gw-more"><summary>Full analysis: every angle ›</summary>${parts.join("")}</details></div>`;
+  }
   const mainLines = () => {
     const out = [];
     for (const gid of gids) {
@@ -3141,6 +3236,7 @@ const up = await load("upcoming.json").catch(() => []);
           ${x.hold != null ? `<div class="small">Scenario check: holds in <b>${pct(x.hold)}</b> of the simulated game scripts${x.libFor || x.libAgainst ? ` · scenario library: ${x.libFor} for, ${x.libAgainst} against` : ""}</div>` : ""}
           <div class="small ${x.qual ? "qual" : "muted"}">${x.qual ? "✓ Statistical edge: our chance beats the book's by 5+ points and EV is +3% or more." : "No qualifying edge: our chance and the price are too close (we need a 5-point gap and +3% EV)."}</div>
           ${x.book != null && Math.abs(x.p - x.book) >= 0.12 ? `<div class="small" style="color:var(--warn)">⚠ Big disagreement (${Math.round(Math.abs(x.p - x.book) * 100)} points). Gaps this large often mean the bookmaker has late news we do not (injury, rest, lineup). Check the latest news before trusting it; our game totals miss by about 15 points on average.</div>` : ""}
+          ${gameWhy(x)}
           <div class="pick-m small muted">${x.date ? esc(timePH(x.date)) + " · " : ""}<a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
         const card = (x) => `<div class="card pick ml${x.gold ? " gold" : ""}">${x.gold ? `<div class="gold-tag">★ Worth a look: edge + odds ${esc(x.dec.toFixed(2))} + ${pct(x.p)} to hit</div>` : ""}<div class="pick-h">${avatar(x.pl.id, x.pl.n, { size: "sm" })}<span><b>${esc(x.pl.n)}</b><span class="small muted"> ${esc(T(x.pl.side === 0 ? x.home : x.away).abbr || "")} · ${esc(x.word)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.62 ? "lean" : "slight lean"}</span>${meter(x.p)}
@@ -3150,6 +3246,7 @@ const up = await load("upcoming.json").catch(() => []);
           ${x.hold != null ? `<div class="small">Scenario check: his average lands on our side in <b>${pct(x.hold)}</b> of the simulated game scripts</div>` : ""}
           ${x.price != null ? `<div class="small ${x.qual ? "qual" : "muted"}">${x.qual ? "✓ Statistical edge vs the bookmaker." : "No qualifying edge at this price."}</div>` : ""}
           <div class="pick-alt"><span>Our median ${esc(x.median ?? "-")}${x.mean != null ? ` · average ${f1(x.mean)}` : ""}</span>${x.thr.map(([t, q]) => `<span>${esc(t)}+: ${pct(q)}</span>`).join("")}</div>
+          ${propWhy(x)}
           <div class="pick-m small muted">${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}${x.date ? ` · ${esc(timePH(x.date))}` : ""} · <a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
         return `${gml.some((x) => x.gold) || ml.some((x) => x.gold) ? `<div class="gold-strip"><b>★ Gold picks</b>${gml.filter((x) => x.gold).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(x.pick)}</span> <i>${esc(T(x.away).abbr)}@${esc(T(x.home).abbr)} · odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · holds in ${pct(x.hold)} of scenarios</i></a>`).join("")}${ml.filter((x) => x.gold).slice(0, 12).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(shortName(x.pl.n))} ${x.over ? "over" : "under"} ${esc(x.line)} ${esc(x.word)}</span> <i>odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · holds in ${pct(x.hold)} of scenarios</i></a>`).join("")}<span class="small muted">Gold = edge vs the bookmaker (5+ points, EV +3%), decimal odds 1.60+, our chance 55%+, gap under 12 points, holds in 60%+ of the simulated game scripts and tonight's scenario library is not against it. Statistical comparison, not betting advice.</span></div>` : `<div class="note small">No gold picks on this day: nothing combines a real edge, odds of 1.60+, a 55%+ chance and support across our scenarios.</div>`}
           <h2 class="pk-sec">Game lines</h2>

@@ -1041,3 +1041,13 @@ a.gtab { color: var(--ink-2); }
 .gold-strip a { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; text-decoration: none; color: inherit; }
 .gold-strip a span { font-weight: 800; padding: 2px 10px; border-radius: 999px; background: #f5b82e; color: #2a1c00; }
 .gold-strip a i { font-style: normal; font-size: 13px; opacity: .9; }
+
+/* ---------- why gold ---------- */
+.gw { margin: 8px 0 4px; }
+.gw-sum { margin: 0 0 4px; font-size: 13px; line-height: 1.45; }
+.pick.gold .gw-sum { border-left: 3px solid #f5b82e; padding-left: 8px; }
+.gw-more > summary { cursor: pointer; font-weight: 700; font-size: 13px; color: var(--accent); padding: 4px 0; }
+.gw-more h4 { margin: 12px 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: .05em; opacity: .85; }
+.gw-more p, .gw-more li { font-size: 13px; line-height: 1.45; }
+.gw-tests li { padding: 2px 0; }
+.gw-t td, .gw-t th { padding: 5px 6px; font-size: 12.5px; }
