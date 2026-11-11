@@ -1072,3 +1072,12 @@ a.gtab { color: var(--ink-2); }
 .lp-row.lp-w .lp-pick { background: #8a93a6; color: #0b1020; }
 .blend-ev { color: #b9a3ff; }
 .blend-tog { display: block; margin: 6px 0; }
+.ol-box { display: grid; gap: 4px; margin: 6px 0; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 13px; font-variant-numeric: tabular-nums; }
+.ol-k { display: inline-block; min-width: 72px; font-size: 10.5px; font-weight: 800; text-transform: uppercase; letter-spacing: .05em; padding: 1px 7px; border-radius: 999px; background: #2fbf71; color: #06210f; margin-right: 6px; text-align: center; }
+.ol-k.mkt { background: #8a93a6; color: #0b1020; }
+.lt { margin: 6px 0 12px; }
+.lt-t { width: 100%; border-collapse: collapse; font-variant-numeric: tabular-nums; }
+.lt-t th, .lt-t td { padding: 7px 8px; text-align: left; border-bottom: 1px solid var(--line); font-size: 14px; }
+.lt-t th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; opacity: .8; }
+.lt-t td b { font-size: 15px; }
+.lt-t .ref, .ol-box .ref { opacity: .72; font-weight: 400; }

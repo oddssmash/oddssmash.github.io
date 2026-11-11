@@ -901,6 +901,7 @@ async function vGames() {
     for (const id of fp) { const p = S.P[id], g = up.find((x) => x.home === p.team || x.away === p.team); if (g) favRows.push(`<a class="fav-r" href="#/game/${esc(g.id)}">${avatar(id, p.n, { size: "sm" })}<span><b>${esc(p.n)}</b> ${g.home === p.team ? "vs" : "at"} ${esc(T(g.home === p.team ? g.away : g.home).abbr)}<i>${esc(label(dayKey(g.date)))} · ${esc(timePH(g.date))}</i></span></a>`); }
     app.innerHTML = `<h1>Upcoming games</h1>
       <p class="lead">Projected score and win chance for every game, with the main reasons on each card. Tap a game for the full reasoning. Times are ${PHT} (Manila).</p>
+      <p class="small pitch">Built without bookmaker data, and usually within a few points of the market anyway. When we disagree, we show you why.</p>
       ${favRows.length ? `<section class="card favs" aria-labelledby="fav-h"><h2 id="fav-h">${STAR} Your favourites</h2><div class="fav-l2">${favRows.join("")}</div></section>` : ""}
       <div class="filters dayswitch" role="group" aria-label="Choose a day (${PHT})">${keys.map((k) => `<button class="fbtn" type="button" data-day="${esc(k)}" aria-pressed="${S.gday === k}">${esc(label(k))} <span class="cnt">${groups.get(k).length}</span></button>`).join("")}<button class="fbtn" type="button" data-day="all" aria-pressed="${S.gday === "all"}">All days <span class="cnt">${up.length}</span></button></div>
       ${shown.map((k) => { const gs = favGames(groups.get(k)); return `<h2 class="day"><span>${esc(dayLong(gs[0].date))}</span><span class="cnt">${gs.length} ${gs.length === 1 ? "game" : "games"} · ${PHT}</span></h2>${gs.map((g) => gameCard(g) + labLinks(g)).join("")}`; }).join("")}
@@ -2259,8 +2260,24 @@ const MORE_MENU = [
   ["more/sources", "Data sources", "Where every number comes from and how it is cross-checked."],
   ["more/method", "How it works", "How projections are made and how the model learns."],
 ];
+// How often our side has won, grouped by how far our number was from the bookmaker's main line. Uses our pre-tip
+// predictions (never changed by odds) and the closing line only to place each game in a group and to grade it.
+const DISC = [[0, 3, "0-3"], [3, 6, "3-6"], [6, 10, "6-10"], [10, 99, "10+"]];
+function discRecord(PT, ODD) {
+  const mk = () => DISC.map(([lo, hi, lab]) => ({ lo, hi, lab, n: 0, w: 0 }));
+  const out = { spread: mk(), total: mk() };
+  for (const x of PT?.games || []) {
+    const c = ODD?.closing?.[x.id]; if (!x.graded || !x.act || !c) continue;
+    if (Number.isFinite(c.spreadHome)) { const book = -c.spreadHome, ours = x.hs - x.as, act = x.act.hs - x.act.as, gap = Math.abs(ours - book);
+      if (gap > 0 && act !== book) { const b = out.spread.find((y) => gap >= y.lo && gap < y.hi); b.n++; if ((ours > book) === (act > book)) b.w++; } }
+    if (Number.isFinite(c.total)) { const ours = x.hs + x.as, act = x.act.hs + x.act.as, gap = Math.abs(ours - c.total);
+      if (gap > 0 && act !== c.total) { const b = out.total.find((y) => gap >= y.lo && gap < y.hi); b.n++; if ((ours > c.total) === (act > c.total)) b.w++; } }
+  }
+  return out;
+}
+const discLabel = (rec, kind, gap) => { const b = rec?.[kind]?.find((y) => gap >= y.lo && gap < y.hi); if (!b) return ""; return b.n >= 20 ? `When we disagree by ${b.lab} points, our side has won ${pct(b.w / b.n)} (${b.n} graded)` : `When we disagree by ${b.lab} points: ${b.n} graded so far (shown from 20)`; };
 async function vAccuracy() {
-  const [R, L, board, PT, ODD] = await Promise.all([load("results.json"), load("learning.json").catch(() => null), load("board.json").catch(() => null), load("pretip.json").catch(() => null), load("odds.json").catch(() => null)]);
+  const [R, L, board, PT, ODD, UP] = await Promise.all([load("results.json"), load("learning.json").catch(() => null), load("board.json").catch(() => null), load("pretip.json").catch(() => null), load("odds.json").catch(() => null), load("upcoming.json").catch(() => [])]);
   const games = R.filter((r) => r.pred && r.act && r.pk && !r.pk.endsWith("-1")); // preseason left out
   const stat = (rows) => { let b = 0, ll = 0, w = 0, m = 0, t = 0, tn = 0; for (const r of rows) { const y = r.act.hs > r.act.as ? 1 : 0, p = Math.min(0.99, Math.max(0.01, r.pred.pHome)); b += (p - y) ** 2; ll += -(y * Math.log(p) + (1 - y) * Math.log(1 - p)); w += r.correct ? 1 : 0; m += Math.abs(r.err ?? (r.act.hs - r.act.as - (r.pred.hs - r.pred.as))); if (r.totErr != null) { t += Math.abs(r.totErr); tn++; } } const n = rows.length || 1; return { n: rows.length, brier: b / n, ll: ll / n, acc: w / n, mae: m / n, tot: tn ? t / tn : null }; };
   const all = stat(games), coin = { brier: 0.25, ll: Math.log(2) };
@@ -2300,6 +2317,26 @@ async function vAccuracy() {
         <details class="more"><summary>Every graded game (${n})</summary><div class="tw"><table><thead><tr><th>Game</th><th class="n">Saved (PH)</th><th class="n">We said</th><th class="n">Final</th><th class="n"></th></tr></thead><tbody>${gr.slice().reverse().map((x) => `<tr><td>${esc(T(x.away).abbr)} @ ${esc(T(x.home).abbr)}</td><td class="n">${esc(new Date(x.frozen).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }))}</td><td class="n">${esc(T(x.pHome >= 0.5 ? x.home : x.away).abbr)} ${pct(Math.max(x.pHome, 1 - x.pHome))}</td><td class="n">${esc(x.act.as)}-${esc(x.act.hs)}</td><td class="n">${x.correct ? '<b class="up">✓</b>' : '<b class="down">✗</b>'}</td></tr>`).join("")}</tbody></table></div></details>` : `<p>Saved predictions are graded as games finish; ${pend} are waiting for their final.</p>`}
       </div>`;
     })()}
+    ${(() => {
+      const avgDiff = (pairs) => { const sp = pairs.filter((x) => x.s != null), tt = pairs.filter((x) => x.t != null); return { s: sp.length ? sp.reduce((z, x) => z + Math.abs(x.s), 0) / sp.length : null, t: tt.length ? tt.reduce((z, x) => z + Math.abs(x.t), 0) / tt.length : null, ns: sp.length, nt: tt.length }; };
+      const slate = avgDiff((UP || []).map((u) => { const o = ODD?.games?.[u.id]; if (!o) return null; return { s: Number.isFinite(o.spreadHome) ? (u.pred.hs - u.pred.as) - -o.spreadHome : null, t: Number.isFinite(o.total) ? (u.pred.hs + u.pred.as) - o.total : null }; }).filter(Boolean));
+      const hist = avgDiff((PT?.games || []).map((x) => { const c = ODD?.closing?.[x.id]; if (!c) return null; return { s: Number.isFinite(c.spreadHome) ? (x.hs - x.as) - -c.spreadHome : null, t: Number.isFinite(c.total) ? (x.hs + x.as) - c.total : null }; }).filter(Boolean));
+      return `<div class="card"><h2>How close are we to the market?</h2>
+        <p>Built without bookmaker data, and usually within a few points of the market anyway. When we disagree, we show you why.</p>
+        <div class="tiles">
+          <div class="tile"><div class="l">Spreads, upcoming games</div><div class="v">${slate.s != null ? f1(slate.s) : "-"}</div><div class="s">avg points from the main line · ${slate.ns} games</div></div>
+          <div class="tile"><div class="l">Totals, upcoming games</div><div class="v">${slate.t != null ? f1(slate.t) : "-"}</div><div class="s">avg points from the main line · ${slate.nt} games</div></div>
+          <div class="tile"><div class="l">Spreads, since tracking</div><div class="v">${hist.s != null ? f1(hist.s) : "-"}</div><div class="s">vs closing line · ${hist.ns} games</div></div>
+          <div class="tile"><div class="l">Totals, since tracking</div><div class="v">${hist.t != null ? f1(hist.t) : "-"}</div><div class="s">vs closing line · ${hist.nt} games</div></div>
+        </div>
+        <p class="small muted">Two checks we watch: if these numbers shrink toward zero over time, something in the pipeline may have started using the line by accident (an automatic check already fails the build if odds reach the model); if they grow, the model may be drifting and is due for recalibration.</p></div>`;
+    })()}
+    ${(() => { const rec = discRecord(PT, ODD), row = (b) => `<tr><td>${b.lab} points</td><td class="n">${b.n}</td><td class="n">${b.n ? `<b>${pct(b.w / b.n)}</b>` : "-"}</td></tr>`;
+      return `<div class="card"><h2>When we disagree with the market, who is right?</h2>
+        <p class="small muted">Our saved pre-tip number against the bookmaker's closing line, grouped by the size of the difference. "Won" = the final landed on our side of the line. The line is used only as the scoreboard; it never changes our projections. Under about 100 games per group, the rates are noisy.</p>
+        <div class="grid two"><div><h3>Spread / margin</h3><div class="tw"><table><thead><tr><th>Difference</th><th class="n">Graded</th><th class="n">Our side won</th></tr></thead><tbody>${rec.spread.map(row).join("")}</tbody></table></div></div>
+        <div><h3>Game total</h3><div class="tw"><table><thead><tr><th>Difference</th><th class="n">Graded</th><th class="n">Our side won</th></tr></thead><tbody>${rec.total.map(row).join("")}</tbody></table></div></div></div>
+        <p class="small muted">If our 10+ point disagreements keep winning, that is an edge the market does not have; if they hover near 50%, treat big disagreements as "check the news". Grading started with the games after November 11, 2026.</p></div>`; })()}
     ${L?.liveTrack?.phases?.length ? `<div class="card"><h2>Strict replay: without information known only at tip-off</h2>
       <p class="small muted">The main replay below uses the real starting line-ups and inactive list, which are only known shortly before tip-off. This stricter version removes both (a player counts as out only if he missed his team's previous game), so it is a lower bound for predictions made hours ahead.</p>
       <div class="tw"><table><thead><tr><th>Phase</th><th class="n">Games</th><th class="n">Winner</th><th class="n">Margin miss</th><th class="n">Player pts miss</th></tr></thead><tbody>${L.liveTrack.phases.map((x) => `<tr><td>${esc(x.label)}</td><td class="n">${num(x.games)}</td><td class="n">${pct(x.winnerAcc)}</td><td class="n">${f1(x.marginMAE)}</td><td class="n">${x.ptsMAE != null ? f1(x.ptsMAE) : "-"}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
@@ -3186,7 +3223,7 @@ const up = await load("upcoming.json").catch(() => []);
     if (pickTeam) for (const sc of gm.scenarios?.list || []) { if (!sc.fav || sc.mixed) continue; if (String(sc.fav) === pickTeam) libFor++; else libAgainst++; }
     return { hold: w ? ok / w : null, libFor, libAgainst };
   };
-  const ODDS = await load("odds.json").catch(() => null);
+  const ODDS = await load("odds.json").catch(() => null), PTREC = discRecord(await load("pretip.json").catch(() => null), ODDS);
   const priceFor = (gid, kind, pick, H) => { const o = ODDS?.games?.[gid]; if (!o) return null; if (kind === "Moneyline") return pick.startsWith(H) ? o.mlHome : o.mlAway; if (kind === "Spread") return pick.startsWith(H) ? o.spreadOddsHome : o.spreadOddsAway; if (kind === "Total") return pick.startsWith("Over") ? o.overOdds : o.underOdds; return null; };
   const gameMain = () => {
     const out = [];
@@ -3398,31 +3435,37 @@ const up = await load("upcoming.json").catch(() => []);
       <p class="lead">Every player and team prop the simulation puts at 85% or more, with alternative lines and the reasons behind each: the projection, how it holds up in each simulated scenario, his strengths and weaknesses in tonight's spots, coach habits, and hot and cold zones. Times are PH time.</p>
       <div class="note"><b>Nothing here is 100%.</b> Questionable players and near-automatic low lines are left out of the suggested parlays. In the back-test, picks the simulation called 95%+ came true ${band95 ? `${esc(band95.happened)}%` : "about 94%"} of the time${band95 ? ` (${num(band95.n)} picks), so about 1 in ${Math.max(2, Math.round(100 / Math.max(0.5, 100 - band95.happened)))} still missed` : ""}. Player props came true a little less often than stated; team picks were close to stated. Statistical analysis only, not betting advice.</div>
       <div class="filters" role="group" aria-label="Day">${days.map((d) => `<button class="fbtn" type="button" data-pk-day="${esc(d)}" aria-pressed="${d === S.pkDay}">${esc(dayName(d))}</button>`).join("")}</div>
-      <label class="small low-tog blend-tog"><input type="checkbox" data-blend-tog ${S.pkBlend ? "checked" : ""}> Show EV with the bookmaker's odds blended in (30% our chance + 70% the bookmaker's fair chance). Reference only: our chances, edges and gold picks never use it.</label>
+      <label class="small low-tog blend-tog"><input type="checkbox" data-blend-tog ${S.pkBlend ? "checked" : ""}> Show EV figures (expected value from our chance, and a market-blended version). Off by default: we compare lines and our record, not profit.</label>
       <div class="filters" role="group" aria-label="Prop type">${[["main", "Main lines"], ["top", "85%+ picks"], ["player", "Player props"], ["team", "Team props"], ["parlay", "Parlays"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-kind="${k}" aria-pressed="${S.pkKind === k}">${l}</button>`).join("")}</div>
       ${S.pkKind === "main" ? (() => {
         const ml = mainLines(), shown = ml.filter((x) => x.p >= 0.55).sort((a, b) => (b.gold - a.gold) || (b.qual - a.qual) || (b.p - a.p)).slice(0, 60);
         const gml = gameMain();
         const gcard = (x) => `<div class="card pick ml${x.gold ? " gold" : ""}">${x.gold ? `<div class="gold-tag">★ Worth a look: edge + odds ${esc(x.dec.toFixed(2))} + ${pct(x.p)} to hit</div>` : ""}<div class="pick-h">${teamLogo(x.home, { size: "sm" })}<span><b>${esc(x.kind)}</b><span class="small muted"> ${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.6 ? "lean" : x.p >= 0.53 ? "slight lean" : "coin-flip"}</span>${meter(x.p)}
-          <div class="pick-l"><b>${esc(x.pick)}</b> <span class="small muted">sportsbook main line</span></div>
-          <div class="pick-alt"><span>${esc(x.ours)}</span>${x.book != null ? `<span>book's fair chance ${pct(x.book)}</span>` : ""}<span class="${x.book != null && x.p - x.book >= 0.05 ? "up" : ""}">gap ${x.book != null ? (x.p - x.book > 0 ? "+" : "") + Math.round((x.p - x.book) * 100) : "-"}</span>${x.price != null ? `<span>odds ${esc(decOdds(x.price))}</span>` : ""}${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}${S.pkBlend && x.book != null && decOdds(x.price) !== "-" ? `<span class="blend-ev">market-blended EV ${(() => { const v = (0.3 * x.p + 0.7 * x.book) * Number(decOdds(x.price)) - 1; return (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; })()}</span>` : ""}</div>
+          <div class="pick-l"><b>${esc(x.pick)}</b> <span class="small muted">at the sportsbook main line</span></div>
+          ${(() => { const gm3 = GAME[x.gid], ob = ODDS?.games?.[x.gid]; if (!gm3) return ""; const H3 = T(gm3.home).abbr, A3 = T(gm3.away).abbr, om = gm3.pred.hs - gm3.pred.as, ot = gm3.pred.hs + gm3.pred.as;
+            const ours = x.kind === "Total" ? `total ${f1(ot)}` : `${om >= 0 ? H3 : A3} −${f1(Math.abs(om))}`;
+            const oursP = x.kind === "Moneyline" ? ` · ${esc(x.pick.replace(" to win", ""))} ${pct(x.p)} · fair odds ${(1 / x.p).toFixed(2)}` : ` · our side ${pct(x.p)} · fair odds ${(1 / x.p).toFixed(2)}`;
+            const main = !ob ? "not posted yet" : x.kind === "Total" ? `total ${ob.total} · over ${decOdds(ob.overOdds)} / under ${decOdds(ob.underOdds)}` : x.kind === "Spread" ? `${H3} ${ob.spreadHome > 0 ? "+" : ""}${ob.spreadHome} · ${decOdds(ob.spreadOddsHome)} / ${A3} ${decOdds(ob.spreadOddsAway)}` : `${H3} ${decOdds(ob.mlHome)} / ${A3} ${decOdds(ob.mlAway)} (line ${H3} ${ob.spreadHome > 0 ? "+" : ""}${ob.spreadHome})`;
+            const gap = !ob ? null : x.kind === "Total" ? Math.abs(ot - ob.total) : Math.abs(om - -ob.spreadHome);
+            return `<div class="ol-box"><div><span class="ol-k">Our line</span> <b>${esc(ours)}${oursP}</b></div><div class="ref"><span class="ol-k mkt">Main line</span> ${esc(main)}${ob?.fetched ? ` <span class="muted">(as of ${esc(new Date(ob.fetched).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }))} PH)</span>` : ""}</div>${gap != null ? `<div class="small muted">Difference: ${f1(gap)} points. ${esc(discLabel(PTREC, x.kind === "Total" ? "total" : "spread", gap))}</div>` : ""}</div>`; })()}
+          <div class="pick-alt"><span>${esc(x.ours)}</span>${x.book != null ? `<span>book's fair chance ${pct(x.book)}</span>` : ""}<span class="${x.book != null && x.p - x.book >= 0.05 ? "up" : ""}">gap ${x.book != null ? (x.p - x.book > 0 ? "+" : "") + Math.round((x.p - x.book) * 100) : "-"}</span>${x.price != null ? `<span>odds ${esc(decOdds(x.price))}</span>` : ""}${S.pkBlend && x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}${S.pkBlend && x.book != null && decOdds(x.price) !== "-" ? `<span class="blend-ev">market-blended EV ${(() => { const v = (0.3 * x.p + 0.7 * x.book) * Number(decOdds(x.price)) - 1; return (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; })()}</span>` : ""}</div>
           ${x.hold != null ? `<div class="small">Scenario check: our side is ahead in <b>${pct(x.hold)}</b> of the game scripts (likelihood-weighted; the scripts overlap, so this is a robustness check, not a probability)${x.libFor || x.libAgainst ? ` · scenario library: ${x.libFor} for, ${x.libAgainst} against` : ""}</div>` : ""}
-          <div class="small ${x.qual ? "qual" : "muted"}">${x.wrong ? "⚠ Large disagreement: we differ from the bookmaker by 10+ points. That usually means news we do not have, so this is not called an edge." : x.qual ? "✓ Edge: our chance is 3-10 points above the bookmaker's and EV is +2% or more." : "No qualifying edge at this price."}</div>
+          <div class="small ${x.qual ? "qual" : "muted"}">${x.wrong ? "⚠ Big difference (10+ points from the bookmaker): check the latest injury news first." : x.qual ? "✓ Meaningful difference: our chance is 3-10 points above the bookmaker's, at a price worth it by our numbers." : "Small difference at this price."}</div>
           ${x.mgap != null && Math.abs(x.mgap) >= 6 ? `<div class="small" style="color:var(--warn)">⚠ Our margin differs from the bookmaker's by ${f1(Math.abs(x.mgap))} points. Check the latest injury report before trusting our number.</div>` : ""}
           ${gameWhy(x)}
           <div class="pick-m small muted">${x.date ? esc(timePH(x.date)) + " · " : ""}<a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
         const card = (x) => `<div class="card pick ml${x.gold ? " gold" : ""}">${x.gold ? `<div class="gold-tag">★ Worth a look: edge + odds ${esc(x.dec.toFixed(2))} + ${pct(x.p)} to hit</div>` : ""}<div class="pick-h">${avatar(x.pl.id, x.pl.n, { size: "sm" })}<span><b>${esc(x.pl.n)}</b><span class="small muted"> ${esc(T(x.pl.side === 0 ? x.home : x.away).abbr || "")} · ${esc(x.word)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.62 ? "lean" : "slight lean"}</span>${meter(x.p)}
           <div class="pick-l"><b>${x.over ? "Over" : "Under"} ${esc(x.line)} ${esc(x.word)}</b> <span class="small ${x.src === "est" ? "est-tag" : "muted"}">${x.src === "est" ? `our pick at his season average (${f1(x.estAvg)}) · bookmaker line not posted yet` : "sportsbook main line"}</span></div>
-          ${x.bk ? `<div class="lp-bk small"><span class="lp-bkl">Bookmaker</span> ${esc(x.bk)}</div>` : ""}
-          ${x.price != null ? `<div class="pick-alt"><span>odds ${esc(decOdds(x.price))}</span><span>book's fair chance ${pct(x.book)}</span><span class="${(x.gap ?? 0) >= 0.05 ? "up" : ""}">gap ${(x.gap > 0 ? "+" : "") + Math.round(x.gap * 100)}</span>${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}${S.pkBlend && x.book != null && decOdds(x.price) !== "-" ? `<span class="blend-ev">market-blended EV ${(() => { const v = (0.3 * x.p + 0.7 * x.book) * Number(decOdds(x.price)) - 1; return (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; })()}</span>` : ""}</div>` : ""}
+          <div class="ol-box"><div><span class="ol-k">Our line</span> median ${esc(x.median ?? "-")} · ${x.over ? "over" : "under"} ${esc(x.line)} ${pct(x.p)} · fair odds ${(1 / x.p).toFixed(2)}</div>${x.bk ? `<div><span class="ol-k mkt">Main line</span> ${esc(x.bk)}</div>` : `<div><span class="ol-k mkt">Main line</span> not posted yet</div>`}</div>
+          ${x.price != null ? `<div class="pick-alt"><span>odds ${esc(decOdds(x.price))}</span><span>book's fair chance ${pct(x.book)}</span><span class="${(x.gap ?? 0) >= 0.05 ? "up" : ""}">gap ${(x.gap > 0 ? "+" : "") + Math.round(x.gap * 100)}</span>${S.pkBlend && x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}${S.pkBlend && x.book != null && decOdds(x.price) !== "-" ? `<span class="blend-ev">market-blended EV ${(() => { const v = (0.3 * x.p + 0.7 * x.book) * Number(decOdds(x.price)) - 1; return (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; })()}</span>` : ""}</div>` : ""}
           ${x.hold != null ? `<div class="small">Scenario check: his average is on our side in <b>${pct(x.hold)}</b> of the game scripts (likelihood-weighted robustness check, not a probability)</div>` : ""}
-          ${x.price != null ? `<div class="small ${x.qual ? "qual" : "muted"}">${x.wrong ? "⚠ Large disagreement (10+ points from the bookmaker): not called an edge." : x.qual ? "✓ Edge: 3-10 points above the bookmaker, EV +2%+." : "No qualifying edge at this price."}</div>` : ""}
+          ${x.price != null ? `<div class="small ${x.qual ? "qual" : "muted"}">${x.wrong ? "⚠ Big difference (10+ points): check the latest news first." : x.qual ? "✓ Meaningful difference (3-10 points above the bookmaker)." : "No qualifying edge at this price."}</div>` : ""}
           <div class="pick-alt"><span>Our median ${esc(x.median ?? "-")}${x.mean != null ? ` · average ${f1(x.mean)}` : ""}</span>${x.thr.map(([t, q]) => `<span>${esc(t)}+: ${pct(q)}</span>`).join("")}</div>
           ${propWhy(x)}
           <div class="pick-m small muted">${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}${x.date ? ` · ${esc(timePH(x.date))}` : ""} · <a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
-        return `${gml.some((x) => x.gold) || ml.some((x) => x.gold) ? `<div class="gold-strip"><b>★ Gold picks</b>${gml.filter((x) => x.gold).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(x.pick)}</span> <i>${esc(T(x.away).abbr)}@${esc(T(x.home).abbr)} · odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · robust in ${pct(x.hold)} of scripts</i></a>`).join("")}${ml.filter((x) => x.gold).slice(0, 12).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(shortName(x.pl.n))} ${x.over ? "over" : "under"} ${esc(x.line)} ${esc(x.word)}</span> <i>odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · robust in ${pct(x.hold)} of scripts</i></a>`).join("")}<span class="small muted">Gold = our chance 3-10 points above the bookmaker's with EV +2%+, decimal odds 1.60+, our chance 55%+, robust in 60%+ of the game scripts and tonight's scenario library not against it. Statistical comparison, not betting advice.</span></div>` : `<div class="note small">No gold picks on this day: nothing combines a real edge, odds of 1.60+, a 55%+ chance and support across our scenarios.</div>`}
+        return `${gml.some((x) => x.gold) || ml.some((x) => x.gold) ? `<div class="gold-strip"><b>★ Gold picks</b>${gml.filter((x) => x.gold).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(x.pick)}</span> <i>${esc(T(x.away).abbr)}@${esc(T(x.home).abbr)} · odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · robust in ${pct(x.hold)} of scripts</i></a>`).join("")}${ml.filter((x) => x.gold).slice(0, 12).map((x) => `<a href="#/game/${esc(x.gid)}"><span>${esc(shortName(x.pl.n))} ${x.over ? "over" : "under"} ${esc(x.line)} ${esc(x.word)}</span> <i>odds ${esc(x.dec.toFixed(2))} · ${pct(x.p)} · robust in ${pct(x.hold)} of scripts</i></a>`).join("")}<span class="small muted">Gold = our chance 3-10 points above the bookmaker's main line at a price that is worth it by our numbers, decimal odds 1.60+, our chance 55%+, robust in 60%+ of the game scripts and tonight's scenario library not against it. Statistical comparison, not betting advice.</span></div>` : `<div class="note small">No gold picks on this day: nothing combines a meaningful difference (3-10 points), odds of 1.60+, a 55%+ chance and support across our scenarios.</div>`}
           <h2 class="pk-sec">Game lines</h2>
           ${gml.length && !gml.some((x) => x.qual) ? `<div class="note"><b>No qualifying edge today.</b> On every game line our chance is within 5 points of the bookmaker's fair chance or the expected value is under +3%. A high chance alone is not an edge.</div>` : ""}
           ${gml.length ? gml.map(gcard).join("") : `<p class="empty">No sportsbook game lines for this day yet (they usually post a day or two before).</p>`}
@@ -3587,7 +3630,7 @@ hero?.insertAdjacentHTML("afterend", bottomLine());
     load(`sim/${g.id}.json`).then((sim) => {
       if (S.curGame !== g) return;
       sim = simAdjust(sim, g, S.curRaw);
-      load("board.json").catch(() => null).then((board) => { if (S.curGame !== g || app.querySelector(".preds")) return; const bl = app.querySelector(".bottom-line"); if (!bl) return; bl.insertAdjacentHTML("beforebegin", predictionsCard(g, sim, board)); const pc = bl.previousElementSibling; if (pc) pc.hidden = (S.gTab || "ov") !== "ov"; });
+      Promise.all([load("board.json").catch(() => null), load("odds.json").catch(() => null), load("pretip.json").catch(() => null)]).then(([board, oddsAll, ptAll]) => { S.oddsAll = oddsAll; S.ptRec = discRecord(ptAll, oddsAll); if (S.curGame !== g || app.querySelector(".preds")) return; const bl = app.querySelector(".bottom-line"); if (!bl) return; bl.insertAdjacentHTML("beforebegin", predictionsCard(g, sim, board)); const pc = bl.previousElementSibling; if (pc) pc.hidden = (S.gTab || "ov") !== "ov"; });
 const slot = app.querySelector(".bottom-line .viz-slot"); if (slot) slot.innerHTML = marginChart(g, sim);
       flipCard(g, sim, S.curRaw).then((html) => { if (!html || S.curGame !== g || app.querySelector(".flip")) return; const bl = app.querySelector(".bottom-line"); if (!bl) return; bl.insertAdjacentHTML("afterend", html); const fc = bl.nextElementSibling; if (fc) fc.hidden = (S.gTab || "ov") !== "ov"; });
       const glance = [...app.children].find((el) => el.dataset?.tabOf === "pl");
@@ -3991,6 +4034,28 @@ function preQuarters(g) {
     ${row("1st half", qh[0] + qh[1], qa[0] + qa[1], 9.5).replace("<tr>", '<tr class="half">')}${row("2nd half", qh[2] + qh[3], qa[2] + qa[3], 9.5).replace("<tr>", '<tr class="half">')}
   </tbody></table></div><p class="small muted">From each team's quarter-by-quarter scoring pattern in our replay (fast starters, strong closers, bench-heavy quarters). Lines sit at our projection.</p>`;
 }
+// Our line first (bold), the bookmaker's main line beside it as a reference only, the difference in plain points and our
+// record at that size of difference. Nothing here changes a projection.
+function lineTable(g) {
+  const o = S.oddsAll?.games?.[g.id], H = T(g.home).abbr, A = T(g.away).abbr, ph = g.pred.pHome, om = g.pred.hs - g.pred.as, ot = g.pred.hs + g.pred.as;
+  const favH = ph >= 0.5, fp = Math.max(ph, 1 - ph), fav = favH ? H : A;
+  const sp = (m) => `${m >= 0 ? H : A} −${f1(Math.abs(m))}`;
+  const bm = o && Number.isFinite(o.spreadHome) ? -o.spreadHome : null;
+  const rows = [
+    ["Winner", `${esc(fav)} ${Math.round(fp * 100)}% · fair ${(1 / fp).toFixed(2)}`, o ? `${esc(H)} ${decOdds(o.mlHome)} / ${esc(A)} ${decOdds(o.mlAway)}` : "-"],
+    ["Spread", esc(sp(om)), bm != null ? esc(bm === 0 ? "pick'em" : sp(bm)) : "-"],
+    ["Total", f1(ot), o && Number.isFinite(o.total) ? esc(o.total) : "-"],
+  ];
+  const dS = bm != null ? om - bm : null, dT = o && Number.isFinite(o.total) ? ot - o.total : null;
+  const diff = [dS != null && Math.abs(dS) >= 0.1 ? `we're ${f1(Math.abs(dS))} pts higher on ${esc(dS > 0 ? H : A)}` : dS != null ? "same margin as the market" : "", dT != null && Math.abs(dT) >= 0.1 ? `${f1(Math.abs(dT))} pts ${dT > 0 ? "higher" : "lower"} on the total` : ""].filter(Boolean).join(", ");
+  const rec = [dS != null ? discLabel(S.ptRec, "spread", Math.abs(dS)) : "", dT != null ? discLabel(S.ptRec, "total", Math.abs(dT)).replace("When we disagree", "On totals, when we disagree") : ""].filter(Boolean);
+  const asOf = o?.fetched ? new Date(o.fetched).toLocaleString("en-US", { timeZone: TZ, month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }) : null;
+  return `<div class="lt"><table class="lt-t"><thead><tr><th></th><th>Our line</th><th class="ref">Main line (reference)</th></tr></thead><tbody>
+      ${rows.map(([k, a, b]) => `<tr><td>${k}</td><td><b>${a}</b></td><td class="ref">${b}</td></tr>`).join("")}</tbody></table>
+    ${o ? `${diff ? `<p class="small"><b>Difference:</b> ${diff}.</p>` : ""}${rec.length ? `<p class="small muted"><i>${rec.map(esc).join(" · ")}</i></p>` : ""}
+      ${(dS != null && Math.abs(dS) >= 10) || (dT != null && Math.abs(dT) >= 10) ? `<p class="small" style="color:var(--warn)">⚠ When we differ by 10+ points, check the latest injury news first.</p>` : ""}
+      <p class="small muted">Main line as of ${esc(asOf || "-")} PH (${esc(o.provider || "sportsbook")}). Reference only: it never changes our projections.</p>` : `<p class="small muted">The sportsbook has not posted a line for this game yet.</p>`}</div>`;
+}
 function predictionsCard(g, sim, board) {
   const L = gameLines(g), home = g.home, away = g.away;
   const pFav = L.pFav, favT = T(L.fav).abbr, dog = L.fav === home ? away : home;
@@ -4018,6 +4083,7 @@ function predictionsCard(g, sim, board) {
   }
   const row = (k, main, sub, p) => `<div class="pr-row"><span class="pr-k">${k}</span><span class="pr-v"><b>${main}</b>${sub ? `<i>${sub}</i>` : ""}</span>${p != null ? `<span class="pr-p">${pct(p)}</span>` : ""}</div>`;
   return `<div class="card preds" data-tab-of="ov"><div class="card-h"><h2>Our predictions</h2><button class="btn sm" type="button" data-gt-go="si">Build your own ›</button></div>
+    ${lineTable(g)}
     ${row("Moneyline", `${esc(favT)} to win`, `fair odds ${esc(T(L.fav).abbr)} ${mlTxt(pFav)} · ${esc(T(dog).abbr)} ${mlTxt(1 - pFav)} · ${strength(pFav)}`, pFav)}
     ${(() => { const c = sim?.comparison; if (c?.spread?.ourProb == null) return ""; const q = c.spread.ourProb, l = c.spread.bookLine, tm = c.spread.team, oth = tm === T(home).abbr ? T(away).abbr : T(home).abbr, take = q >= 0.5;
       return row("Spread", `${esc(take ? tm : oth)} ${(take ? l : -l) > 0 ? "+" : ""}${take ? l : -l}`, `sportsbook main line · our margin ${esc(T(L.fav).abbr)} by ${f1(Math.abs(g.pred.hs - g.pred.as))} · ${strength(Math.max(q, 1 - q))}`, Math.max(q, 1 - q)); })() || `${coverFav != null && coverFav < 0.5 ? row("Spread", `${esc(T(dog).abbr)} +${L.spread.toFixed(1)}`, `covers in ${pct(1 - coverFav)} of simulations · our line, so close to even`, 1 - coverFav) : row("Spread", `${esc(favT)} ${spreadTxt(L.spread)}`, coverFav != null ? `covers in ${pct(coverFav)} of simulations · our line, so close to even` : "set at our projected margin", coverFav)}`}
@@ -4442,7 +4508,7 @@ function livePicksCard(g, L, M, m) {
       <div class="lp-top"><span class="lp-tag">${esc(x.tag)}</span><span class="lp-k">${esc(x.kind)}</span>${x.qual ? '<span class="lp-star" title="Qualifying edge">★ edge</span>' : ""}</div>
       <div class="lp-mid"><span class="lp-pick">${esc(x.pick)}</span><span class="lp-price">${esc(amT(x.price))}</span></div>
       ${x.bk ? `<div class="lp-bk small"><span class="lp-bkl">Bookmaker</span> ${esc(x.bk)}</div>` : ""}
-      <div class="lp-num small"><span>Ours <b>${pct(x.ours)}</b></span><span>Book fair ${x.book != null ? pct(x.book) : "-"}</span><span class="${(x.gap ?? 0) > 0 ? "up" : "down"}">gap ${x.gap != null ? (x.gap > 0 ? "+" : "") + Math.round(x.gap * 100) : "-"}</span>${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}${S.pkBlend && x.book != null && decOdds(x.price) !== "-" ? `<span class="blend-ev">market-blended EV ${(() => { const v = (0.3 * x.ours + 0.7 * x.book) * Number(decOdds(x.price)) - 1; return (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; })()}</span>` : ""}${x.note ? `<span class="muted">${esc(x.note)}</span>` : ""}</div></div>`;
+      <div class="lp-num small"><span>Ours <b>${pct(x.ours)}</b></span><span>Book fair ${x.book != null ? pct(x.book) : "-"}</span><span class="${(x.gap ?? 0) > 0 ? "up" : "down"}">gap ${x.gap != null ? (x.gap > 0 ? "+" : "") + Math.round(x.gap * 100) : "-"}</span>${S.pkBlend && x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}${S.pkBlend && x.book != null && decOdds(x.price) !== "-" ? `<span class="blend-ev">market-blended EV ${(() => { const v = (0.3 * x.ours + 0.7 * x.book) * Number(decOdds(x.price)) - 1; return (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; })()}</span>` : ""}${x.note ? `<span class="muted">${esc(x.note)}</span>` : ""}</div></div>`;
   const order = (a, b) => (b.qual - a.qual) || ((b.gap ?? -1) - (a.gap ?? -1));
   return `<div class="lp-card"><h3>Our live picks <span class="mk-badge">live odds · ${esc(m.book)}</span></h3>
     <label class="small blend-tog"><input type="checkbox" data-blend-live ${S.pkBlend ? "checked" : ""}> Show market-blended EV (reference only)</label>
