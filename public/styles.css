@@ -942,3 +942,29 @@ a.gtab { color: var(--ink-2); }
 .lv-score strong { font-size: 30px; font-weight: 800; font-variant-numeric: tabular-nums; }
 .lv-score .r { text-align: right; }
 .lv-mid { font-size: 12px; color: var(--muted); padding-bottom: 8px; }
+
+/* ---------- live markets (quarters, totals, spread, scenarios, props) ---------- */
+.lvq td, .lvq th { padding: 6px 6px; }
+.lvq tr.final td { opacity: .78; }
+.lvq tr.live td { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.lvq tr.half td { border-top: 1px solid var(--line-2); font-weight: 600; }
+.lvq-tag { display: inline-block; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 1px 6px; border-radius: 999px; margin-left: 4px; border: 1px solid var(--line-2); color: var(--muted, #8a97b0); vertical-align: 1px; }
+.lvq-tag.live { color: #fff; background: #e5484d; border-color: #e5484d; }
+.lvq-tag.final { opacity: .8; }
+.lvchips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 8px; }
+.lvc { font-size: 12px; padding: 4px 9px; border-radius: 999px; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--ink) 4%, transparent); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lvc b { font-weight: 700; margin-right: 2px; }
+.lvc i { font-style: normal; opacity: .7; }
+.lvc.hi { border-color: color-mix(in srgb, var(--good) 70%, transparent); background: color-mix(in srgb, var(--good) 14%, transparent); }
+.lvc.lo { opacity: .7; }
+.lvbands { display: grid; gap: 4px; margin: 8px 0; }
+.lvbands > div { display: grid; grid-template-columns: 7.5em 1fr 3.2em; align-items: center; gap: 8px; font-size: 12px; }
+.lvbands i { display: block; height: 8px; border-radius: 4px; min-width: 2px; }
+.lvbands .a i { background: var(--s1); }
+.lvbands .h i { background: var(--s2, #d95926); }
+.lvbands b { text-align: right; font-variant-numeric: tabular-nums; }
+.lvreads { list-style: none; padding: 0; margin: 6px 0 10px; display: grid; gap: 8px; }
+.lvreads li { display: grid; grid-template-columns: 1.6em 1fr; gap: 6px; font-size: 13px; line-height: 1.45; padding: 8px 10px; border-radius: 10px; background: color-mix(in srgb, var(--accent) 7%, transparent); border: 1px solid var(--line); }
+.lvp { display: grid; gap: 8px; }
+.lvp-r { padding: 8px 10px; border: 1px solid var(--line); border-radius: 10px; }
+.lvp-r .lvchips { margin: 6px 0 2px; }

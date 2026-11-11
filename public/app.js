@@ -3263,6 +3263,17 @@ function simPlayersCard(sim, g) {
 
 
 // ================================================================ "Our predictions" card at the top of a game page
+function preQuarters(g) {
+  const h = g.teams.find((t) => t.isHome), a = g.teams.find((t) => !t.isHome);
+  const qh = h?.quarters?.proj, qa = a?.quarters?.proj; if (!qh || !qa) return "";
+  const H = T(g.home).abbr, A = T(g.away).abbr;
+  const win = (m, sd) => { const p = 1 - pNorm(-m / sd); return Math.abs(p - 0.5) < 0.02 ? "even" : `${esc(p >= 0.5 ? H : A)} ${pct(Math.max(p, 1 - p))}`; };
+  const row = (lab, x, y, sd) => `<tr><td>${lab}</td><td class="n">${f1(y)}</td><td class="n">${f1(x)}</td><td class="n">${f1(x + y)}<br><span class="muted small">line ${Math.round(x + y - 0.5) + 0.5}</span></td><td class="n">${win(x - y, sd)}</td></tr>`;
+  return `<h3>Quarters and halves</h3><div class="tw"><table class="lvq"><thead><tr><th></th><th class="n">${esc(A)}</th><th class="n">${esc(H)}</th><th class="n">Total</th><th class="n">Wins it</th></tr></thead><tbody>
+    ${[0, 1, 2, 3].map((q) => row(`Q${q + 1}`, qh[q], qa[q], 7)).join("")}
+    ${row("1st half", qh[0] + qh[1], qa[0] + qa[1], 9.5).replace("<tr>", '<tr class="half">')}${row("2nd half", qh[2] + qh[3], qa[2] + qa[3], 9.5).replace("<tr>", '<tr class="half">')}
+  </tbody></table></div><p class="small muted">From each team's quarter-by-quarter scoring pattern in our replay (fast starters, strong closers, bench-heavy quarters). Lines sit at our projection.</p>`;
+}
 function predictionsCard(g, sim, board) {
   const L = gameLines(g), home = g.home, away = g.away;
   const pFav = L.pFav, favT = T(L.fav).abbr, dog = L.fav === home ? away : home;
@@ -3286,6 +3297,7 @@ function predictionsCard(g, sim, board) {
     ${coverFav != null && coverFav < 0.5 ? row("Spread", `${esc(T(dog).abbr)} +${L.spread.toFixed(1)}`, `covers in ${pct(1 - coverFav)} of simulations · our line, so close to even`, 1 - coverFav) : row("Spread", `${esc(favT)} ${spreadTxt(L.spread)}`, coverFav != null ? `covers in ${pct(coverFav)} of simulations · our line, so close to even` : "set at our projected margin", coverFav)}
     ${row("Game total", `${L.total.toFixed(1)} · ${tot?.pOver != null ? esc(lean(tot.pOver)) : "even"}`, `projected ${f1(g.pred.hs + g.pred.as)} points`, tot?.pOver != null ? Math.max(tot.pOver, 1 - tot.pOver) : null)}
     ${row("Team totals", `${esc(T(away).abbr)} ${tt.away?.line ?? f1(g.pred.as)} · ${esc(T(home).abbr)} ${tt.home?.line ?? f1(g.pred.hs)}`, `${esc(T(away).abbr)} ${esc(lean(tt.away?.pOver))} · ${esc(T(home).abbr)} ${esc(lean(tt.home?.pOver))}`, null)}
+    ${preQuarters(g)}
     <h3>Best player props</h3>
     ${best.length ? best.map((p) => `<div class="pr-prop">${p.player ? avatar(p.player.id, p.player.n, { size: "sm" }) : ""}<span><b>${esc(p.label)}</b><i>${p.lean ? "main line, simulation lean" : `adjusted for past accuracy · picks like this came true ${p.hit?.rate != null ? esc(p.hit.rate) + "%" : "-"}`}</i></span><span class="pr-p">${pct(p.p)}</span></div>`).join("") : `<p class="small muted">No strong player prop for this game.</p>`}
     <p class="small muted" style="margin-top:8px">All from our model and 10,000 simulations; no sportsbook numbers are used. Main lines are set at our projection, so they sit near 50%; the Picks tab has every 85%+ prop and alternative line. Not betting advice.</p>
@@ -3354,7 +3366,10 @@ async function liveFetch(id) {
         box.set(String(a.athlete.id), { t: side.team.id, min: n0(g("minutes")), pts: n0(g("points")), reb: n0(g("rebounds")), ast: n0(g("assists")), tpm: n0(String(g("threePointFieldGoalsMade-threePointFieldGoalsAttempted") || "0-0").split("-")[0]), pf: n0(g("fouls")), dnp: a.didNotPlay ? 1 : 0, ej: a.ejected ? 1 : 0 });
       }
     }
-    return { src: "live", fetched: new Date().toISOString(), state: st?.state, detail: st?.shortDetail || "", period: hdr?.status?.period || 0, clock: hdr?.status?.displayClock || "0:00", hs: n0(comp("home")?.score), as: n0(comp("away")?.score), box };
+    const lsOf = (side) => (comp(side)?.linescores || []).map((x) => n0(x.displayValue ?? x.value));
+    const tb = {};
+    for (const t of s.boxscore?.teams || []) { const m = {}; for (const x of t.statistics || []) m[x.name] = x.displayValue; tb[t.homeAway === "home" ? "h" : "a"] = m; }
+    return { src: "live", fetched: new Date().toISOString(), state: st?.state, detail: st?.shortDetail || "", period: hdr?.status?.period || 0, clock: hdr?.status?.displayClock || "0:00", hs: n0(comp("home")?.score), as: n0(comp("away")?.score), box, ls: { h: lsOf("home"), a: lsOf("away") }, tb };
   } catch {
     const lv = await liveOf(id);
     if (!lv) return null;
@@ -3408,7 +3423,108 @@ function liveModel(g, L) {
       players.push({ id: p.id, n: p.n, t: t.tid, cur: c, restMin, pre: p, live: { pts: proj("pts"), reb: proj("reb"), ast: proj("ast"), tpm: proj("tpm") }, line, pOver, why });
     }
   }
-  return { rem, lead, projH, projA, projTot: projH + projA, margin, pHome, whyTeam, players, blowout, closeLate };
+  const ex = liveExtras(g, L, { home, away, rem, elapsed, lead, preM, preTot, restH, restA, projH, projA, margin, sd, pHome, live48, blowout, closeLate, ot });
+  for (const p of players) p.props = livePlayerProps(p);
+  return { rem, lead, projH, projA, projTot: projH + projA, margin, sd, pHome, whyTeam, players, blowout, closeLate, ...ex };
+}
+const half = (v) => Math.round(v - 0.5) + 0.5;
+function livePlayerProps(p) {
+  const frac = Math.sqrt(Math.max(0.01, p.restMin / Math.max(1, p.pre.min)));
+  const out = {};
+  for (const [k, base] of [["pts", null], ["reb", 1.15], ["ast", 1.2], ["tpm", 1.1]]) {
+    const pre = p.pre[k] || 0; if (k !== "pts" && pre < 1) continue;
+    const line = half(pre), proj = p.live[k], cur = p.cur[k] || 0;
+    const sdK = k === "pts" ? Math.max(0.6, (((p.pre.hi ?? pre + 7) - (p.pre.lo ?? pre - 7)) / 2.56) * frac) : Math.max(0.35, base * Math.sqrt(Math.max(0.5, pre)) * frac);
+    const pOver = cur > line ? 1 : p.restMin === 0 ? 0 : 1 - pNorm((line - proj) / sdK);
+    out[k] = { line, proj, cur, pOver };
+  }
+  const pra = (p.live.pts || 0) + (p.live.reb || 0) + (p.live.ast || 0), praPre = (p.pre.pts || 0) + (p.pre.reb || 0) + (p.pre.ast || 0), praCur = (p.cur.pts || 0) + (p.cur.reb || 0) + (p.cur.ast || 0);
+  const praLine = half(praPre), praSd = Math.max(0.8, 1.25 * Math.sqrt(Math.max(1, praPre)) * frac * 1.1);
+  out.pra = { line: praLine, proj: pra, cur: praCur, pOver: praCur > praLine ? 1 : p.restMin === 0 ? 0 : 1 - pNorm((praLine - pra) / praSd) };
+  return out;
+}
+// Quarter, half, total, team total, spread and situation reads for a game in progress.
+function liveExtras(g, L, c) {
+  const { home, away, rem, elapsed, lead, preM, preTot, restH, restA, projH, projA, margin, sd, pHome, live48 } = c;
+  const clk = String(L.clock || "0:00").split(":"), qSec = clk.length === 2 ? n0(clk[0]) * 60 + n0(clk[1]) : n0(clk[0]);
+  const per = L.period || 0, done = L.state === "post";
+  const qRem = per >= 1 && per <= 4 && !done ? qSec / 720 : 0;
+  const qH = home.quarters?.proj || Array(4).fill(g.pred.hs / 4), qA = away.quarters?.proj || Array(4).fill(g.pred.as / 4);
+  const lsH = L.ls?.h || [], lsA = L.ls?.a || [];
+  const share = (q) => (per > 4 || done ? 0 : q < per - 1 ? 0 : q === per - 1 ? qRem : 1);
+  const rawH = qH.reduce((t, v, q) => t + v * share(q), 0), rawA = qA.reduce((t, v, q) => t + v * share(q), 0);
+  const quarters = [0, 1, 2, 3].map((q) => {
+    const sh = share(q), status = sh === 0 ? "final" : q === per - 1 ? "live" : "next";
+    const aH = lsH[q] ?? 0, aA = lsA[q] ?? 0;
+    const pH = status === "final" ? aH : aH + (rawH ? (qH[q] * sh / rawH) * restH : 0);
+    const pA = status === "final" ? aA : aA + (rawA ? (qA[q] * sh / rawA) * restA : 0);
+    const m = pH - pA, qsd = status === "live" ? 0.8 + 6.5 * Math.sqrt(sh) : 7, tsd = status === "live" ? 0.8 + 7.5 * Math.sqrt(sh) : 8;
+    const pH_ = status === "final" ? (aH > aA ? 1 : aH < aA ? 0 : 0.5) : 1 - pNorm(-m / qsd);
+    const tLine = half(qH[q] + qA[q]);
+    const pOver = status === "final" ? (aH + aA > tLine ? 1 : 0) : 1 - pNorm((tLine - (pH + pA)) / tsd);
+    return { q: q + 1, status, aH, aA, pH, pA, pHome: pH_, tLine, pOver };
+  });
+  const halfRow = (a, b) => {
+    const st = a.status === "final" && b.status === "final" ? "final" : a.status === "next" && b.status === "next" ? "next" : "live";
+    const pH = a.pH + b.pH, pA = a.pA + b.pA, sh = share(a.q - 1) + share(b.q - 1);
+    const hsd = st === "final" ? 0 : 0.8 + 9.5 * Math.sqrt(sh / 2) * 1.414 / 1.414;
+    return { st, pH, pA, pHome: st === "final" ? (pH > pA ? 1 : pH < pA ? 0 : 0.5) : 1 - pNorm(-(pH - pA) / Math.max(1, hsd)) };
+  };
+  const halves = per <= 4 ? [halfRow(quarters[0], quarters[1]), halfRow(quarters[2], quarters[3])] : null;
+  // Game total
+  const projTot = projH + projA, sdTot = 2 + 15 * Math.sqrt(rem), preLine = half(preTot);
+  const overAt = (line) => (L.hs + L.as > line ? 1 : 1 - pNorm((line - projTot) / sdTot));
+  const liveLine = half(projTot);
+  const totAlts = [-10, -5, 0, 5, 10].map((d) => ({ line: liveLine + d, pOver: overAt(liveLine + d) }));
+  // Team totals
+  const sdT = 1.5 + 10.5 * Math.sqrt(rem);
+  const team = (proj, cur, pre) => {
+    const line = half(pre), at = (x) => (cur > x ? 1 : 1 - pNorm((x - proj) / sdT));
+    const m0 = Math.floor(proj / 10) * 10;
+    return { proj, line, pOver: at(line), miles: [m0 - 10, m0, m0 + 10].filter((x) => x > cur).map((x) => ({ x, p: at(x - 0.5) })) };
+  };
+  const tH = team(projH, L.hs, g.pred.hs), tA = team(projA, L.as, g.pred.as);
+  // Spread: our pre-game line and live alternatives
+  const preFav = preM >= 0 ? "h" : "a", preLineS = half(Math.abs(preM));
+  const favMargin = preFav === "h" ? margin : -margin;
+  const coverPre = 1 - pNorm((preLineS - favMargin) / sd);
+  const liveFav = margin >= 0 ? "h" : "a", liveS = half(Math.abs(margin));
+  const spreadAlts = [-6, -3, 0, 3, 6].map((d) => liveS + d).filter((x) => x > 0).map((x) => ({ line: x, p: 1 - pNorm((x - Math.abs(margin)) / sd) }));
+  // Overtime and winning-margin bands
+  const pOT = done ? 0 : pNorm((0.5 - margin) / sd) - pNorm((-0.5 - margin) / sd);
+  const band = (lo, hi) => (pNorm((hi + 0.5 - margin) / sd) - pNorm((lo - 0.5 - margin) / sd));
+  const bands = [
+    { k: "h", lab: "by 11+", p: 1 - pNorm((10.5 - margin) / sd) }, { k: "h", lab: "by 6-10", p: band(6, 10) }, { k: "h", lab: "by 1-5", p: band(1, 5) },
+    { k: "a", lab: "by 1-5", p: band(-5, -1) }, { k: "a", lab: "by 6-10", p: band(-10, -6) }, { k: "a", lab: "by 11+", p: pNorm((-10.5 - margin) / sd) },
+  ];
+  // Situation reads from the live box score, compared with our pre-game view.
+  const reads = [];
+  const ab = (x) => T(x === "h" ? g.home : g.away).abbr;
+  const expLead = preM * elapsed;
+  if (elapsed > 0.1 && Math.abs(lead - expLead) >= 6) reads.push({ ic: "📈", t: `${ab(lead - expLead > 0 ? "h" : "a")} is ${f0(Math.abs(lead - expLead))} points better than our projection for this stage. The rest of the game still uses the pre-game strength, so part of the gap is expected to close.` });
+  const preDog = preM >= 0 ? "a" : "h", pDog = preDog === "h" ? pHome : 1 - pHome;
+  if (pDog >= 0.5) reads.push({ ic: "🚨", t: `Upset watch: our pre-game underdog ${ab(preDog)} now wins ${pct(pDog)} of the time from here.` });
+  if (per >= 1 && per <= 4 && quarters[per - 1]) { const cq = quarters[per - 1], d = cq.aH - cq.aA; if (Math.abs(d) >= 8) reads.push({ ic: "🔥", t: `${ab(d > 0 ? "h" : "a")} has won this quarter by ${Math.abs(d)} so far. The model does not chase runs: teams usually drift back toward their normal level.` }); }
+  const tb = L.tb || {};
+  const st3 = (m) => { const p = String(m?.["threePointFieldGoalsMade-threePointFieldGoalsAttempted"] || "0-0").split("-").map(n0); return { m: p[0], a: p[1], pct: p[1] ? p[0] / p[1] : 0 }; };
+  for (const k of ["h", "a"]) {
+    const x = st3(tb[k]);
+    if (x.a >= 12 && Math.abs(x.pct - 0.36) >= 0.11) reads.push({ ic: x.pct > 0.36 ? "🎯" : "🧊", t: `${ab(k)} is ${x.pct > 0.36 ? "hot" : "cold"} from three: ${x.m} of ${x.a} (${pct(x.pct)}). Shooting streaks rarely last, so the rest of the game assumes normal shooting${x.pct > 0.36 ? ", which is a risk to their lead or total" : ", which favours a comeback in their scoring"}.` });
+  }
+  if (tb.h && tb.a) {
+    const to = n0(tb.h.totalTurnovers ?? tb.h.turnovers) - n0(tb.a.totalTurnovers ?? tb.a.turnovers);
+    if (Math.abs(to) >= 5) reads.push({ ic: "🔄", t: `Turnovers: ${ab(to > 0 ? "a" : "h")} has ${Math.abs(to)} fewer, which means extra shots. Turnover gaps tend to shrink as the game goes on.` });
+    const orb = n0(tb.h.offensiveRebounds) - n0(tb.a.offensiveRebounds);
+    if (Math.abs(orb) >= 6) reads.push({ ic: "🧱", t: `${ab(orb > 0 ? "h" : "a")} leads offensive rebounds by ${Math.abs(orb)}: second chances are driving the score. Size and effort edges like this tend to hold more than shooting does.` });
+    const fta = (m) => n0(String(m?.["freeThrowsMade-freeThrowsAttempted"] || "0-0").split("-")[1]);
+    const fd = fta(tb.h) - fta(tb.a);
+    if (Math.abs(fd) >= 10) reads.push({ ic: "🎟️", t: `${ab(fd > 0 ? "h" : "a")} has ${Math.abs(fd)} more free-throw attempts: they are getting to the line and putting the other side in foul trouble.` });
+    const lc = n0(tb.h.leadChanges);
+    if (lc >= 10 && Math.abs(lead) <= 6) reads.push({ ic: "⚖️", t: `${lc} lead changes and a ${Math.abs(lead)}-point game: a true toss-up, so late possessions and free throws decide it.` });
+  }
+  if (false && elapsed > 0.15 && Math.abs(live48 - preTot) >= 12) reads.push({ ic: "⏱️", t: `Pace: scoring is running at ${f0(live48)} points per 48 minutes against our ${f0(preTot)}. The live total leans partly on the pace seen so far.` });
+  if (pOT >= 0.06) reads.push({ ic: "➕", t: `Overtime chance ${pct(pOT)}: close enough that a tie at the end of regulation is a real outcome.` });
+  return { quarters, halves, totals: { projTot, preLine, pOverPre: overAt(preLine), liveLine, alts: totAlts, sdTot }, teamTot: { h: tH, a: tA }, spread: { preFav, preLineS, coverPre, liveFav, liveS, alts: spreadAlts }, pOT, bands, reads };
 }
 function liveEngineCard(g, L, M) {
   const home = g.home, away = g.away, ph = M.pHome;
@@ -3423,11 +3539,45 @@ function liveEngineCard(g, L, M) {
     <div class="pr-row"><span class="pr-k">Live spread</span><span class="pr-v"><b>${esc(T(favLive).abbr)} ${spreadTxt(spread)}</b><i>projected final margin ${esc(T(favLive).abbr)} by ${f1(Math.abs(M.margin))}</i></span></div>
     <div class="pr-row"><span class="pr-k">Live total</span><span class="pr-v"><b>${f1(M.projTot)}</b><i>pre-game ${f1(g.pred.hs + g.pred.as)} · now ${esc(L.hs + L.as)}</i></span></div>
     <div class="pr-row"><span class="pr-k">Team totals</span><span class="pr-v"><b>${esc(T(away).abbr)} ${f1(M.projA)} · ${esc(T(home).abbr)} ${f1(M.projH)}</b><i>projected finals</i></span></div>
-    ${M.whyTeam.length ? `<div class="takeaway"><span class="ic" aria-hidden="true">⚡</span><div><b>Live situation</b>${M.whyTeam.map(esc).join(" ")}</div></div>` : ""}
-    ${rows.length ? `<h3>Live player props</h3><div class="tw"><table><thead><tr><th>Player</th><th class="n">Now</th><th class="n">Proj</th><th class="n">Line</th><th class="n">Over</th></tr></thead><tbody>
-      ${rows.map((p) => `<tr><td>${esc(shortName(p.n))} <span class="muted">${esc(T(p.t).abbr)}</span>${p.why.length ? `<br><span class="small" style="color:var(--warn)">${esc(p.why.join("; "))}</span>` : ""}</td><td class="n">${esc(p.cur.pts)}<span class="muted"> · ${esc(p.cur.min)}m${p.cur.pf ? ` · ${esc(p.cur.pf)}f` : ""}</span></td><td class="n"><b>${f1(p.live.pts)}</b><br><span class="muted small">${f1(p.live.reb)}r ${f1(p.live.ast)}a</span></td><td class="n">${esc(p.line)}</td><td class="n ${p.pOver >= 0.5 ? "up" : "down"}">${pct(p.pOver)}</td></tr>`).join("")}
-    </tbody></table></div>` : ""}
+    ${liveMarkets(g, L, M)}
     <p class="small muted" style="margin-top:8px">Starts from our pre-game projection and scenario library, then uses the live score, time left, pace and each player's line so far. Remaining minutes use his normal scoring rate, so a hot or cold start is expected to even out. Lines are the pre-game prop lines; no betting odds are used.</p></div>`;
+}
+function liveMarkets(g, L, M) {
+  const A = T(g.away).abbr, H = T(g.home).abbr, ab = (k) => (k === "h" ? H : A);
+  const tag = (st) => `<span class="lvq-tag ${st}">${st === "final" ? "Final" : st === "live" ? "Live" : "Proj"}</span>`;
+  const winQ = (p) => (Math.abs(p - 0.5) < 0.02 ? "even" : `${esc(p >= 0.5 ? H : A)} ${pct(Math.max(p, 1 - p))}`);
+  const ou = (p) => (p >= 0.5 ? `O ${pct(p)}` : `U ${pct(1 - p)}`);
+  const qRows = (M.quarters || []).map((q) => `<tr class="${q.status}"><td>Q${q.q} ${tag(q.status)}</td><td class="n">${q.status === "final" ? esc(q.aA) : f1(q.pA)}</td><td class="n">${q.status === "final" ? esc(q.aH) : f1(q.pH)}</td><td class="n">${q.status === "final" ? esc(q.aA + q.aH) : f1(q.pA + q.pH)}<br><span class="muted small">${esc(q.tLine)} · ${q.status === "final" ? (q.aA + q.aH > q.tLine ? "over" : "under") : ou(q.pOver)}</span></td><td class="n">${q.status === "final" ? esc(q.aH > q.aA ? H : q.aH < q.aA ? A : "tie") : winQ(q.pHome)}</td></tr>`).join("");
+  const hRows = M.halves ? M.halves.map((h, i) => `<tr class="half"><td>${i ? "2nd half" : "1st half"} ${tag(h.st)}</td><td class="n">${h.st === "final" ? f0(h.pA) : f1(h.pA)}</td><td class="n">${h.st === "final" ? f0(h.pH) : f1(h.pH)}</td><td class="n">${h.st === "final" ? f0(h.pA + h.pH) : f1(h.pA + h.pH)}</td><td class="n">${h.st === "final" ? esc(h.pH > h.pA ? H : h.pH < h.pA ? A : "tie") : winQ(h.pHome)}</td></tr>`).join("") : "";
+  const T_ = M.totals, S_ = M.spread, tt = M.teamTot;
+  const chip = (lab, p, good) => `<span class="lvc ${p >= 0.7 ? "hi" : p <= 0.3 ? "lo" : ""}"><b>${lab}</b> ${pct(p)}</span>`;
+  const propChip = (k, lab, x) => (x ? `<span class="lvc ${x.pOver >= 0.7 ? "hi" : x.pOver <= 0.3 ? "lo" : ""}" title="${esc(lab)}"><b>${lab}</b> ${f1(x.proj)} <i>o${esc(x.line)}</i> ${pct(x.pOver)}</span>` : "");
+  const rows = M.players.filter((p) => p.restMin > 0 || p.cur.min > 0).sort((a, b) => b.live.pts - a.live.pts).slice(0, 12);
+  return `
+    <h3>Quarter by quarter</h3>
+    <div class="tw"><table class="lvq"><thead><tr><th></th><th class="n">${esc(A)}</th><th class="n">${esc(H)}</th><th class="n">Total · line</th><th class="n">Wins it</th></tr></thead><tbody>${qRows}${hRows}</tbody></table></div>
+    <p class="small muted">Finished quarters are real scores. The live quarter adds what is left of it; later quarters use our pre-game quarter pattern for each team, scaled to the live pace. Quarter lines are our pre-game quarter projections.</p>
+
+    <h3>Game total</h3>
+    <div class="pr-row"><span class="pr-k">Projected</span><span class="pr-v"><b>${f1(T_.projTot)}</b><i>now ${esc(L.hs + L.as)} · pre-game ${f1(g.pred.hs + g.pred.as)} · range about ${f0(T_.projTot - 1.28 * T_.sdTot)}-${f0(T_.projTot + 1.28 * T_.sdTot)}</i></span></div>
+    <div class="pr-row"><span class="pr-k">Our line ${esc(T_.preLine)}</span><span class="pr-v"><b>${T_.pOverPre >= 0.5 ? "Over" : "Under"}</b><i>against the pre-game total line</i></span><span class="pr-p">${pct(Math.max(T_.pOverPre, 1 - T_.pOverPre))}</span></div>
+    <div class="lvchips">${T_.alts.map((x) => chip(`O ${x.line}`, x.pOver)).join("")}</div>
+
+    <h3>Team totals</h3>
+    ${["a", "h"].map((k) => { const x = tt[k]; return `<div class="pr-row"><span class="pr-k">${esc(ab(k))} ${f1(x.proj)}</span><span class="pr-v"><b>${x.pOver >= 0.5 ? "Over" : "Under"} ${esc(x.line)}</b><i>${x.miles.map((m) => `reaches ${m.x}: ${pct(m.p)}`).join(" · ") || "milestones passed"}</i></span><span class="pr-p">${pct(Math.max(x.pOver, 1 - x.pOver))}</span></div>`; }).join("")}
+
+    <h3>Spread and margin</h3>
+    <div class="pr-row"><span class="pr-k">Our pre-game line</span><span class="pr-v"><b>${esc(ab(S_.preFav))} -${esc(S_.preLineS)}</b><i>${S_.coverPre >= 0.5 ? `${esc(ab(S_.preFav))} covers` : `${esc(ab(S_.preFav === "h" ? "a" : "h"))} +${esc(S_.preLineS)} covers`}</i></span><span class="pr-p">${pct(Math.max(S_.coverPre, 1 - S_.coverPre))}</span></div>
+    <div class="lvchips">${S_.alts.map((x) => chip(`${esc(ab(S_.liveFav))} -${x.line}`, x.p)).join("")}</div>
+    <div class="lvbands">${M.bands.map((b) => `<div class="${b.k}"><span>${esc(ab(b.k))} ${esc(b.lab)}</span><i style="width:${Math.round(b.p * 100)}%"></i><b>${pct(b.p)}</b></div>`).join("")}</div>
+    ${M.pOT >= 0.005 ? `<p class="small">Overtime chance: <b>${pct(M.pOT)}</b></p>` : ""}
+
+    ${M.whyTeam.length || M.reads.length ? `<h3>Live scenarios</h3><ul class="lvreads">${M.whyTeam.map((t) => `<li><span aria-hidden="true">⚡</span><span>${esc(t)}</span></li>`).join("")}${M.reads.map((r) => `<li><span aria-hidden="true">${r.ic}</span><span>${esc(r.t)}</span></li>`).join("")}</ul>` : ""}
+
+    ${rows.length ? `<h3>Live player props</h3><div class="lvp">${rows.map((p) => `<div class="lvp-r"><div class="lvp-h"><b>${esc(shortName(p.n))}</b> <span class="muted">${esc(T(p.t).abbr)}</span><span class="small muted"> · now ${esc(p.cur.pts)}p ${esc(p.cur.reb)}r ${esc(p.cur.ast)}a · ${esc(p.cur.min)}m${p.cur.pf ? ` · ${esc(p.cur.pf)}f` : ""} · ~${f0(p.restMin)} min left</span></div>
+      <div class="lvchips">${propChip("pts", "PTS", p.props.pts)}${propChip("reb", "REB", p.props.reb)}${propChip("ast", "AST", p.props.ast)}${propChip("tpm", "3PM", p.props.tpm)}${propChip("pra", "PRA", p.props.pra)}</div>
+      ${p.why.length ? `<div class="small" style="color:var(--warn)">${esc(p.why.join("; "))}</div>` : ""}</div>`).join("")}</div>
+      <p class="small muted">Each chip: projected final, our pre-game line, and the chance he goes over it.</p>` : ""}`;
 }
 async function liveQuick(id) {
   // Score, clock and period only, from the small scoreboard feed.
@@ -3436,7 +3586,8 @@ async function liveQuick(id) {
     const sb = await espnJSON(`scoreboard?dates=${day}`);
     const ev = (sb.events || []).find((e) => e.id === String(id)); if (!ev) continue;
     const c = ev.competitions[0], h = c.competitors.find((x) => x.homeAway === "home"), a = c.competitors.find((x) => x.homeAway === "away");
-    return { state: ev.status?.type?.state, detail: ev.status?.type?.shortDetail || "", period: ev.status?.period || 0, clock: ev.status?.displayClock || "0:00", hs: n0(h.score), as: n0(a.score) };
+    const lsq = (x) => (x.linescores || []).map((y) => n0(y.displayValue ?? y.value));
+    return { state: ev.status?.type?.state, detail: ev.status?.type?.shortDetail || "", period: ev.status?.period || 0, clock: ev.status?.displayClock || "0:00", hs: n0(h.score), as: n0(a.score), ls: { h: lsq(h), a: lsq(a) } };
   }
   return null;
 }
