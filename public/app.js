@@ -1597,7 +1597,7 @@ async function vWhy() {
 const STAT_NAME = { pts: "points", reb: "rebounds", ast: "assists", tpa: "three-point attempts", min: "minutes" };
 // ---------------- Our own archetypes, play-type matchups and the scenario card (display; evidence-labelled)
 // Archetypes are our own labels, calculated from Synergy play types, shot locations and NBA.com defender tracking.
-const evid = (n, unit = "player-games") => { const lab = n >= 1500 ? "strong" : n >= 500 ? "medium" : n >= 150 ? "weak" : "noise"; return `<span class="ev ev-${lab}">${lab}</span> <span class="muted small">${num(Math.round(n))} ${unit}</span>`; };
+const evid = (n, unit = "player-games") => { const lab = n >= 1500 ? "strong" : n >= 500 ? "medium" : n >= 150 ? "weak" : "noise"; return `<span class="evl evl-${lab}">${lab}</span> <span class="muted small">${num(Math.round(n))} ${unit}</span>`; };
 function offArchetypes(p) {
   const pt = Object.fromEntries((p.playstyle?.playTypes?.rows || []).map((x) => [x.id, x.freq || 0]));
   const z = Object.fromEntries((p.zones14?.rows || []).map((x) => [x.id, x.share || 0]));
