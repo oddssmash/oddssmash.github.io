@@ -162,6 +162,11 @@ async function route() {
   // Each navigation gets a number. A slow page that finishes after the visitor has moved on may
   // already have drawn itself over the newer page, so once it settles the current page is drawn again.
   const seq = S.seq = (S.seq || 0) + 1;
+  // In-app history: Back links return to the page you came from (and its scroll spot), not to a fixed section.
+  const hNow = location.hash || "#/games", st = (S.navStack ||= []); S.scrollAt ||= {};
+  if (S.lastHash !== undefined && S.lastHash !== hNow) S.scrollAt[S.lastHash || "#/games"] = window.scrollY;
+  let wentBack = false;
+  if (st.length > 1 && st[st.length - 2] === hNow) { st.pop(); wentBack = true; } else if (st[st.length - 1] !== hNow) st.push(hNow);
   const [, view = "games", arg, arg2] = location.hash.split("/");
   drawNav(ROUTE_TAB[view] || "games");
   hideTip();
@@ -184,8 +189,10 @@ async function route() {
   clearTimeout(slow);
   if (seq !== S.seq) { if (S.doneSeq === S.seq) { S.doneSeq = 0; route(); } return; }
   S.doneSeq = seq;
+  if (st.length > 1) app.querySelectorAll("a.back, a.gbar-b").forEach((a) => { a.textContent = "‹ Back"; a.setAttribute("aria-label", "Back to the previous page"); });
   if (S.lastHash !== location.hash) {
-    window.scrollTo(0, 0);
+    const y = wentBack ? S.scrollAt[hNow] : 0;
+    window.scrollTo(0, y || 0); if (y) setTimeout(() => window.scrollTo(0, y), 250); // again once late cards have drawn
     if (S.lastHash !== undefined) app.focus({ preventScroll: true }); // hand keyboard and screen-reader focus to the new page (not on first load)
     S.afterRoute?.(); // a view can ask to start at one of its sections (Scout opened on the matchup lab)
   }
@@ -2472,7 +2479,7 @@ async function vScout(id, labTid) {
         ${mine.length ? `<ul class="scns">${mine.map((s) => scenarioItem(s, 0, null, false)).join("")}</ul>` : ""}` : ""}`;
     app.querySelectorAll("[data-lab]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.lab === tid)));
     // A team picked by hand goes into the address, so the matchup can be shared or reloaded (no new history entry, no re-route).
-    if (byUser) { try { history.replaceState(null, "", `#/scout/${encodeURIComponent(p.id)}/${encodeURIComponent(tid)}`); S.lastHash = location.hash; } catch { /* sandboxed frame */ } }
+    if (byUser) { try { history.replaceState(null, "", `#/scout/${encodeURIComponent(p.id)}/${encodeURIComponent(tid)}`); S.lastHash = location.hash; if (S.navStack?.length) S.navStack[S.navStack.length - 1] = location.hash; } catch { /* sandboxed frame */ } }
 
     // Likely defenders: the opponent's eight heaviest-minute players this season, with their own closest-defender numbers.
     const og = up.find((g) => g.home === tid || g.away === tid), outNames = new Set((og?.out?.[og.home === tid ? 0 : 1]) || []); // out lists are [home, away]
@@ -3440,6 +3447,8 @@ async function boot() {
   wireFavs();
   wireSearch();
   addEventListener("hashchange", route);
+  // Back links step back one page when there is a page to go back to; on a fresh visit they open their section.
+  document.addEventListener("click", (e) => { const a = e.target.closest?.("a.back, a.gbar-b"); if (a && (S.navStack?.length || 0) > 1 && !e.metaKey && !e.ctrlKey) { e.preventDefault(); history.back(); } });
   let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(() => { if (location.hash.startsWith("#/why") && S.redraw) S.redraw(); }, 200); });
   addEventListener("scroll", hideTip, { passive: true });
   route();
