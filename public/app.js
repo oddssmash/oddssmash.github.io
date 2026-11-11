@@ -1768,6 +1768,23 @@ function bindPicker(input, list, onPick) {
   input.addEventListener("input", show);
   res.addEventListener("click", (e) => { const b = e.target.closest("[data-pid]"); if (!b) return; const q = list.find((x) => String(x.id) === b.dataset.pid); if (!q) return; input.value = ""; res.innerHTML = ""; onPick(q); });
 }
+// A pick far below the player's main line (e.g. 5+ points when his line is 16.5) is near-certain but pays almost
+// nothing, so it is hidden by default on Picks and on the High-confidence board. Main line = the bookmaker's line when
+// posted, else our simulation's main line, else his season average.
+const PROP_GAP = { pts: 4, reb: 2, ast: 2, tpm: 1, pra: 5 };
+function propMainRef(p, simMain) {
+  if (p.comparison?.bookLine != null) return p.comparison.bookLine;
+  if (simMain != null) return simMain;
+  const b = seasonLine(S.P?.[String(p.player?.id)]), k = { pts: "pts", reb: "reb", ast: "ast" }[p.fam];
+  if (b && k) return Math.floor(b[k]) + 0.5;
+  if (b && p.fam === "pra") return Math.floor(b.pts + b.reb + b.ast) + 0.5;
+  return null;
+}
+function tooFarBelow(p, simMain) {
+  if (!p.player) return false; if (isLowLine(p)) return true;
+  const ref = propMainRef(p, simMain); if (ref == null) return false;
+  return p.line < ref * 0.8 && ref - p.line >= (PROP_GAP[p.fam] || 2);
+}
 function seasonLine(sp) {
   const c = sp?.cur, pv = sp?.prev; if (!c && !pv) return null;
   const wc = c ? Math.min(1, (c[0] || 0) / 15) : 0, mix = (i) => (c && pv ? wc * c[i] + (1 - wc) * pv[i] : (c || pv)[i]);
@@ -2970,12 +2987,14 @@ async function vBoard() {
     return `Line ${ln}<i>ours there ${pct(c.ourProbAtBookLine)}${c.bookProb != null ? `, book ${pct(c.bookProb)}` : ""}</i>`;
   };
   const draw = (focusSel) => {
-    const rows = picks.filter((p) => (B.g === "all" || p.game === B.g) && (B.fam === "all" || p.fam === B.fam))
+    const safeHidden = picks.filter((p) => tooFarBelow(p)).length;
+    const rows = picks.filter((p) => (B.g === "all" || p.game === B.g) && (B.fam === "all" || p.fam === B.fam) && (B.safe || !tooFarBelow(p)))
       .sort(B.sort === "p" ? (x, y) => y.p - x.p : (x, y) => Date.parse(x.date) - Date.parse(y.date) || y.p - x.p);
     const famCount = (k) => picks.filter((p) => (B.g === "all" || p.game === B.g) && (k === "all" || p.fam === k)).length;
     const cal = b.calibration || {};
     app.innerHTML = `${labBack}<h1>High-confidence board</h1>
       <p class="lead">Every market where the simulation gives 85% or more for an upcoming game, with how often picks chosen by exactly this rule came true in the back-test.</p>
+      <p class="small muted">Lines far below a player's main line (e.g. 5+ points when his line is 16.5) are hidden by default: they almost always hit but pay almost nothing. Use "Show very safe lines" to see them.</p>
       <div class="card caveat" role="note"><b>Past hit rate, not a guarantee.</b>
         <p class="small">Even at 90%, about 1 pick in 10 misses, and picks from the same game tend to miss together. In the back-test player picks came true 2 to 5 points less often than the simulation said (85-90% band: about 83-85%); team picks were on target. Past picks were made with the confirmed inactive list, upcoming ones earlier, so real hit rates can be a little lower. Statistical analysis only, not betting advice.</p>
         <details class="more"><summary>Back-test of this board rule (${esc(num(cal.games))} games)</summary>${calTable(cal.all || [], "Picks")}
@@ -2989,6 +3008,7 @@ async function vBoard() {
           <button class="fbtn" type="button" data-sort="time" aria-pressed="${B.sort === "time"}">By tip-off</button>
           <button class="fbtn" type="button" data-sort="p" aria-pressed="${B.sort === "p"}">By chance</button>
           <button class="fbtn" type="button" id="bd-cmp" aria-pressed="${B.cmp}">Book column (comparison only)</button>
+          <button class="fbtn" type="button" id="bd-safe" aria-pressed="${!!B.safe}">${B.safe ? "Hide" : "Show"} very safe lines (${safeHidden})</button>
         </div>
       </div>
       ${B.cmp ? `<p class="note">${cmpChip} ${esc(String(b.comparisonLabel || "").replace(/^For comparison only.s*/i, ""))}${odds?.fetched ? ` Lines fetched ${esc(stamp(odds.fetched))}.` : ""} "Ours there" is the simulation's chance for the same side at the book's line.</p>` : ""}
@@ -3004,6 +3024,7 @@ async function vBoard() {
     app.querySelectorAll("[data-fam]").forEach((x) => x.addEventListener("click", () => { B.fam = x.dataset.fam; B.shown = 60; draw(`[data-fam="${CSS.escape(B.fam)}"]`); }));
     app.querySelectorAll("[data-sort]").forEach((x) => x.addEventListener("click", () => { B.sort = x.dataset.sort; draw(`[data-sort="${CSS.escape(B.sort)}"]`); }));
     document.getElementById("bd-cmp").addEventListener("click", () => { B.cmp = !B.cmp; draw("#bd-cmp"); });
+    document.getElementById("bd-safe")?.addEventListener("click", () => { B.safe = !B.safe; draw("#bd-safe"); });
     document.getElementById("bd-g").addEventListener("change", (e) => { B.g = e.target.value; B.shown = 60; draw("#bd-g"); });
     document.getElementById("bd-more")?.addEventListener("click", () => { B.shown += 100; draw("#bd-more"); });
     if (focusSel) app.querySelector(focusSel)?.focus({ preventScroll: true });
@@ -3400,7 +3421,7 @@ const up = await load("upcoming.json").catch(() => []);
     }
     return null;
   };
-  const tooSafe = (p) => { if (!p.player) { const ref = teamRef(p); if (ref == null) return false; const v = p.fam === "spread" ? (p.side === "by" ? -p.line : p.line) : p.line; return Math.abs(v - ref) > (p.fam === "total" ? 12 : p.fam === "spread" ? 7 : 9); } if (isLowLine(p)) return true; const ref = refLine(p.game, p.player.id, p.fam); return !!ref && p.line < ref.line * 0.75 && ref.line - p.line >= (p.fam === "pts" ? 4 : 1.5); };
+  const tooSafe = (p) => { if (!p.player) { const ref = teamRef(p); if (ref == null) return false; const v = p.fam === "spread" ? (p.side === "by" ? -p.line : p.line) : p.line; return Math.abs(v - ref) > (p.fam === "total" ? 12 : p.fam === "spread" ? 7 : 9); } const ref = refLine(p.game, p.player.id, p.fam); return tooFarBelow(p, ref?.line ?? null); };
   const FAMS_MAIN = [["pts", "points"], ["reb", "rebounds"], ["ast", "assists"], ["tpm", "threes"], ["pra", "pts+reb+ast"]];
   // Expected value at the sportsbook's price, from OUR chance. Display only: odds never feed the model.
   const decOf = (a) => { const v = Number(a); return !v ? null : v > 0 ? 1 + v / 100 : 1 + 100 / -v; };
