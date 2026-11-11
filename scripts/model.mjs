@@ -1361,7 +1361,10 @@ for (const e of futureEvents) {
     const byName = new Map(r.map((x) => [normName(x.n), x.id]));
     const inj = injuries.filter((i) => i.team === tid).map((i) => ({ ...i, id: String(i.id || byName.get(normName(i.n)) || "") })).filter((i) => i.id && onRoster.has(i.id) && hasPlayed(i.id));
     // "Out" with an expected return on or before this game counts as questionable, not out
-    const backBy = (i) => i.returnDate && i.returnDate <= etDay(e.date);
+    // ...except a fresh game-specific "ruled out for <day>'s game" (under 60 hours old, so it covers the previous game) before a back-to-back: an injury
+    // that kept him out last night usually keeps him out the next night, so he stays out until a newer report says otherwise.
+    const freshOut = (i) => /ruled out|out for \w+'s game/i.test(i.detail || "") && !/rest|personal|suspen/i.test(i.detail || "") && i.date && Date.parse(e.date) - Date.parse(i.date) < 60 * 3600e3;
+    const backBy = (i) => i.returnDate && i.returnDate <= etDay(e.date) && !freshOut(i);
     const out = inj.filter((i) => /out|doubtful/i.test(i.status) && !backBy(i)).map((i) => i.id);
     const q = inj.filter((i) => /questionable|day-to-day/i.test(i.status) || (/out|doubtful/i.test(i.status) && backBy(i))).map((i) => i.id);
     // same rule as the live-like back-test track: recent minutes for this team, recent arrivals, and the injury list

@@ -28,7 +28,7 @@ const face = (n, px = 40) => `<span class="pf" style="width:${px}px;height:${px}
 // ---------------------------------------------------------------- chrome
 const NAV = [["games", "Games", "M4 5h16v14H4zM4 10h16M9 5v14"], ["picks", "Picks", "M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"],
   ["players", "Players", "M10.5 17a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM20 20l-4.9-4.9M10.5 7.5v6M7.5 10.5h6"], ["teams", "Teams", "M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"], ["more", "More", "M4 7h16M4 12h16M4 17h16"]];
-const TAB = { games: "games", game: "games", picks: "picks", players: "players", player: "players", teams: "teams", team: "teams", results: "more", accuracy: "more", more: "more", how: "more", sources: "more", news: "more" };
+const TAB = { games: "games", game: "games", picks: "picks", players: "players", player: "players", teams: "teams", team: "teams", results: "more", accuracy: "more", result: "more", why: "more", lab: "more", board: "picks", scout: "players", insights: "games", today: "more", more: "more", how: "more", sources: "more", news: "more" };
 function drawNav(active) {
   const nav = document.getElementById("nav");
   if (!nav.childElementCount) nav.innerHTML = NAV.map(([k, l, d]) => `<a href="#/${k}" data-tab="${k}"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg></span><span class="nav-l">${l}</span></a>`).join("");
@@ -279,13 +279,19 @@ async function teamVersus(t) {
 // ---------------------------------------------------------------- teams
 async function vTeams() {
   const teams = await load("teams.json");
-  const list = teams.filter((t) => t.kind === S.tk);
-  app.innerHTML = `<h1>Teams</h1><p class="lead">Ranked by net rating: points scored minus points allowed per 100 possessions, adjusted for who they played and fading between windows. National teams and clubs are rated separately.</p>
+  // Ratings only connect teams that play each other: national teams are ranked within their region (qualifiers are
+  // regional), clubs within their competition. One combined list would compare teams that never meet.
+  const groups = [...new Set(teams.filter((t) => t.kind === S.tk).map((t) => t.region))].sort();
+  if (!groups.includes(S.rg)) S.rg = groups.includes("Asia") ? "Asia" : groups[0];
+  const list = teams.filter((t) => t.kind === S.tk && t.region === S.rg);
+  app.innerHTML = `<h1>Teams</h1><p class="lead">Ranked by net rating: points scored minus points allowed per 100 possessions, adjusted for who they played, fading between windows and pulled toward average on thin records (the ratings the projections use). Teams are ranked within a region or competition: qualifiers are played inside each region, so ratings from different regions are not comparable.</p>
     <div class="gtabs" role="tablist"><button class="gtab" role="tab" data-tk="nt" aria-selected="${S.tk === "nt"}">National teams</button><button class="gtab" role="tab" data-tk="club" aria-selected="${S.tk === "club"}">Clubs</button></div>
+    <div class="filters" role="group" aria-label="${S.tk === "nt" ? "Region" : "Competition"}">${groups.map((r) => `<button class="fbtn" type="button" data-rg="${esc(r)}" aria-pressed="${S.rg === r}">${esc(r)}</button>`).join("")}</div>
     <div class="card"><div class="tw"><table class="ft"><thead><tr><th>#</th><th>Team</th><th class="n">W-L</th><th class="n">Off</th><th class="n">Def</th><th class="n">Net</th></tr></thead><tbody>
       ${list.map((t, i) => `<tr><td class="muted">${i + 1}</td><td><a class="tn" href="#/team/${esc(t.tid)}">${badge(t, t.kind, 24)} ${esc(t.name)}</a> <span class="muted small">${esc(t.comp)}</span></td><td class="n">${t.w}-${t.l}</td><td class="n">${sg(t.off)}</td><td class="n">${sg(t.def)}</td><td class="n"><b class="${t.net >= 0 ? "up" : "down"}">${sg(t.net)}</b></td></tr>`).join("")}</tbody></table></div>
       <p class="small muted">Off and Def are points per 100 possessions better than average (Def: fewer points allowed is positive). Teams with few games move a lot.</p></div>`;
-  app.querySelectorAll("[data-tk]").forEach((b) => b.addEventListener("click", () => { S.tk = b.dataset.tk; vTeams(); }));
+  app.querySelectorAll("[data-tk]").forEach((b) => b.addEventListener("click", () => { S.tk = b.dataset.tk; S.rg = null; vTeams(); }));
+  app.querySelectorAll("[data-rg]").forEach((b) => b.addEventListener("click", () => { S.rg = b.dataset.rg; vTeams(); }));
 }
 async function vTeam(tid) {
   const [t, up] = await Promise.all([load(`teams/${tid}.json`), load("upcoming.json")]);
@@ -372,7 +378,7 @@ async function route() {
   if (st.length > 1 && st[st.length - 2] === h) st.pop(); else if (st[st.length - 1] !== h) st.push(h);
   const [, view = "games", arg] = h.split("/");
   drawNav(TAB[view] || "games");
-  try { await ({ games: vGames, game: vGame, picks: vPicks, players: vPlayers, player: vPlayer, teams: vTeams, team: vTeam, results: vResults, accuracy: vResults, more: vMore, how: vHow, sources: vSources, news: vNews }[view] || vMissing)(decodeURIComponent(arg || "")); }
+  try { await ({ games: vGames, game: vGame, picks: vPicks, players: vPlayers, player: vPlayer, teams: vTeams, team: vTeam, results: vResults, accuracy: vResults, result: vResults, why: vResults, lab: vMore, board: vPicks, scout: vPlayers, insights: vGames, today: vNews, more: vMore, how: vHow, sources: vSources, news: vNews }[view] || vMissing)(decodeURIComponent(arg || "")); }
   catch (e) { if (seq === S.seq) app.innerHTML = `<div class="card"><h2>Could not load this page</h2><p class="muted">${esc(e.message)}</p><p><a class="go" href="#/games">Back to games</a></p></div>`; }
   if (st.length > 1) app.querySelectorAll("a.back").forEach((a) => (a.textContent = "‹ Back"));
   if (S.last !== h) window.scrollTo(0, 0);

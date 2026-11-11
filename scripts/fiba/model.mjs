@@ -150,7 +150,11 @@ function projectPlayers(tid, oppTid, pace, kind, announced = null, source = null
   if (announced?.length) list = announced.map((a) => { const s = PL.get(a.pid); return s ? { s, min: s.min, kinds: s.teams } : { s: { pid: a.pid, n: a.n, pos: a.pos, no: a.no, gp: 0, rate: PRIOR[grpOf(a.pos)], log: [] }, min: a.min || 12, isNew: true }; });
   else list = ro.list.map((s) => ({ s, min: s.min }));
   list = list.filter((x) => x.min > 1);
-  const tot = list.reduce((a, x) => a + x.min, 0) || 1; list.forEach((x) => (x.min = Math.min(38, (x.min * 200) / tot)));
+  // Minutes add up to 200. Too many: players keep their usual minutes in order of role and the deep bench is cut
+  // (how coaches trim). Too few: everyone is scaled up, capped at 38.
+  const tot = list.reduce((a, x) => a + x.min, 0) || 1;
+  if (tot > 200) { let left = 200; for (const x of [...list].sort((a, b) => b.min - a.min)) { x.min = Math.max(0, Math.min(x.min, left)); left -= x.min; } }
+  else list.forEach((x) => (x.min = Math.min(38, (x.min * 200) / tot)));
   const fPace = pace / L.pace, fDef = opp ? (L.ppp - opp.def) / L.ppp : 1;
   return { from: announced?.length ? null : ro.date, announced: !!announced?.length, source, gid: ro.gid, players: list.sort((a, b) => b.min - a.min).map(({ s, min, isNew }) => {
     const other = Object.values(s.teams || {}).filter((t) => t.kind !== kind).reduce((a, t) => a + t.gp, 0), same = Object.values(s.teams || {}).filter((t) => t.kind === kind).reduce((a, t) => a + t.gp, 0);
@@ -205,8 +209,8 @@ for (const g of upcoming) {
   const spread = Math.round((pa - pb) * 2) / 2, total = halfLine(pa + pb);
   const why = [];
   if (A && B) {
-    const net = (t) => t.off + t.def; // + better
-    if (Math.abs(net(A) - net(B)) >= 1) why.push([Math.abs(net(A) - net(B)) * pace / 100, `${net(A) > net(B) ? g.a.name : g.b.name} rate better: net ${r1(Math.max(net(A), net(B)))} vs ${r1(Math.min(net(A), net(B)))} points per 100 possessions, adjusted for opponents`]);
+    const net = (t) => (t === A ? (A.off + A.def) * wA : (B.off + B.def) * wB); // + better; the ratings as used (thin records pulled toward average)
+    if (Math.abs(net(A) - net(B)) >= 1) why.push([Math.abs(net(A) - net(B)) * pace / 100, `${net(A) > net(B) ? g.a.name : g.b.name} rate better: net ${r1(Math.max(net(A), net(B)))} vs ${r1(Math.min(net(A), net(B)))} points per 100 possessions, adjusted for opponents and pulled toward average on thin records`]);
     if (hca) why.push([Math.abs(hca), `${h === 0 ? g.a.name : g.b.name} at home (+${r1(P.hca[g.kind])} pts, learned from ${g.kind === "nt" ? "national-team" : "club"} results)`]);
     if (Math.abs(offA - offB) >= 3) why.push([Math.abs(offA - offB) * pace / 200, `${offA > offB ? g.a.name : g.b.name} have the stronger offence`]);
     if (Math.abs(defA - defB) >= 3) why.push([Math.abs(defA - defB) * pace / 200, `${defA > defB ? g.a.name : g.b.name} have the stronger defence`]);
@@ -219,9 +223,10 @@ for (const g of upcoming) {
   // 10+ projected minutes, with the reason when the projection differs; a gap over 30% with no minutes change is
   // flagged and kept out of the picks (that is where data errors hide).
   const players = pls.map((p, j) => { const s = sim.pts[j], base = p.avgPts ?? p.pts, ln = p.min >= 10 ? halfLine(base) : null, gap = p.pts - base;
-    const minChg = p.avgMin ? (p.min - p.avgMin) / p.avgMin : 0, why = Math.abs(gap) < 1.5 || p.avgPts == null ? null : Math.abs(minChg) >= 0.15 ? `${r1(p.min)} projected minutes vs his usual ${r1(p.avgMin)}` : p.raw && Math.abs(p.pts / p.raw - 1) >= 0.1 ? `this roster leaves ${p.pts > p.raw ? "more" : "fewer"} of the team's projected points for him (his share is scaled so the team adds up to its projected score)` : `${gap > 0 ? "softer" : "tougher"} opponent defence and the game pace`;
+    const minChg = p.avgMin ? (p.min - p.avgMin) / p.avgMin : 0, why = Math.abs(gap) < 1.5 || p.avgPts == null ? null : Math.abs(minChg) >= 0.15 ? `${r1(p.min)} projected minutes vs his usual ${r1(p.avgMin)}` : p.raw && Math.abs(p.pts / p.raw - 1) >= 0.1 && Math.sign(p.pts - p.raw) === Math.sign(gap) ? `this roster leaves ${p.pts > p.raw ? "more" : "fewer"} of the team's projected points for him (his share is scaled so the team adds up to its projected score)` : `${gap > 0 ? "softer" : "tougher"} opponent defence and the game pace`;
     const flagged = p.avgPts != null && base >= 4 && Math.abs(gap) / base > 0.3 && Math.abs(minChg) < 0.15 && !(p.raw && Math.abs(p.pts / p.raw - 1) >= 0.1);
-    return { ...p, lo: r1(q(s, 0.1)), hi: r1(q(s, 0.9)), line: ln, pOver: ln == null ? null : r3(share(s, (v) => v > ln)), lineWhy: why, flagged, m10: r3(share(s, (v) => v >= 10)), m15: r3(share(s, (v) => v >= 15)), m20: r3(share(s, (v) => v >= 20)) }; });
+    const noPick = p.avgPts == null || (base >= 4 && Math.abs(gap) / base > (p.gp < 10 ? 0.2 : 0.25)) || Math.abs(minChg) > 0.2 || (p.raw > 0 && Math.abs(p.pts / p.raw - 1) >= 0.15); // a 30%+ gap, a 20%+ minutes change or a 15%+ roster-share scaling (all from our own allocation) is not a named reason or a 20%+ minutes change from our own allocation is not a named reason
+    return { ...p, lo: r1(q(s, 0.1)), hi: r1(q(s, 0.9)), line: ln, pOver: ln == null ? null : r3(share(s, (v) => v > ln)), lineWhy: why, flagged, noPick, m10: r3(share(s, (v) => v >= 10)), m15: r3(share(s, (v) => v >= 15)), m20: r3(share(s, (v) => v >= 20)) }; });
   const rec = { id: g.id, date: g.date, timed: g.timed, comp: g.comp, compName: g.compName, kind: g.kind, round: g.round, group: g.group, city: g.city, venue: g.venue, home: h,
     a: { ...g.a, n: A?.n || 0, w: A?.w || 0, l: A?.l || 0, off: r1(offA), def: r1(defA) }, b: { ...g.b, n: B?.n || 0, w: B?.w || 0, l: B?.l || 0, off: r1(offB), def: r1(defB) },
     proj: { a: r1(pa), b: r1(pb), pA: r3(pA), spread, total, pace: r1(pace), sd: r1(sd), lo: [r1(q(sim.sA, 0.1)), r1(q(sim.sB, 0.1))], hi: [r1(q(sim.sA, 0.9)), r1(q(sim.sB, 0.9))],
@@ -232,9 +237,10 @@ for (const g of upcoming) {
   // picks: our own lines (no sportsbook). Winner, our spread side, total side, and player points at his average.
   const fav = pA >= 0.5 ? g.a.name : g.b.name, pf = Math.max(pA, 1 - pA);
   if (nmin >= 3) {
-    picks.push({ gid: g.id, date: g.date, comp: g.comp, kind: "winner", pick: `${fav} to win`, p: r3(pf), game: `${g.a.code || g.a.name} vs ${g.b.code || g.b.name}`, fair: r1(1 / pf * 100) / 100 });
+    picks.push({ gid: g.id, date: g.date, comp: g.comp, kind: "winner", pick: `${fav} to win`, p: r3(Math.min(0.92, pf)), game: `${g.a.code || g.a.name} vs ${g.b.code || g.b.name}`, fair: r1(1 / Math.min(0.92, pf) * 100) / 100 });
     picks.push({ gid: g.id, date: g.date, comp: g.comp, kind: "total", pick: `${rec.proj.over >= 0.5 ? "Over" : "Under"} ${total}`, p: r3(Math.max(rec.proj.over, 1 - rec.proj.over)), game: `${g.a.code || g.a.name} vs ${g.b.code || g.b.name}`, fair: r1(1 / Math.max(rec.proj.over, 1 - rec.proj.over) * 100) / 100 });
-    for (const p of players.filter((x) => x.gp >= 3 && x.avgPts >= 8 && x.line != null && !x.flagged)) { const po = p.pOver, side = po >= 0.5 ? "over" : "under", pp = Math.max(po, 1 - po);
+    let perGame = 0;
+    for (const p of players.filter((x) => x.gp >= 3 && x.avgPts >= 8 && x.line != null && !x.flagged && !x.noPick).sort((a, b) => Math.abs(b.pOver - 0.5) - Math.abs(a.pOver - 0.5))) { if (perGame >= 2) break; perGame++; const po = p.pOver, side = po >= 0.5 ? "over" : "under", pp = Math.min(p.gp < 10 ? 0.85 : 0.9, Math.max(po, 1 - po)); /* cap: a handful of games cannot support 95% */
       picks.push({ gid: g.id, date: g.date, comp: g.comp, kind: "prop", pick: `${p.n} ${side} ${p.line} points`, p: r3(pp), game: `${g.a.code || g.a.name} vs ${g.b.code || g.b.name}`, proj: p.pts, avg: p.avgPts, fair: r1(1 / pp * 100) / 100, why: `projected ${p.pts} (range ${p.lo}-${p.hi}) vs his ${p.avgPts} average over ${p.gp} games${p.lineWhy ? ": " + p.lineWhy : ""}` }); }
   }
 }
@@ -257,8 +263,11 @@ const accuracy = { graded: R.n, brier: r3(R.brier), logloss: r3(R.ll), winner: r
   grid: grid.length, rule: "Each game is projected only from games before it, then graded. A game counts once both teams have 3+ games in our data." };
 writeJSON(path.join(OUT, "accuracy.json"), accuracy);
 
+const REGION = { "WCQ Asia": "Asia", "Asia Cup": "Asia", "WCQ Europe": "Europe", EuroBasket: "Europe", "WCQ Americas": "Americas", AmeriCup: "Americas", "WCQ Africa": "Africa", AfroBasket: "Africa" };
+const regionOf = (tid, kind) => { const c = {}; for (const g of games) if (g.box.teams.some((t) => t.tid === tid)) { const r = kind === "nt" ? REGION[g.comp] || "World" : g.comp; c[r] = (c[r] || 0) + 1; } return Object.entries(c).sort((a, b) => b[1] - a[1])[0]?.[0] || "Other"; };
 const teams = [...R.T.values()].map((t) => { const last = [...games].reverse().find((g) => g.box.teams.some((x) => x.tid === t.tid)), side = last.box.teams[0].tid === t.tid ? 0 : 1, info = last.box.teams[side];
-  return { tid: t.tid, code: info.code, name: info.name, kind: t.kind, comp: last.comp, ha: haRec(t.tid), off: r1(t.off), def: r1(t.def), net: r1(t.off + t.def), pace: r1(R.lg[t.kind].pace + t.pace), gp: t.n, w: t.w, l: t.l, ppg: r1(t.pf / t.n), oppg: r1(t.pa / t.n), last: t.last }; })
+  const w = t.n / (t.n + P.k0) || 0; // shown as used in projections: thin records pulled toward average
+  return { tid: t.tid, code: info.code, name: info.name, kind: t.kind, comp: last.comp, region: regionOf(t.tid, t.kind), ha: haRec(t.tid), off: r1(t.off * w), def: r1(t.def * w), net: r1((t.off + t.def) * w), netRaw: r1(t.off + t.def), pace: r1(R.lg[t.kind].pace + t.pace), gp: t.n, w: t.w, l: t.l, ppg: r1(t.pf / t.n), oppg: r1(t.pa / t.n), last: t.last }; })
   .sort((a, b) => b.net - a.net);
 writeJSON(path.join(OUT, "teams.json"), teams);
 for (const t of teams) {
