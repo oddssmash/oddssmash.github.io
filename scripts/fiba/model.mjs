@@ -44,7 +44,7 @@ function replay(P, record = false) {
   for (const g of games) {
     const A = team(g.box.teams[0].tid, g.kind), B = team(g.box.teams[1].tid, g.kind), L = lg[g.kind];
     decay(A, g.date); decay(B, g.date);
-    const h = homeOf(g), hca = h === 0 ? P.hca : h === 1 ? -P.hca : 0;
+    const h = homeOf(g), H = P.hca[g.kind], hca = h === 0 ? H : h === 1 ? -H : 0;
     const pace = L.pace + (A.pace + B.pace) / 2, pa = pace * (L.ppp + A.off - B.def) / 100 + hca / 2, pb = pace * (L.ppp + B.off - A.def) / 100 - hca / 2;
     const margin = pa - pb, sd = P.sd * (1 + 1.2 / Math.sqrt(1 + Math.min(A.n, B.n))), pA = Phi(margin / sd);
     const ta = teamLine(g.box, 0), tb = teamLine(g.box, 1), sa = g.box.teams[0].score, sb = g.box.teams[1].score, won = sa > sb ? 1 : 0;
@@ -63,7 +63,7 @@ function replay(P, record = false) {
   return { T, lg, brier: brier / n, ll: ll / n, acc: right / n, mae: mae / n, tmae: tmae / n, n, log };
 }
 // learn the settings: walk-forward grid, best Brier
-const grid = []; for (const k of [0.1, 0.16, 0.24, 0.32, 0.42]) for (const hca of [0.5, 1.5, 2.5, 3.5]) for (const hl of [180, 365, 730]) for (const sd of [9, 10.5, 12, 13.5]) grid.push({ k, hca, hl, sd });
+const grid = []; for (const k of [0.1, 0.16, 0.24, 0.32, 0.42]) for (const hn of [0, 0.75, 1.5, 2.5]) for (const hc of [2, 3, 4, 5, 6]) for (const hl of [180, 365, 730]) for (const sd of [9, 10.5, 12, 13.5]) grid.push({ k, hca: { nt: hn, club: hc }, hl, sd });
 let best = null; for (const P of grid) { const r = replay(P); if (!best || r.brier < best.r.brier) best = { P, r }; }
 const P = best.P, R = replay(P, true);
 console.log("learned", JSON.stringify(P), "Brier", r3(R.brier), "winner", (R.acc * 100).toFixed(1) + "%", "margin MAE", r1(R.mae), "total MAE", r1(R.tmae), "graded", R.n);
@@ -108,15 +108,25 @@ const lastRoster = (tid) => { // players from the team's most recent game
   const side = last.box.teams[0].tid === tid ? 0 : 1;
   return { date: last.date, gid: last.id, list: last.box.players.filter((p) => p.side === side).map((p) => PL.get(p.pid)).filter(Boolean) };
 };
-function projectPlayers(tid, oppTid, pace, kind) {
+// A player new to our data (first FIBA game in a competition we follow): start from what players at his position
+// usually produce per minute in FIBA, a little below average, in a bench role. He is marked "new" on the page.
+const grpOf = (pos) => (/C/i.test(pos || "") ? "C" : /F/i.test(pos || "") ? "F" : "G");
+const PRIOR = {}; for (const g of ["G", "F", "C"]) { const ps = [...PL.values()].filter((s) => s.gp >= 5 && grpOf(s.pos) === g); const w = ps.reduce((a, s) => a + s.min, 0) || 1; PRIOR[g] = Object.fromEntries(STAT.map((k) => [k, (ps.reduce((a, s) => a + s.rate[k] * s.min, 0) / w) * 0.85])); }
+const ROSTERS = new Map(); { const RDIR = path.join(FD, "rosters"); if (fs.existsSync(RDIR)) for (const f of fs.readdirSync(RDIR)) { const r = readJSON(path.join(RDIR, f)); if (r) ROSTERS.set(r.id, r); } }
+function projectPlayers(tid, oppTid, pace, kind, announced = null) {
   const ro = lastRoster(tid), L = R.lg[kind], opp = R.T.get(oppTid);
-  let list = ro.list.filter((s) => s.min > 1).map((s) => ({ s, min: s.min }));
+  // the announced 12 when FIBA has posted them, else the players from the team's last game
+  let list;
+  if (announced?.length) list = announced.map((a) => { const s = PL.get(a.pid); return s ? { s, min: s.min, kinds: s.teams } : { s: { pid: a.pid, n: a.n, pos: a.pos, no: a.no, gp: 0, rate: PRIOR[grpOf(a.pos)], log: [] }, min: 12, isNew: true }; });
+  else list = ro.list.map((s) => ({ s, min: s.min }));
+  list = list.filter((x) => x.min > 1);
   const tot = list.reduce((a, x) => a + x.min, 0) || 1; list.forEach((x) => (x.min = Math.min(38, (x.min * 200) / tot)));
   const fPace = pace / L.pace, fDef = opp ? (L.ppp - opp.def) / L.ppp : 1;
-  return { from: ro.date, gid: ro.gid, players: list.sort((a, b) => b.min - a.min).map(({ s, min }) => ({ pid: s.pid, n: s.n, pos: s.pos, no: s.no, min: r1(min),
-    pts: r1(s.rate.pts * min * fPace * fDef), reb: r1(s.rate.reb * min * fPace), ast: r1(s.rate.ast * min * fPace), stl: r1(s.rate.stl * min * fPace), blk: r1(s.rate.blk * min * fPace), f3m: r1(s.rate.f3m * min * fPace * fDef), gp: s.gp, avgPts: r1(s.log.reduce((a, l) => a + l[5], 0) / s.log.length) })) };
-}
-// seeded RNG so a refresh without new data gives the same numbers
+  return { from: announced?.length ? null : ro.date, announced: !!announced?.length, gid: ro.gid, players: list.sort((a, b) => b.min - a.min).map(({ s, min, isNew }) => {
+    const other = Object.values(s.teams || {}).filter((t) => t.kind !== kind).reduce((a, t) => a + t.gp, 0), same = Object.values(s.teams || {}).filter((t) => t.kind === kind).reduce((a, t) => a + t.gp, 0);
+    return { pid: s.pid, n: s.n, pos: s.pos, no: s.no, min: r1(min), isNew: !!isNew, src: isNew ? "new: no FIBA games in our data, estimated from his position" : same === 0 && other ? `first ${kind === "nt" ? "national-team" : "club"} game in our data: rates from his ${other} ${kind === "nt" ? "club" : "national-team"} games` : null,
+      pts: r1(s.rate.pts * min * fPace * fDef), reb: r1(s.rate.reb * min * fPace), ast: r1(s.rate.ast * min * fPace), stl: r1(s.rate.stl * min * fPace), blk: r1(s.rate.blk * min * fPace), f3m: r1(s.rate.f3m * min * fPace * fDef), gp: s.gp, avgPts: s.log.length ? r1(s.log.reduce((a, l) => a + l[5], 0) / s.log.length) : null }; }) };
+}// seeded RNG so a refresh without new data gives the same numbers
 let seed = 12345; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
 const gauss = () => { let u = 0, v = 0; while (!u) u = rnd(); while (!v) v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
 const N = 10000;
@@ -133,29 +143,33 @@ const q = (arr, p) => { const s = [...arr].sort((x, y) => x - y); return s[Math.
 const share = (arr, f) => arr.filter(f).length / arr.length;
 const halfLine = (x) => Math.floor(x) + 0.5;
 
+// home / away / neutral records from finished games (home court as decided by homeOf)
+const HA = new Map(); for (const g of games) { const h = homeOf(g); g.box.teams.forEach((t, i) => { const r = HA.get(t.tid) || { home: [0, 0], away: [0, 0], neutral: [0, 0] }; const k = h === -1 ? "neutral" : h === i ? "home" : "away", won = t.score > g.box.teams[1 - i].score; r[k][won ? 0 : 1]++; HA.set(t.tid, r); }); }
+const haRec = (tid) => HA.get(tid) || { home: [0, 0], away: [0, 0], neutral: [0, 0] };
 const upOut = [], picks = [];
 for (const g of upcoming) {
   const A = R.T.get(g.a.tid), B = R.T.get(g.b.tid), L = R.lg[g.kind];
-  const h = homeOf(g), hca = h === 0 ? P.hca : h === 1 ? -P.hca : 0;
+  const h = homeOf(g), hca = h === 0 ? P.hca[g.kind] : h === 1 ? -P.hca[g.kind] : 0;
   const offA = A?.off || 0, defA = A?.def || 0, offB = B?.off || 0, defB = B?.def || 0, pace = L.pace + ((A?.pace || 0) + (B?.pace || 0)) / 2;
   const pa = pace * (L.ppp + offA - defB) / 100 + hca / 2, pb = pace * (L.ppp + offB - defA) / 100 - hca / 2, nmin = Math.min(A?.n || 0, B?.n || 0);
   const sd = P.sd * (1 + 1.2 / Math.sqrt(1 + nmin)), pA = Phi((pa - pb) / sd);
-  const prA = projectPlayers(g.a.tid, g.b.tid, pace, g.kind), prB = projectPlayers(g.b.tid, g.a.tid, pace, g.kind);
+  const RO = ROSTERS.get(g.id), prA = projectPlayers(g.a.tid, g.b.tid, pace, g.kind, RO?.a), prB = projectPlayers(g.b.tid, g.a.tid, pace, g.kind, RO?.b);
   // scale player points so each side adds up to the team projection (free throws and bench included)
   for (const [pr, tot] of [[prA, pa], [prB, pb]]) { const s = pr.players.reduce((a, p) => a + p.pts, 0); if (s > 0) pr.players.forEach((p) => (p.pts = r1((p.pts * tot) / s))); }
-  const pls = [...prA.players.slice(0, 8).map((p) => ({ ...p, side: 0 })), ...prB.players.slice(0, 8).map((p) => ({ ...p, side: 1 }))];
+  const pls = [...prA.players.slice(0, 12).map((p) => ({ ...p, side: 0 })), ...prB.players.slice(0, 12).map((p) => ({ ...p, side: 1 }))];
   const sim = simulate(pa, pb, sd, pls), mg = sim.sA.map((a, i) => a - sim.sB[i]), tt = sim.sA.map((a, i) => a + sim.sB[i]);
   const spread = Math.round((pa - pb) * 2) / 2, total = halfLine(pa + pb);
   const why = [];
   if (A && B) {
     const net = (t) => t.off + t.def; // + better
-    if (Math.abs(net(A) - net(B)) >= 1) why.push([Math.abs(net(A) - net(B)) * pace / 100, `${net(A) > net(B) ? g.a.name : g.b.name} rate better per 100 possessions (${r1(net(A))} vs ${r1(net(B))}, adjusted for opponents)`]);
-    if (hca) why.push([Math.abs(hca), `${h === 0 ? g.a.name : g.b.name} at home (+${r1(P.hca)} pts, learned from FIBA results)`]);
+    if (Math.abs(net(A) - net(B)) >= 1) why.push([Math.abs(net(A) - net(B)) * pace / 100, `${net(A) > net(B) ? g.a.name : g.b.name} rate better: net ${r1(Math.max(net(A), net(B)))} vs ${r1(Math.min(net(A), net(B)))} points per 100 possessions, adjusted for opponents`]);
+    if (hca) why.push([Math.abs(hca), `${h === 0 ? g.a.name : g.b.name} at home (+${r1(P.hca[g.kind])} pts, learned from ${g.kind === "nt" ? "national-team" : "club"} results)`]);
     if (Math.abs(offA - offB) >= 3) why.push([Math.abs(offA - offB) * pace / 200, `${offA > offB ? g.a.name : g.b.name} have the stronger offence`]);
     if (Math.abs(defA - defB) >= 3) why.push([Math.abs(defA - defB) * pace / 200, `${defA > defB ? g.a.name : g.b.name} have the stronger defence`]);
   }
   if (nmin < 4) why.push([0, `Thin record: ${Math.min(A?.n || 0, B?.n || 0)} game${nmin === 1 ? "" : "s"} for one side in our data, so the range is wider`]);
-  if (g.kind === "nt") why.push([0, `Roster from each team's last game (${[prA.from, prB.from].filter(Boolean).map((d) => d.slice(0, 10)).join(" / ")}); national-team rosters change between windows`]);
+  for (const [pr, t] of [[prA, g.a], [prB, g.b]]) why.push([0, pr.announced ? `${t.name}: official roster posted by FIBA` : `${t.name}: roster from their last game${pr.from ? ` (${pr.from.slice(0, 10)})` : ""}; the final 12 is not posted yet${g.kind === "nt" ? " and national-team rosters change between windows" : ""}`]);
+  const nNew = [...prA.players, ...prB.players].filter((p) => p.isNew).length; if (nNew) why.push([0, `${nNew} player${nNew > 1 ? "s" : ""} new to our data: estimated from his position until he plays`]);
   const quarters = [0.255, 0.245, 0.25, 0.25].map((f) => [r1(pa * f), r1(pb * f)]);
   const players = pls.map((p, j) => { const s = sim.pts[j], ln = halfLine(p.avgPts || p.pts);
     return { ...p, lo: r1(q(s, 0.1)), hi: r1(q(s, 0.9)), line: ln, pOver: r3(share(s, (v) => v > ln)), m10: r3(share(s, (v) => v >= 10)), m15: r3(share(s, (v) => v >= 15)), m20: r3(share(s, (v) => v >= 20)) }; });
@@ -163,7 +177,7 @@ for (const g of upcoming) {
     a: { ...g.a, n: A?.n || 0, w: A?.w || 0, l: A?.l || 0, off: r1(offA), def: r1(defA) }, b: { ...g.b, n: B?.n || 0, w: B?.w || 0, l: B?.l || 0, off: r1(offB), def: r1(defB) },
     proj: { a: r1(pa), b: r1(pb), pA: r3(pA), spread, total, pace: r1(pace), sd: r1(sd), lo: [r1(q(sim.sA, 0.1)), r1(q(sim.sB, 0.1))], hi: [r1(q(sim.sA, 0.9)), r1(q(sim.sB, 0.9))],
       close: r3(share(mg, (m) => Math.abs(m) <= 5)), blowout: r3(share(mg, (m) => Math.abs(m) >= 20)), ot: r3(share(mg, (m) => Math.abs(m) < 0.6)), coverA: r3(share(mg, (m) => m > spread)), over: r3(share(tt, (t) => t > total)) },
-    quarters, why: why.sort((x, y) => y[0] - x[0]).map((w) => w[1]), players, rosterFrom: [prA.from, prB.from], confidence: nmin < 4 ? "low (thin record)" : Math.abs(pA - 0.5) >= 0.3 ? "high" : Math.abs(pA - 0.5) >= 0.15 ? "medium" : "low (near coin-flip)" };
+    quarters, why: why.sort((x, y) => y[0] - x[0]).map((w) => w[1]), players, rosterFrom: [prA.from, prB.from], announced: [prA.announced, prB.announced], ha: [haRec(g.a.tid), haRec(g.b.tid)], confidence: nmin < 4 ? "low (thin record)" : Math.abs(pA - 0.5) >= 0.3 ? "high" : Math.abs(pA - 0.5) >= 0.15 ? "medium" : "low (near coin-flip)" };
   writeJSON(path.join(OUT, "games", `${g.id}.json`), rec);
   upOut.push({ id: g.id, date: g.date, timed: g.timed, comp: g.comp, kind: g.kind, round: g.round, group: g.group, a: rec.a, b: rec.b, proj: { a: rec.proj.a, b: rec.proj.b, pA: rec.proj.pA, spread, total }, confidence: rec.confidence, home: h });
   // picks: our own lines (no sportsbook). Winner, our spread side, total side, and player points at his average.
@@ -195,7 +209,7 @@ const accuracy = { graded: R.n, brier: r3(R.brier), logloss: r3(R.ll), winner: r
 writeJSON(path.join(OUT, "accuracy.json"), accuracy);
 
 const teams = [...R.T.values()].map((t) => { const last = [...games].reverse().find((g) => g.box.teams.some((x) => x.tid === t.tid)), side = last.box.teams[0].tid === t.tid ? 0 : 1, info = last.box.teams[side];
-  return { tid: t.tid, code: info.code, name: info.name, kind: t.kind, comp: last.comp, off: r1(t.off), def: r1(t.def), net: r1(t.off + t.def), pace: r1(R.lg[t.kind].pace + t.pace), gp: t.n, w: t.w, l: t.l, ppg: r1(t.pf / t.n), oppg: r1(t.pa / t.n), last: t.last }; })
+  return { tid: t.tid, code: info.code, name: info.name, kind: t.kind, comp: last.comp, ha: haRec(t.tid), off: r1(t.off), def: r1(t.def), net: r1(t.off + t.def), pace: r1(R.lg[t.kind].pace + t.pace), gp: t.n, w: t.w, l: t.l, ppg: r1(t.pf / t.n), oppg: r1(t.pa / t.n), last: t.last }; })
   .sort((a, b) => b.net - a.net);
 writeJSON(path.join(OUT, "teams.json"), teams);
 for (const t of teams) {

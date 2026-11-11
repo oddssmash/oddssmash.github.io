@@ -69,8 +69,8 @@ async function vGame(id) {
   const A = g.a, B = g.b, p = g.proj, fa = p.pA >= 0.5, fav = fa ? A : B;
   const side = (s) => g.players.filter((x) => x.side === s);
   const ptable = (s, t) => `<div class="card"><h2>${badge(t, g.kind, 24)} ${esc(t.name)}</h2><div class="tw"><table class="ft"><thead><tr><th>Player</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Range</th><th class="n">Reb</th><th class="n">Ast</th><th class="n">3PM</th><th class="n">Our line</th></tr></thead><tbody>
-    ${side(s).map((x) => `<tr><td><a href="#/player/${esc(x.pid)}">${esc(x.n)}</a> <span class="muted small">${esc(x.pos)}</span></td><td class="n">${f0(x.min)}</td><td class="n"><b>${f1(x.pts)}</b></td><td class="n muted">${f0(x.lo)}-${f0(x.hi)}</td><td class="n">${f1(x.reb)}</td><td class="n">${f1(x.ast)}</td><td class="n">${f1(x.f3m)}</td><td class="n">${f1(x.line)} <span class="${x.pOver >= 0.5 ? "up" : "down"}">${x.pOver >= 0.5 ? "O" : "U"} ${pct(Math.max(x.pOver, 1 - x.pOver))}</span></td></tr>`).join("")}</tbody></table></div>
-    <p class="small muted">Roster and roles from ${esc(t.name)}'s last game in our data${g.rosterFrom[s] ? ` (${esc(dayShort(g.rosterFrom[s]))})` : ""}. "Our line" is set at his average; O/U is the side our projection favours and how often it happened in 10,000 simulated games.</p></div>`;
+    ${side(s).map((x) => `<tr><td>${x.isNew ? `${esc(x.n)} <span class="ztag cold" title="${esc(x.src)}">NEW</span>` : `<a href="#/player/${esc(x.pid)}">${esc(x.n)}</a>`} <span class="muted small">${esc(x.pos)}</span>${x.src && !x.isNew ? `<span class="small muted" style="display:block">${esc(x.src)}</span>` : ""}</td><td class="n">${f0(x.min)}</td><td class="n"><b>${f1(x.pts)}</b></td><td class="n muted">${f0(x.lo)}-${f0(x.hi)}</td><td class="n">${f1(x.reb)}</td><td class="n">${f1(x.ast)}</td><td class="n">${f1(x.f3m)}</td><td class="n">${f1(x.line)} <span class="${x.pOver >= 0.5 ? "up" : "down"}">${x.pOver >= 0.5 ? "O" : "U"} ${pct(Math.max(x.pOver, 1 - x.pOver))}</span></td></tr>`).join("")}</tbody></table></div>
+    <p class="small muted">${g.announced?.[s] ? `Official roster posted by FIBA. Players marked NEW have no FIBA games in our data yet, so they start from what players at their position usually produce, in a bench role, until they play.` : `Roster and roles from ${esc(t.name)}'s last game in our data${g.rosterFrom[s] ? ` (${esc(dayShort(g.rosterFrom[s]))})` : ""}; this switches to the official 12 as soon as FIBA posts them (usually a day or two before tip-off).`} "Our line" is set at his average; O/U is the side our projection favours and how often it happened in 10,000 simulated games.</p></div>`;
   app.innerHTML = `<a class="back" href="#/games">‹ Games</a>
     <p class="small muted" style="margin:0">${esc(g.compName)}${g.round ? " · " + esc(g.round) : ""}${g.group ? " · Group " + esc(g.group) : ""} · ${esc(dayLabel(g.date))}, ${esc(timeOf(g.date, g.timed))} PH${g.venue ? " · " + esc(g.venue) : ""}${g.city ? ", " + esc(g.city) : ""}</p>
     <h1>${esc(fav.name)} by ${f1(Math.abs(p.a - p.b))}</h1>
@@ -88,7 +88,26 @@ async function vGame(id) {
       <p class="small muted">From 10,000 simulated games. No sportsbook line is used or shown for FIBA.</p></div>
     <div class="card"><h2>By quarter</h2><table class="ft"><thead><tr><th></th><th class="n">Q1</th><th class="n">Q2</th><th class="n">Q3</th><th class="n">Q4</th></tr></thead><tbody>
       <tr><td>${esc(A.code)}</td>${g.quarters.map((x) => `<td class="n">${f1(x[0])}</td>`).join("")}</tr><tr><td>${esc(B.code)}</td>${g.quarters.map((x) => `<td class="n">${f1(x[1])}</td>`).join("")}</tr></tbody></table></div>
-    <h2 style="margin-top:18px">Player projections</h2>${ptable(0, A)}${ptable(1, B)}`;
+    ${haCard(g.ha, [A, B], g.home)}
+    <h2 style="margin-top:18px">Player projections</h2>${ptable(0, A)}${ptable(1, B)}
+    <div id="g-news"></div>`;
+  newsCard(document.getElementById("g-news"), (x) => x.teams.includes(A.tid) || x.teams.includes(B.tid), `News and talk: ${A.name} and ${B.name}`);
+}
+
+// Home / away / neutral records, so home court can be checked against each team's own results.
+function haCard(ha, teams, home) {
+  if (!ha) return "";
+  const rec = (r) => `${r[0]}-${r[1]}`;
+  return `<div class="card"><h2>Home and away</h2><table class="ft"><thead><tr><th></th><th class="n">Home</th><th class="n">Away</th><th class="n">Neutral</th></tr></thead><tbody>${teams.map((t, i) => `<tr><td>${esc(t.name)}${home === i ? ` <span class="chip">home tonight</span>` : ""}</td><td class="n">${rec(ha[i].home)}</td><td class="n">${rec(ha[i].away)}</td><td class="n">${rec(ha[i].neutral)}</td></tr>`).join("")}</tbody></table>
+    <p class="small muted">${home === -1 ? "Neutral court: no home edge is applied." : "Home edge learned from every FIBA game, separately for national teams and clubs (see Results)."} Home-and-away rounds give the first-named team home court; at tournaments only a host nation is at home.</p></div>`;
+}
+// Headlines about these teams and players (Google News, Reddit, FIBA YouTube). Never used in the projections.
+async function newsCard(el, keep, title) {
+  if (!el) return; const N = await load("news.json").catch(() => null); if (!N) return;
+  const rows = N.items.filter(keep).slice(0, 12); if (!rows.length) return;
+  const ago = (d) => { const h = (Date.now() - Date.parse(d)) / 3600000; return h < 24 ? `${Math.max(1, Math.round(h))}h ago` : `${Math.round(h / 24)}d ago`; };
+  el.innerHTML = `<div class="card"><h2>${esc(title)}</h2><ul class="plain news">${rows.map((x) => `<li>${x.roster ? `<span class="ztag hot">ROSTER</span> ` : ""}<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.title)}</a> <span class="small muted">${esc(x.outlet)} · ${esc(ago(x.date))}</span></li>`).join("")}</ul>
+    <p class="small muted">${esc(N.note)} ROSTER marks headlines about call-ups, injuries, withdrawals or line-ups: check them against the roster above.</p></div>`;
 }
 
 // ---------------------------------------------------------------- picks
@@ -177,10 +196,13 @@ async function vTeam(tid) {
     <div class="ehead">${badge(t, t.kind, 64)}<div><h1 style="margin:0">${esc(t.name)}</h1><p class="small muted" style="margin:0">${esc(t.comp)} · ${t.w}-${t.l} in our data · ${f1(t.ppg)} scored, ${f1(t.oppg)} allowed a game</p></div></div>
     <div class="statgrid sg4" style="margin:12px 0"><div class="stat"><b>${sg(t.net)}</b><span>Net rating</span></div><div class="stat"><b>${sg(t.off)}</b><span>Offence</span></div><div class="stat"><b>${sg(t.def)}</b><span>Defence</span></div><div class="stat"><b>${f1(t.pace)}</b><span>Pace</span></div></div>
     ${nx.length ? `<h2>Next games</h2><div class="gc-grid">${nx.map(gameCard).join("")}</div>` : ""}
+    ${t.ha ? `<p class="small">Home ${t.ha.home[0]}-${t.ha.home[1]} · away ${t.ha.away[0]}-${t.ha.away[1]} · neutral ${t.ha.neutral[0]}-${t.ha.neutral[1]}</p>` : ""}
+    <div id="t-news"></div>
     <div class="card"><h2>Roster (last game, ${esc(t.rosterFrom ? dayShort(t.rosterFrom) : "-")})</h2><div class="tw"><table class="ft"><thead><tr><th>Player</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Reb</th><th class="n">Ast</th><th class="n">GP</th></tr></thead><tbody>
       ${t.roster.map((p) => `<tr><td><a href="#/player/${esc(p.pid)}">${esc(p.n)}</a> <span class="muted small">${esc(p.pos)}</span></td><td class="n">${f0(p.min)}</td><td class="n">${f1(p.pts)}</td><td class="n">${f1(p.reb)}</td><td class="n">${f1(p.ast)}</td><td class="n">${p.gp}</td></tr>`).join("")}</tbody></table></div><p class="small muted">Per-game numbers are his projected role: recent minutes times his per-minute rates.</p></div>
     <div class="card"><h2>Shooting zones</h2><div class="grid two"><div><h3>Offence</h3>${zoneTable(t.zonesOff)}</div><div><h3>Defence (what opponents shoot)</h3>${zoneTable(t.zonesDef.map((z) => ({ ...z, tag: z.tag === "hot" ? "cold" : z.tag === "cold" ? "hot" : z.tag })))}</div></div><p class="small muted">On defence, HOT means opponents shoot worse than average there (a strong spot), COLD means they shoot better (a soft spot).</p></div>
     <div class="card"><h2>Results</h2><ul class="plain">${t.games.slice(0, 30).map((g) => `<li class="spread"><span>${esc(dayShort(g.date))} · ${g.us > g.them ? '<b class="up">W</b>' : '<b class="down">L</b>'} vs <a href="#/team/${esc(g.oppTid)}">${esc(g.opp)}</a> <span class="muted small">${esc(g.comp)}</span></span><span class="num">${g.us}-${g.them}</span></li>`).join("")}</ul></div>`;
+  newsCard(document.getElementById("t-news"), (x) => x.teams.includes(t.tid), `News and talk: ${t.name}`);
 }
 
 // ---------------------------------------------------------------- results + accuracy
@@ -191,7 +213,7 @@ async function vResults() {
     <p class="small muted">${acc.graded} graded games. ${esc(acc.rule)} Player points: ${acc.playerGraded.toLocaleString()} graded player-games.</p>
     <div class="card"><h2>Calibration</h2><table class="ft"><thead><tr><th>We said</th><th class="n">Games</th><th class="n">Favourite won</th></tr></thead><tbody>${acc.calibration.map((b) => `<tr><td>${b.lo}-${b.hi}%</td><td class="n">${b.n}</td><td class="n">${b.rate == null ? "-" : pct(b.rate)}</td></tr>`).join("")}</tbody></table></div>
     <div class="card"><h2>By competition</h2><table class="ft"><thead><tr><th>Competition</th><th class="n">Games</th><th class="n">Winners</th><th class="n">Margin miss</th></tr></thead><tbody>${acc.byComp.map((c) => `<tr><td>${esc(c.comp)}</td><td class="n">${c.n}</td><td class="n">${pct(c.winner)}</td><td class="n">${f1(c.marginMAE)}</td></tr>`).join("")}</tbody></table></div>
-    <div class="card"><h2>What the model learned</h2><p class="small">Update speed ${acc.learned.k}, home court ${acc.learned.hca} pts, ratings fade halfway in ${acc.learned.hl} days, result spread ${acc.learned.sd} pts.</p><p class="small muted">${esc(acc.learned.note)} ${acc.grid} combinations tried.</p></div>
+    <div class="card"><h2>What the model learned</h2><p class="small">Update speed ${acc.learned.k}, home court ${acc.learned.hca?.nt ?? acc.learned.hca} pts for national teams and ${acc.learned.hca?.club ?? acc.learned.hca} for clubs, ratings fade halfway in ${acc.learned.hl} days, result spread ${acc.learned.sd} pts.</p><p class="small muted">${esc(acc.learned.note)} ${acc.grid} combinations tried.</p></div>
     <h2>Latest results</h2><div class="tgrid">${res.slice(0, 80).map((r) => { const won = r.a.score > r.b.score; return `<div class="titem rs"><span class="rs-c ${r.graded ? (r.right ? "ok" : "no") : ""}" aria-label="${r.graded ? (r.right ? "Called it" : "Missed") : "Not graded (thin record)"}">${r.graded ? (r.right ? "✓" : "✗") : "·"}</span>
       <span><span class="t1">${won ? "<b>" : ""}${esc(r.a.name)} ${r.a.score}${won ? "</b>" : ""} - ${!won ? "<b>" : ""}${r.b.score} ${esc(r.b.name)}${!won ? "</b>" : ""}</span><span class="t2">${esc(dayShort(r.date))} · ${esc(r.comp)} · we said ${f0(r.proj.a)}-${f0(r.proj.b)}, ${esc(r.proj.pA >= 0.5 ? r.a.code : r.b.code)} ${pct(Math.max(r.proj.pA, 1 - r.proj.pA))}</span>${r.why ? `<span class="t2 why">${esc(r.why)}</span>` : ""}</span><span></span></div>`; }).join("")}</div>`;
 }

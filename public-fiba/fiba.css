@@ -43,3 +43,6 @@ table.ft .n { text-align: right; font-variant-numeric: tabular-nums; white-space
 @media (min-width: 760px) { .grid.two { grid-template-columns: 1fr 1fr; } }
 .statgrid.sg4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .stat b { display: block; font-size: 18px; } .stat span { font-size: 12px; color: var(--muted); }
+
+.news li { padding: 7px 0; border-bottom: 1px solid var(--line); } .news li:last-child { border-bottom: 0; }
+

@@ -104,4 +104,18 @@ await pool(todo, 4, async (g) => {
   if ((ok + bad) % 50 === 0) console.log(`  ${ok + bad}/${todo.length}`);
 });
 console.log(`fetched ${ok} games, ${bad} without a box score`);
+
+// ---------------------------------------------------------------- announced rosters for upcoming games
+// FIBA posts each team's 12 on the game page before tip-off (national teams usually a few days before a window). Check games in the next 21 days every run (every 3 hours);
+// once a roster is there it replaces "last game's roster" in the projections.
+const RD = path.join(FD, "rosters"); fs.mkdirSync(RD, { recursive: true });
+const soon = all.filter((g) => g.status !== "VALID" && Date.parse(g.date) > Date.now() - 3 * 3600000 && Date.parse(g.date) < Date.now() + 21 * 86400000 && g.a.code && g.b.code);
+let rosters = 0;
+await pool(soon, 4, async (g) => {
+  const html = await page(`https://www.fiba.basketball/en/events/${g.slug}/games/${g.id}-${encodeURIComponent(g.a.code)}-${encodeURIComponent(g.b.code)}`); if (!html) return;
+  const f = flight(html), pick = (k) => (valueWhere(f, k, (v) => Array.isArray(v) && v[0]?.personId) || []).map((p) => ({ pid: String(p.personId), n: [p.firstName, p.lastName].filter(Boolean).join(" "), pos: p.position || "", no: p.uniformNumber || "", captain: !!p.isCaptain }));
+  const a = pick("playersTeamA"), b = pick("playersTeamB");
+  if (a.length || b.length) { writeJSON(path.join(RD, `${g.id}.json`), { id: g.id, fetched: new Date().toISOString(), a, b }); rosters++; }
+});
+console.log(`announced rosters found for ${rosters} of ${soon.length} games in the next 21 days`);
 writeJSON(path.join(FD, "fetch-meta.json"), { fetched: new Date().toISOString(), events: EVENTS.length, source: "fiba.basketball public event and game pages (schedule, box scores, play-by-play with shot locations). No betting data." });

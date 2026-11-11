@@ -53,13 +53,15 @@ jobs:
           node scripts/insights.mjs
           node scripts/live.mjs
 
-      # FIBA section: schedules, box scores and shot locations from fiba.basketball, then the walk-forward model.
+      # FIBA section: schedules, box scores, shot locations and the latest posted rosters (next 21 days) from fiba.basketball,
+      # then the walk-forward model, then headlines (Google News, Reddit, FIBA YouTube) tagged to teams and players.
       # A FIBA hiccup must not stop the NBA update, so these steps may fail without failing the run.
       - name: FIBA fetch and model
         continue-on-error: true
         run: |
           node scripts/fiba/fetch.mjs
           node scripts/fiba/model.mjs
+          node scripts/fiba/news.mjs
 
       # One site: homepage at the root, NBA under /nba/, FIBA under /fiba/. The version tag makes phones
       # load the new code right after a deploy.
