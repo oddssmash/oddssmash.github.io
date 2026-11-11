@@ -9,13 +9,13 @@
   <meta name="description" content="Scenario-based NBA projections that grade themselves against every real result. Betting odds never feed the projections.">
   <!-- Dark is the default for every visitor. The toggle stores "light" or "dark" in localStorage and app.js keeps this tag in step. -->
   <meta name="color-scheme" content="dark light">
-  <meta name="theme-color" id="theme-color" content="#04100a">
+  <meta name="theme-color" id="theme-color" content="#0b0c0d">
   <script>
     // Apply a saved light preference before first paint so the page never flashes the wrong theme.
     try {
       if (localStorage.getItem("theme") === "light") {
         document.documentElement.dataset.theme = "light";
-        document.getElementById("theme-color").setAttribute("content", "#f7f5f0");
+        document.getElementById("theme-color").setAttribute("content", "#f4f5f6");
       }
     } catch (e) { /* storage blocked: stay on the dark default */ }
   </script>
@@ -34,7 +34,7 @@
   <button class="skip" id="skip" type="button">Skip to content</button>
   <header class="top">
     <a class="brand" href="#/games" aria-label="ODDSSMASH home">
-      <img class="brand-full" src="brand/logo-lockup.png" alt="" width="176" height="40"><img class="brand-mark" src="brand/icon-192.png" alt="" width="40" height="40">
+      <img class="brand-full on-dark" src="brand/stack-silver.png" alt="" height="46"><img class="brand-full on-light" src="brand/stack-black.png" alt="" height="46">
     </a>
     <nav class="nav" id="nav" aria-label="Sections"></nav>
     <a class="icon-btn" id="bell" href="#/today" aria-label="What changed today" title="What changed today"><svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path d="M6 16V11a6 6 0 1112 0v5l1.5 2h-15zM10 20a2 2 0 004 0" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"/></svg></a>

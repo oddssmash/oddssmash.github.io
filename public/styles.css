@@ -30,7 +30,7 @@
   --focus: #86b6ef;    /* focus ring */
   --shadow: 0 8px 24px rgba(0, 0, 0, .5);
 
-  /* brand kit: forest green, metallic silver, neon blue */
+  /* brand kit: metallic silver (major), neon blue (links, live), forest green (secondary) */
   --brand: #0b5d34; --brand-deep: #053d22; --brand-hi: #13804a;
   --silver: #c3c8cd; --silver-metal: linear-gradient(100deg, #8b9198 0%, #e9ecef 38%, #a9afb5 55%, #f4f6f7 72%, #8f959c 100%);
   --neon: #1fb6ff; --on-accent: #02131d;
@@ -42,14 +42,14 @@
 }
 :root[data-theme="light"] {
   color-scheme: light;
-  --page: #f7f5f0; --surface: #fdfcfa; --surface-2: #efece6;
+  --page: #f4f5f6; --surface: #ffffff; --surface-2: #eceef0;
   --ink: #0b0b0b; --ink-2: #52514e; --muted: #696762;
   --line: #e1e0d9; --axis: #c3c2b7; --ring: rgba(11, 11, 11, .1);
-  --accent: #0072d6; --accent-ink: #0058a8; --accent-wash: #e2f1fd; --on-accent: #fff;
+  --accent: #6b7279; --accent-ink: #0063bd; --accent-wash: #e9ecef; --on-accent: #fff;
   --good: #0ca30c; --good-ink: #006300; --warn: #fab219; --serious: #ec835a; --crit: #d03b3b; --crit-ink: #b02a2a;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300;
   --pos: #2a78d6; --neg: #e34948;
-  --line-2: #b4b3a8; --press: #f1eee8; --face: #e4e1d9; --focus: #0058a8;
+  --line-2: #aeb4ba; --press: #eef0f2; --face: #e1e4e7; --focus: #0063bd;
   --shadow: 0 8px 24px rgba(0, 0, 0, .14);
 }
 @media (min-width: 480px) { :root { --pad: 16px; } }
@@ -89,8 +89,10 @@ main:focus, main:focus-visible { outline: none; }
 }
 .brand { display: inline-flex; align-items: center; gap: 10px; min-height: var(--tap); font-size: 16px; font-weight: 700; color: var(--ink); letter-spacing: -.015em; white-space: nowrap; }
 .brand:hover { text-decoration: none; }
-.brand img { flex: none; display: block; height: 40px; width: auto; border-radius: 10px; box-shadow: 0 0 0 1px rgba(195, 200, 205, .55); }
-.brand .brand-mark { display: none; }
+.brand img { flex: none; display: block; height: 46px; width: auto; }
+.brand .on-light { display: none; }
+:root[data-theme="light"] .brand .on-dark { display: none; }
+:root[data-theme="light"] .brand .brand-full.on-light { display: block; }
 .icon-btn { margin-left: auto; flex: none; width: var(--tap); height: var(--tap); display: grid; place-items: center; border: 1px solid var(--line); background: var(--surface); border-radius: 12px; cursor: pointer; color: var(--ink-2); transition: border-color .12s, color .12s; }
 .icon-btn:active { background: var(--surface-2); }
 @media (hover: hover) { .icon-btn:hover { border-color: var(--line-2); color: var(--ink); } }
@@ -628,7 +630,7 @@ details.prop-why .pw-l img, details.prop-why .pw-l svg, details.prop-why .pw-l >
 /* ---------- Lab (batch 3): simulation, board, season, insights, compare ---------- */
 /* Seven tabs in the phone bar now (Lab added before More). */
 .nav { grid-template-columns: repeat(7, minmax(0, 1fr)); }
-@media (min-width: 760px) and (max-width: 899px) { .brand .brand-full { display: none; } .brand .brand-mark { display: block; } .nav a { padding: 0 10px; } }
+@media (min-width: 760px) and (max-width: 899px) {  .nav a { padding: 0 10px; } }
 .lab-g { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; margin-bottom: 12px; }
 @media (min-width: 620px) { .lab-g { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .lab-g .card { margin: 0; }
@@ -779,31 +781,32 @@ a.gtab { color: var(--accent-ink); }
 [hidden] { display: none !important; }
 
 /* ==========================================================================
-   Brand kit (official ODDSSMASH logo): forest-green surfaces, metallic silver edges, neon blue accent and glow.
+   Brand kit (official ODDSSMASH logo): metallic silver is the major colour (logo, selected tabs, edges)
+   on graphite surfaces; neon blue for links; forest green secondary.
    Chart colours --s1..--s6 unchanged; re-validated against the navy surfaces
-   (#101a2e); the forest surfaces have the same lightness, so contrast holds.
+   (#101a2e); the graphite surfaces have the same lightness, so contrast holds.
    ========================================================================== */
 :root:not([data-theme="light"]) {
-  --page: #04100a; --surface: #0a1c13; --surface-2: #11291d;
-  --line: #1b3a2a; --axis: #2a5040; --line-2: #3d6b54; --press: #0e2418; --face: #173427;
-  --ink: #eef5f0; --ink-2: #b9cbc0; --muted: #839a8d;
-  --accent: #1fb6ff; --accent-ink: #7fd5ff; --accent-wash: #062a3b; --focus: #7fd5ff;
-  --glow: 0 0 0 1px rgba(31, 182, 255, .2), 0 6px 22px rgba(11, 93, 52, .35);
+  --page: #0b0c0d; --surface: #15171a; --surface-2: #1e2125;
+  --line: #2a2e33; --axis: #3a3f45; --line-2: #4e545b; --press: #1a1d20; --face: #262a2f;
+  --ink: #f2f4f6; --ink-2: #c4c9ce; --muted: #8f969d;
+  --accent: #c9ced3; --accent-ink: #7fd5ff; --accent-wash: #23272c; --focus: #7fd5ff;
+  --glow: 0 0 0 1px rgba(201, 206, 211, .16), 0 6px 22px rgba(0, 0, 0, .45);
 }
-:root:not([data-theme="light"]) body { background: radial-gradient(1200px 600px at 50% -200px, #0b3d24 0%, var(--page) 60%) fixed, var(--page); }
-:root:not([data-theme="light"]) .card, :root:not([data-theme="light"]) .menu-i, :root:not([data-theme="light"]) .titem { border-color: rgba(31, 182, 255, .18); box-shadow: var(--glow); }
-:root:not([data-theme="light"]) .top { background: rgba(4, 16, 10, .92); border-bottom-color: rgba(195, 200, 205, .22); }
-:root:not([data-theme="light"]) .nav { background: rgba(6, 20, 13, .97); border-top-color: rgba(195, 200, 205, .25); }
+:root:not([data-theme="light"]) body { background: radial-gradient(1200px 600px at 50% -200px, #23272c 0%, var(--page) 60%) fixed, var(--page); }
+:root:not([data-theme="light"]) .card, :root:not([data-theme="light"]) .menu-i, :root:not([data-theme="light"]) .titem { border-color: rgba(201, 206, 211, .18); box-shadow: var(--glow); }
+:root:not([data-theme="light"]) .top { background: rgba(11, 12, 13, .92); border-bottom-color: rgba(195, 200, 205, .22); }
+:root:not([data-theme="light"]) .nav { background: rgba(16, 18, 20, .97); border-top-color: rgba(195, 200, 205, .25); }
 .nav a[aria-current="page"] { color: #fff; }
-.nav a[aria-current="page"] svg { color: var(--accent); filter: drop-shadow(0 0 6px rgba(31, 182, 255, .75)); }
+.nav a[aria-current="page"] svg { color: var(--accent); filter: drop-shadow(0 0 6px rgba(230, 234, 238, .6)); }
 
 /* pill tabs */
 .gtabs { background: transparent; border: 0; gap: 6px; }
-:root:not([data-theme="light"]) .gtabs { background: rgba(4, 16, 10, .94); }
+:root:not([data-theme="light"]) .gtabs { background: rgba(11, 12, 13, .94); }
 .gtab { background: var(--surface-2); color: var(--ink-2); border-radius: 12px; }
-.gtab[aria-selected="true"] { background: var(--accent); color: var(--on-accent); font-weight: 650; box-shadow: 0 0 14px rgba(31, 182, 255, .5); }
+.gtab[aria-selected="true"] { background: var(--silver-metal); color: #0b0b0b; font-weight: 650; box-shadow: 0 0 0 1px #aeb4ba, 0 0 14px rgba(220, 226, 232, .28); }
 a.gtab { color: var(--ink-2); }
-.fbtn[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); font-weight: 650; border-color: var(--accent); box-shadow: 0 0 12px rgba(31, 182, 255, .4); }
+.fbtn[aria-pressed="true"] { background: var(--silver-metal); color: #0b0b0b; font-weight: 650; border-color: #aeb4ba; box-shadow: 0 0 12px rgba(220, 226, 232, .25); }
 /* metallic silver rule under the header */
 .top::after { content: ""; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: var(--silver-metal); opacity: .6; pointer-events: none; }
 :root[data-theme="light"] .top::after { opacity: .95; }

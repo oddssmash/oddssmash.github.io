@@ -116,7 +116,7 @@ document.addEventListener("error", (e) => {
 }, true);
 
 // Theme: dark unless the visitor chose light. Keeps the browser chrome colour, the toggle label and the logo set in step.
-const THEME_COLOR = { dark: "#04100a", light: "#f7f5f0" };
+const THEME_COLOR = { dark: "#0b0c0d", light: "#f4f5f6" };
 function setTheme(theme, persist = false) {
   const t = theme === "light" ? "light" : "dark";
   document.documentElement.dataset.theme = t;
