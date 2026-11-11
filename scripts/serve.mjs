@@ -19,4 +19,4 @@ http.createServer((req, res) => {
     if (err) { res.writeHead(404, { "Content-Type": "text/plain" }).end("Not found"); return; }
     res.writeHead(200, { "Content-Type": types[path.extname(file)] || "application/octet-stream", "Cache-Control": "no-store" }).end(buf);
   });
-}).listen(port, () => console.log(`AGAINST ALL ODDS preview: http://localhost:${port}`));
+}).listen(port, () => console.log(`ODDSSMASH preview: http://localhost:${port}`));

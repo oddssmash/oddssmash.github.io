@@ -1,4 +1,4 @@
-// AGAINST ALL ODDS - front end. Reads the JSON the pipeline writes into ./data.
+// ODDSSMASH - front end. Reads the JSON the pipeline writes into ./data.
 const app = document.getElementById("app");
 const tipEl = document.getElementById("tip");
 // S.P maps player id -> players.json entry and S.PN maps lower-case name -> id (both filled at boot, used for faces).
