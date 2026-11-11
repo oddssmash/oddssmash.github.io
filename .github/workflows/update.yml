@@ -53,6 +53,13 @@ jobs:
           node scripts/insights.mjs
           node scripts/live.mjs
 
+      # Make phones load the new code right after a deploy (the version tag changes on every run).
+      - name: Cache-bust the site code
+        run: |
+          v="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
+          sed -i "s#src=\"app.js\"#src=\"app.js?v=$v\"#; s#href=\"styles.css\"#href=\"styles.css?v=$v\"#" public/index.html
+          grep -o 'app.js?v=[^"]*' public/index.html
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
