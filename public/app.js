@@ -917,7 +917,9 @@ const briefReason = (t) => String(t ?? "").replace(/\s*\([^()]{40,}\)/g, "").tri
 const halfLine = (x) => Math.floor(x) + 0.5;                       // 23.6 -> 23.5, 24.2 -> 24.5 rule below
 const nearHalf = (x) => Math.round(x - 0.5) + 0.5;                 // nearest x.5
 const fairML = (p) => { p = Math.min(0.995, Math.max(0.005, p)); return p >= 0.5 ? -Math.round((100 * p) / (1 - p)) : Math.round((100 * (1 - p)) / p); };
-const mlTxt = (p) => { const v = fairML(p); return v > 0 ? `+${v}` : `−${Math.abs(v)}`; };
+// Odds are shown as decimal odds everywhere (payout per 1 staked, stake included).
+const decOdds = (a) => { const v = Number(String(a ?? "").replace("+", "")); if (!v || !Number.isFinite(v)) return "-"; return (v > 0 ? 1 + v / 100 : 1 + 100 / -v).toFixed(2); };
+const mlTxt = (p) => (p > 0 && p < 1 ? (1 / p).toFixed(2) : "-");
 const spreadTxt = (x) => (x > 0 ? `−${x.toFixed(1)}` : `+${Math.abs(x).toFixed(1)}`);
 function pNorm(z) { const t = 1 / (1 + 0.2316419 * Math.abs(z)), d = 0.3989423 * Math.exp((-z * z) / 2); const q = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274)))); return z > 0 ? 1 - q : q; }
 // Chance a stat clears a line, using the player's own (uneven) 80% range when we have it.
@@ -3072,7 +3074,7 @@ const up = await load("upcoming.json").catch(() => []);
         const gcard = (x) => `<div class="card pick ml"><div class="pick-h">${teamLogo(x.home, { size: "sm" })}<span><b>${esc(x.kind)}</b><span class="small muted"> ${esc(T(x.away).abbr)} at ${esc(T(x.home).abbr)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.6 ? "lean" : x.p >= 0.53 ? "slight lean" : "coin-flip"}</span>${meter(x.p)}
           <div class="pick-l"><b>${esc(x.pick)}</b> <span class="small muted">sportsbook main line</span></div>
-          <div class="pick-alt"><span>${esc(x.ours)}</span>${x.book != null ? `<span>book's fair chance ${pct(x.book)}</span>` : ""}<span class="${x.book != null && x.p - x.book >= 0.05 ? "up" : ""}">gap ${x.book != null ? (x.p - x.book > 0 ? "+" : "") + Math.round((x.p - x.book) * 100) : "-"}</span>${x.price != null ? `<span>price ${esc(Number(x.price) > 0 ? "+" + x.price : x.price)}</span>` : ""}${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}</div>
+          <div class="pick-alt"><span>${esc(x.ours)}</span>${x.book != null ? `<span>book's fair chance ${pct(x.book)}</span>` : ""}<span class="${x.book != null && x.p - x.book >= 0.05 ? "up" : ""}">gap ${x.book != null ? (x.p - x.book > 0 ? "+" : "") + Math.round((x.p - x.book) * 100) : "-"}</span>${x.price != null ? `<span>odds ${esc(decOdds(x.price))}</span>` : ""}${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}</div>
           <div class="small ${x.qual ? "qual" : "muted"}">${x.qual ? "✓ Statistical edge: our chance beats the book's by 5+ points and EV is +3% or more." : "No qualifying edge: our chance and the price are too close (we need a 5-point gap and +3% EV)."}</div>
           ${x.book != null && Math.abs(x.p - x.book) >= 0.12 ? `<div class="small" style="color:var(--warn)">⚠ Big disagreement (${Math.round(Math.abs(x.p - x.book) * 100)} points). Gaps this large often mean the bookmaker has late news we do not (injury, rest, lineup). Check the latest news before trusting it; our game totals miss by about 15 points on average.</div>` : ""}
           <div class="pick-m small muted">${x.date ? esc(timePH(x.date)) + " · " : ""}<a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
@@ -3894,7 +3896,7 @@ function liveMarkets(g, L, M) {
 const ESPN_CORE = "https://sports.core.api.espn.com/v2/sports/basketball/leagues/nba";
 const amP = (a) => { const v = Number(String(a ?? "").replace("+", "")); return !v ? null : v < 0 ? -v / (-v + 100) : 100 / (v + 100); };
 const noVig = (a, b) => { const x = amP(a), y = amP(b); return x == null || y == null ? null : x / (x + y); };
-const amTxt = (a) => (a == null || a === "" ? "-" : (Number(a) > 0 ? "+" : "") + Number(a));
+const amTxt = (a) => decOdds(a);
 function parseProps(pb, tid) {
   const groups = new Map();
   for (const x of pb?.items || []) {
@@ -3929,7 +3931,7 @@ async function marketFetch(id, keepProps) {
 function livePicks(g, L, M, m) {
   const H = T(g.home).abbr, A = T(g.away).abbr, homeId = String(g.home), awayId = String(g.away);
   const dec = (a) => { const v = Number(a); return !v ? null : v > 0 ? 1 + v / 100 : 1 + 100 / -v; };
-  const out = [], amB = (v) => (v == null || v === "" || !Number.isFinite(Number(v)) ? "-" : (Number(v) > 0 ? "+" : "") + Number(v));
+  const out = [], amB = (v) => decOdds(v);
   const add = (o) => { if (o.ours == null || !Number.isFinite(o.ours) || o.ours <= 0.5 || o.ours >= 0.995) return; const d = dec(o.price); o.ev = d ? o.ours * d - 1 : null; o.gap = o.book != null ? o.ours - o.book : null; o.qual = o.gap != null && o.ev != null && o.gap >= 0.05 && o.ev >= 0.03; out.push(o); };
   const sideP = (pOver, line, price2, label, kind, tag, extra = {}) => { const over = pOver >= 0.5; const pr = over ? price2[0] : price2[1]; const bk = noVig(price2[0], price2[1]); add({ tag, kind, bk: `Over ${line} ${amB(price2[0])} · Under ${line} ${amB(price2[1])}`, pick: `${over ? "Over" : "Under"} ${line}`, label, price: pr, ours: over ? pOver : 1 - pOver, book: bk == null ? null : over ? bk : 1 - bk, ...extra }); };
   // game moneyline
@@ -3977,7 +3979,7 @@ function livePicks(g, L, M, m) {
 function livePicksCard(g, L, M, m) {
   if (!m.live) return `<div class="lp-card"><h3>Our live picks</h3><p class="small muted">Waiting for the sportsbook's live odds. Picks appear only against live lines, never against stale pre-game lines.</p></div>`;
   const lp = livePicks(g, L, M, m); if (!lp.game.length && !lp.props.length) return "";
-  const amT = (a) => (a == null || a === "" || !Number.isFinite(Number(a)) ? "-" : (Number(a) > 0 ? "+" : "") + Number(a));
+  const amT = (a) => decOdds(a);
   const row = (x) => `<div class="lp-row ${x.qual ? "lp-q" : x.gap != null && x.gap >= 0.02 ? "lp-l" : "lp-n"}">
       <div class="lp-top"><span class="lp-tag">${esc(x.tag)}</span><span class="lp-k">${esc(x.kind)}</span>${x.qual ? '<span class="lp-star" title="Qualifying edge">★ edge</span>' : ""}</div>
       <div class="lp-mid"><span class="lp-pick">${esc(x.pick)}</span><span class="lp-price">${esc(amT(x.price))}</span></div>
