@@ -70,6 +70,7 @@ jobs:
         run: |
           node scripts/mlbb/fetch.mjs
           node scripts/mlbb/model.mjs
+          node scripts/mlbb/images.mjs
 
       # One site: homepage at the root, NBA under /nba/, FIBA under /fiba/. The version tag makes phones
       # load the new code right after a deploy.

@@ -166,7 +166,7 @@ const PL = new Map();
 for (const m of done) for (const g of m.games) for (const [team, hs, won] of [[m.a, g.h1, g.w === 1], [m.b, g.h2, g.w === 2]]) {
   const ro = rosterFor(team, m.page); if (!ro.length) continue;
   hs.forEach((hero, i) => { const pl = ro.find((x) => x.role === ROLES[i]); if (!pl) return; const k = pl.page || pl.player; let s = PL.get(k);
-    if (!s) PL.set(k, (s = { id: safe(k), name: pl.player, role: pl.role, teams: {}, heroes: {}, games: 0, wins: 0, mvp: 0, last: null }));
+    if (!s) PL.set(k, (s = { id: safe(k), page: pl.page && !/does not exist/.test(pl.page) ? pl.page : null, name: pl.player, role: pl.role, teams: {}, heroes: {}, games: 0, wins: 0, mvp: 0, last: null }));
     s.games++; if (won) s.wins++; s.teams[team] = (s.teams[team] || 0) + 1; s.team = team; s.role = pl.role; s.last = m.date;
     const hh = (s.heroes[hero] ||= { n: 0, w: 0 }); hh.n++; if (won) hh.w++; });
 }
@@ -185,7 +185,7 @@ function playerArch(s) {
   if (pool >= 10) out.push("Deep hero pool"); else if (top >= 0.3 && tot >= 10) out.push("Specialist");
   return { labels: out, profile: Object.fromEntries(TRAITS.map((k) => [k, Math.round(p[k] * 100) / 100])) };
 }
-const playersOut = [...PL.values()].map((s) => ({ arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
+const playersOut = [...PL.values()].map((s) => ({ page: s.page, arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
   pool: Object.entries(s.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 12),
   signature: Object.entries(s.heroes).filter(([, v]) => v.n >= 4).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n), score: (v.w + 2) / (v.n + 4) * Math.log(1 + v.n) })).sort((a, b) => b.score - a.score).slice(0, 3).map(({ score, ...x }) => x),
   teams: Object.entries(s.teams).map(([t, n]) => ({ t, n })) })).sort((a, b) => b.games - a.games);

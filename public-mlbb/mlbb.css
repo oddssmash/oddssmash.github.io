@@ -40,3 +40,10 @@ table.tb2 td:nth-child(3) { width: 45%; }
 .mbar { display: inline-block; width: 50%; height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; } .mbar span { display: block; height: 100%; background: var(--accent); }
 .tgrid2 { display: grid; gap: 4px; margin: 8px 0; }
 .btn { min-height: 40px; padding: 0 14px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); cursor: pointer; font: inherit; }
+
+/* pictures */
+.tlogo { display: inline-grid; place-items: center; flex: none; vertical-align: middle; } .tlogo img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.tlogo .on-light-i { display: none; } :root[data-theme="light"] .tlogo .on-light-i { display: block; } :root[data-theme="light"] .tlogo .on-dark-i { display: none; }
+.himg { border-radius: 50%; object-fit: cover; vertical-align: middle; margin-right: 4px; background: var(--surface-2); }
+.pface { border-radius: 50%; object-fit: cover; object-position: center top; background: var(--face); flex: none; vertical-align: middle; }
+.hpic { position: relative; display: inline-block; } .hpic .tier { position: absolute; right: -6px; bottom: -6px; width: 22px; height: 22px; font-size: 12px; }
