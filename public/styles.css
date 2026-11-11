@@ -1051,3 +1051,4 @@ a.gtab { color: var(--ink-2); }
 .gw-more p, .gw-more li { font-size: 13px; line-height: 1.45; }
 .gw-tests li { padding: 2px 0; }
 .gw-t td, .gw-t th { padding: 5px 6px; font-size: 12.5px; }
+.est-tag { color: #6fd3ff; font-weight: 600; }

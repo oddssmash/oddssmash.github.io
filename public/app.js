@@ -3095,9 +3095,9 @@ const up = await load("upcoming.json").catch(() => []);
     const pl = gm?.teams?.flatMap((t) => (t.players || []).map((p) => ({ ...p, tid: t.tid }))).find((p) => String(p.id) === String(x.pl.id));
     const opp = gm?.teams?.find((t) => t.tid !== pl?.tid);
     const d = x.pl.dist?.[x.fam] || [], side = x.over ? "Over" : "Under";
-    const summary = `${side} ${x.line}: we project ${esc(x.median ?? "-")} (80% range ${esc(d[3] ?? "-")}-${esc(d[6] ?? "-")}) in about ${f0(x.pl.proj?.min || pl?.min || 0)} minutes. We say ${pct(x.p)}, the book ${x.book != null ? pct(x.book) : "-"}${x.hold != null ? `; holds in ${pct(x.hold)} of the game scripts` : ""}${x.ev != null ? `; EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}% at ${x.dec.toFixed(2)}` : ""}.`;
+    const summary = `${side} ${x.line}: we project ${esc(x.median ?? "-")} (80% range ${esc(d[3] ?? "-")}-${esc(d[6] ?? "-")}) in about ${f0(x.pl.proj?.min || pl?.min || 0)} minutes. We say ${pct(x.p)}${x.src === "est" ? ` at his season-average line (${f1(x.estAvg)}); the bookmaker has not posted this prop yet, so there are no odds to compare` : `, the book ${x.book != null ? pct(x.book) : "-"}`}${x.hold != null ? `; holds in ${pct(x.hold)} of the game scripts` : ""}${x.ev != null ? `; EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}% at ${x.dec.toFixed(2)}` : ""}.`;
     const parts = [];
-    parts.push(`<h4>Gold tests</h4>${goldTests(x)}`);
+    if (x.src !== "est") parts.push(`<h4>Gold tests</h4>${goldTests(x)}`); else parts.push(`<h4>Our pick before the bookmaker posts</h4><p>Tested at ${esc(x.line)}, just above or below his season average of ${f1(x.estAvg)}, which is where books usually set the line. Gold needs real odds, so this pick can turn gold only after the bookmaker posts.</p>`);
     parts.push(`<h4>Our projection</h4><p>${f0(x.pl.proj?.min || pl?.min || 0)} minutes · average ${f1(x.mean)} · median ${esc(x.median ?? "-")} · 80% range ${esc(d[3] ?? "-")} to ${esc(d[6] ?? "-")} ${x.word}.${x.thr.length ? ` Chance of reaching: ${x.thr.map(([t, q]) => `${t}+ ${pct(q)}`).join(", ")}.` : ""}</p>${pl ? `<p class="small muted">${propReason(pl)}</p>` : ""}`);
     // full scenario-by-scenario analysis
     const rows = (sim?.scenarios || []).filter((sc) => sc.freq >= 0.01).map((sc) => {
@@ -3172,10 +3172,22 @@ const up = await load("upcoming.json").catch(() => []);
         if ((pl.proj?.min || 0) < 20 || pl.pDnp > 0.25) continue;
         for (const [fam, word] of FAMS_MAIN) {
           const ref = refLine(gid, pl.id, fam); if (!ref || ref.pOver == null) continue;
-          if (ref.src === "ours") continue; // our own main line sits at our median, so it is always near 50%
+          let estAvg = null;
+          if (ref.src === "ours") {
+            // No bookmaker line yet: test our projection at the line a book would most likely post, his season average
+            // (this season, blended with last season while the sample is small). Replaced as soon as the real line appears.
+            const sp = S.P?.[String(pl.id)], I = { pts: 2, reb: 3, ast: 4 };
+            const avgOf = (row) => (!row ? null : fam === "pra" ? row[2] + row[3] + row[4] : I[fam] != null ? row[I[fam]] : null);
+            const c = sp?.cur, pv = sp?.prev, ac = avgOf(c), ap = avgOf(pv);
+            if (ac == null && ap == null) continue;
+            const wc = c ? Math.min(1, (c[0] || 0) / 15) : 0; estAvg = ac != null && ap != null ? wc * ac + (1 - wc) * ap : ac ?? ap;
+            const L = Math.floor(estAvg) + 0.5, pO = simOver(pl, fam, L); if (pO == null) continue;
+            Object.assign(ref, { line: L, pOver: pO, src: "est" });
+            if (Math.max(pO, 1 - pO) < 0.58) continue; // too close to call at his usual line
+          }
           const over = ref.pOver >= 0.5, p = Math.max(ref.pOver, 1 - ref.pOver);
           const thr = (pl.thr?.[fam] || []).filter(([x]) => Math.abs(x - ref.line) <= (fam === "pts" || fam === "pra" ? 10 : 3)).slice(0, 4);
-          const x = { gid, pl, fam, word, line: ref.line, over, p, median: ref.median, mean: pl.dist?.[fam]?.[0], thr, src: ref.src, home: sim.home ?? GAME[gid]?.home, away: sim.away ?? GAME[gid]?.away, date: GAME[gid]?.date };
+          const x = { gid, pl, fam, word, line: ref.line, over, p, median: ref.median, mean: pl.dist?.[fam]?.[0], thr, src: ref.src, home: sim.home ?? GAME[gid]?.home, away: sim.away ?? GAME[gid]?.away, date: GAME[gid]?.date, estAvg };
           const po = PROPODDS[gid]?.get(`${pl.id}|${fam}`);
           if (po && po.line === ref.line) { x.price = over ? po.over : po.under; const bo = noVig(po.over, po.under); x.book = bo == null ? null : over ? bo : 1 - bo; x.bk = `Over ${po.line} ${decOdds(po.over)} · Under ${po.line} ${decOdds(po.under)}`; }
           x.dec = decOf(x.price); x.ev = evOf(x.p, x.price); x.gap = x.book != null ? x.p - x.book : null;
@@ -3240,7 +3252,7 @@ const up = await load("upcoming.json").catch(() => []);
           <div class="pick-m small muted">${x.date ? esc(timePH(x.date)) + " · " : ""}<a href="#/game/${esc(x.gid)}">Game page ›</a></div></div>`;
         const card = (x) => `<div class="card pick ml${x.gold ? " gold" : ""}">${x.gold ? `<div class="gold-tag">★ Worth a look: edge + odds ${esc(x.dec.toFixed(2))} + ${pct(x.p)} to hit</div>` : ""}<div class="pick-h">${avatar(x.pl.id, x.pl.n, { size: "sm" })}<span><b>${esc(x.pl.n)}</b><span class="small muted"> ${esc(T(x.pl.side === 0 ? x.home : x.away).abbr || "")} · ${esc(x.word)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.62 ? "lean" : "slight lean"}</span>${meter(x.p)}
-          <div class="pick-l"><b>${x.over ? "Over" : "Under"} ${esc(x.line)} ${esc(x.word)}</b> <span class="small muted">sportsbook main line</span></div>
+          <div class="pick-l"><b>${x.over ? "Over" : "Under"} ${esc(x.line)} ${esc(x.word)}</b> <span class="small ${x.src === "est" ? "est-tag" : "muted"}">${x.src === "est" ? `our pick at his season average (${f1(x.estAvg)}) · bookmaker line not posted yet` : "sportsbook main line"}</span></div>
           ${x.bk ? `<div class="lp-bk small"><span class="lp-bkl">Bookmaker</span> ${esc(x.bk)}</div>` : ""}
           ${x.price != null ? `<div class="pick-alt"><span>odds ${esc(decOdds(x.price))}</span><span>book's fair chance ${pct(x.book)}</span><span class="${(x.gap ?? 0) >= 0.05 ? "up" : ""}">gap ${(x.gap > 0 ? "+" : "") + Math.round(x.gap * 100)}</span>${x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}</div>` : ""}
           ${x.hold != null ? `<div class="small">Scenario check: his average lands on our side in <b>${pct(x.hold)}</b> of the simulated game scripts</div>` : ""}
@@ -3254,7 +3266,7 @@ const up = await load("upcoming.json").catch(() => []);
           ${gml.length ? gml.map(gcard).join("") : `<p class="empty">No sportsbook game lines for this day yet (they usually post a day or two before).</p>`}
           <h2 class="pk-sec">Player props</h2><p class="small muted">EV (expected value) = our chance × the decimal price − 1, per unit staked: it uses our chance, never the book's. Player prop prices come from the same bookmaker's pre-game prop feed; the over/under order is checked against its milestone prices. Statistical comparison, not betting advice.</p>
           <p class="small muted">Player props at the <b>sportsbook's main line</b> (the line you would actually see, e.g. 22.5 points), with our lean and our chance from 10,000 simulations. The book only sets which line is tested: our chance is our own model, never the odds. These sit between 55% and 75% because main lines are set close to even; that is normal. The chips show our chance at nearby lines.</p>
-          ${shown.length ? shown.map(card).join("") : `<p class="empty">No sportsbook main lines for this day: player lines usually appear on game day, and games that have started are left out (open the game's Live tab instead). Our own main line for every player is on each game page (Players tab).</p>`}
+          ${shown.length ? shown.map(card).join("") : `<p class="empty">No player picks for this day yet: games that have started are left out (open the game's Live tab instead). Our own main line for every player is on each game page (Players tab).</p>`}
           ${ml.length > shown.length ? `<p class="small muted">${ml.length - shown.length} more lines are close to 50/50 and left out.</p>` : ""}`;
       })()
       : S.pkKind !== "parlay" ? `<div class="filters" role="group" aria-label="Confidence">${[["all", "85% and up"], ["95", "Near-certain 95%+"], ["85", "85-94%"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-band="${k}" aria-pressed="${S.pkBand === k}">${l}</button>`).join("")}</div>
