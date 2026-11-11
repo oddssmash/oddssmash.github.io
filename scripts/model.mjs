@@ -1867,6 +1867,26 @@ if (!process.env.CL_OUT || process.env.CL_HISTORY === "1") {
   const old = fs.readdirSync(HIST).filter((f) => /^projections-.*\.json$/.test(f)).sort();
   for (const f of old.slice(0, Math.max(0, old.length - 120))) fs.rmSync(path.join(HIST, f), { force: true });
 }
+// ---- permanent pre-tip ledger (data/pretip.json): each game's LAST prediction made before tip-off, frozen with the
+// model version, then graded against the final score. Seeded from the history snapshots, updated on every run until tip.
+// This is the honest record: unlike the walk-forward replay, nothing here can be re-computed after the fact.
+if (!process.env.CL_OUT) {
+  const LEDGER = path.join(DATA, "pretip.json"), HIST = path.join(DATA, "history");
+  const led = readJSON(LEDGER, { format: 1, games: {} });
+  const ver = (process.env.GITHUB_SHA || "local").slice(0, 7) + (EFF_K ? `-eff${EFF_K}` : "");
+  const put = (g, at, version) => {
+    const prev = led.games[g.id]; if (prev && prev.graded) return; if (Date.parse(at) >= Date.parse(g.date)) return; if (prev && Date.parse(prev.frozen) > Date.parse(at)) return;
+    led.games[g.id] = { frozen: at, version, date: g.date, home: g.home, away: g.away, hs: g.hs, as: g.as, pHome: g.pHome };
+  };
+  const snaps = fs.existsSync(HIST) ? fs.readdirSync(HIST).filter((x) => x.startsWith("projections-") && x.endsWith(".json")).sort() : [];
+  for (const fn of snaps) { const h = readJSON(path.join(HIST, fn), null); for (const g of h?.games || []) put(g, h.run, led.games[g.id]?.version || "snapshot"); }
+  const nowReal = new Date().toISOString();
+  for (const u of upcoming) put({ id: u.id, date: u.date, home: u.home, away: u.away, hs: u.pred.hs, as: u.pred.as, pHome: u.pred.pHome }, nowReal, ver);
+  const res = new Map(readJSON(path.join(OUT, "results.json"), []).map((x) => [String(x.id), x]));
+  for (const [id, g] of Object.entries(led.games)) { const r0 = res.get(String(id)); if (!r0 || g.graded) continue; g.graded = true; g.act = { hs: r0.act.hs, as: r0.act.as }; g.correct = (r0.act.hs > r0.act.as) === (g.pHome >= 0.5); }
+  writeJSON(LEDGER, led);
+  writeJSON(path.join(OUT, "pretip.json"), { format: 1, note: "Predictions saved before tip-off (the last run before each game), frozen with the model version and graded after the final. No betting odds in this file.", games: Object.entries(led.games).map(([id, g]) => ({ id, ...g })).sort((x, y) => x.date.localeCompare(y.date)) });
+}
 fs.rmSync(path.join(OUT, "players"), { recursive: true, force: true });
 for (const p of playerProfiles) writeJSON(path.join(OUT, "players", `${p.id}.json`), p);
 writeJSON(path.join(OUT, "players.json"), playerProfiles.map((p) => ({ id: p.id, n: p.n, pos: p.pos, team: p.team, arch: p.archetype, k2: p.k2?.ovr ?? null, cur: p.cur ? [p.cur.gp, p.cur.min, p.cur.pts, p.cur.reb, p.cur.ast] : null, prev: p.prev ? [p.prev.gp, p.prev.min, p.prev.pts, p.prev.reb, p.prev.ast] : null,

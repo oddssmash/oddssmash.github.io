@@ -1067,3 +1067,8 @@ a.gtab { color: var(--ink-2); }
 .bld-sl { display: grid; gap: 8px; margin: 10px 0; }
 .bld-sl label { display: grid; gap: 4px; font-size: 13px; }
 .bld-sl input[type=range] { width: 100%; accent-color: #f5b82e; }
+.lp-key.w::before { background: #e5484d; }
+.lp-row.lp-w { border-left-color: #e5484d; opacity: .85; }
+.lp-row.lp-w .lp-pick { background: #8a93a6; color: #0b1020; }
+.blend-ev { color: #b9a3ff; }
+.blend-tog { display: block; margin: 6px 0; }

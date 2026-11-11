@@ -330,8 +330,17 @@ async function writeOdds(events) {
     } catch { /* no props for this game */ }
     if (Object.keys(players).length) { g.props = players; props.games++; props.players += Object.keys(players).length; }
   }
+  // Closing lines: the last pre-game line of every game that has tipped off, kept for grading closing line value
+  // (did our side's price improve between the first line we saw and the close?). Comparison only, like everything here.
+  const closing = { ...(prev.closing || {}) };
+  for (const [id, g] of Object.entries(prev.games || {})) {
+    if (closing[id] || Date.parse(g.date) > now) continue;
+    const { props: _p, ...line } = g; closing[id] = { ...line, closedAt: stamp };
+  }
   writeJSON(file, {
     format: 1,
+    closingNote: "closing[id]: the last pre-game line stored before tip-off (with the opening line in 'open'), used only to grade closing line value on the Accuracy report.",
+    closing,
     note: "FOR COMPARISON ONLY. Sportsbook lines as ESPN publishes them on its scoreboard (pre-game summary as a fallback). Display-only in the Simulation and High-confidence tabs; never an input to projections, learning, scenarios or the simulation. spreadHome is the home team's line (negative = home favoured); moneylines are American odds; impliedHome is the moneyline win chance with the bookmaker margin removed. games[id].props (games in the next 30 hours, when published): ESPN athlete id -> line for pts, reb, ast, tpm, stl, blk, pra from the same bookmaker; only the line is stored because ESPN does not label which price is over and which under.",
     source: "ESPN public scoreboard / summary feeds (site.api.espn.com) for game lines; ESPN public core API propBets (sports.core.api.espn.com) for player lines. The bookmaker is named per game in 'provider'.",
     fetched: stamp, props, games,
