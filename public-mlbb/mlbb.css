@@ -539,3 +539,14 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 .fm-r { display: grid; grid-template-columns: minmax(0, 70px) 1fr; gap: 4px 10px; align-items: center; margin: 8px 0; } .fm-r > span.small { grid-column: 2; }
 .fm-s { display: flex; gap: 4px; } .fm-c { display: grid; justify-items: center; min-width: 38px; padding: 3px 4px; border-radius: 8px; font-weight: 800; font-size: 12px; background: var(--surface-2); }
 .fm-c em { font-style: normal; font-weight: 600; font-size: 10px; color: var(--ink-2); } .fm-c.w { color: #3DDC97; box-shadow: inset 0 0 0 1px rgba(61,220,151,.45); } .fm-c.l { color: #FF6B5E; box-shadow: inset 0 0 0 1px rgba(255,107,94,.45); }
+
+/* ---- light theme: readable versions of the neon accents (4.5:1 or better on white) ---- */
+:root[data-theme="light"] .go, :root[data-theme="light"] a.rcard .go, :root[data-theme="light"] .doc-c a, :root[data-theme="light"] .doc-c h2, :root[data-theme="light"] a.go { color: #0b6a93; }
+:root[data-theme="light"] .up, :root[data-theme="light"] .sg-w, :root[data-theme="light"] .fm-c.w { color: #17784a; }
+:root[data-theme="light"] .dn, :root[data-theme="light"] .fm-c.l { color: #b42f24; }
+:root[data-theme="light"] .ps-badge { color: color-mix(in srgb, var(--c) 55%, #000); }
+:root[data-theme="light"] .ps-conf-High { color: #17784a; } :root[data-theme="light"] .ps-conf-Medium { color: #8a6100; } :root[data-theme="light"] .ps-conf-Low { color: #b42f24; }
+:root[data-theme="light"] .pk-live, :root[data-theme="light"] .cx-lead, :root[data-theme="light"] .ds-cf { color: #8a6100; }
+:root[data-theme="light"] .ps-chip[aria-pressed="true"], :root[data-theme="light"] .ar-tg input:checked + .ar-sw { background: #0b6a93; border-color: #0b6a93; color: #fff; }
+:root[data-theme="light"] .doc-c { border-left-color: #0b6a93 !important; }
+:root[data-theme="light"] .mc-neon, :root[data-theme="light"] .sg-pp b { color: inherit; }
