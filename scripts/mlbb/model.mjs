@@ -258,7 +258,9 @@ function playerArch(s) {
   if (pool >= 10) out.push("Deep hero pool"); else if (top >= 0.3 && tot >= 10) out.push("Specialist");
   return { labels: out, profile: Object.fromEntries(TRAITS.map((k) => [k, Math.round(p[k] * 100) / 100])) };
 }
-const playersOut = [...PL.values()].map((s) => ({ page: s.page, arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
+// per-game shares from the official MPL PH match pages (derived file; raw data kept private)
+const SH = new Map(Object.values(readJSON(path.join(MD, "shares-ph-s18.json"), { players: {} }).players).map((p) => [nk(p.player), p]));
+const playersOut = [...PL.values()].map((s) => ({ page: s.page, arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, shares: SH.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
   pool: Object.entries(s.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 12),
   signature: Object.entries(s.heroes).filter(([, v]) => v.n >= 4).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n), score: (v.w + 2) / (v.n + 4) * Math.log(1 + v.n) })).sort((a, b) => b.score - a.score).slice(0, 3).map(({ score, ...x }) => x),
   teams: Object.entries(s.teams).map(([t, n]) => ({ t, n })) })).sort((a, b) => b.games - a.games);
