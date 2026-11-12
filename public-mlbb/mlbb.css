@@ -318,7 +318,7 @@ a.mc-cta { margin-top: 10px; text-decoration: none; } a.mc-cta:hover { text-deco
 .filters { flex-wrap: wrap; }
 table.sip { font-size: 12px; } table.sip th, table.sip td { padding: 6px 4px; }
 .card .tw { max-width: calc(100% + 2 * var(--pad)); }
-html, body { overflow-x: hidden; }
+html, body { overflow-x: clip; } /* clip, not hidden: hidden makes body a scroll box and breaks sticky bars */
 .rcard .why { color: var(--ink-2); border-top: 1px solid var(--line); padding-top: 6px; } .rcard .why b { color: var(--gold); }
 .why-miss b { color: var(--warn); }
 
