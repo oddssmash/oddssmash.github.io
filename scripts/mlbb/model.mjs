@@ -118,7 +118,7 @@ function replay(P, record = false) {
       const y = g.w === 1 ? 1 : 0, dd = (A.r + reg(A) - (B.r + reg(B))) * (cross ? P.cx : 1), p0 = lg(dd), e = D.edge(g.h1, g.h2), p1 = lg(dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04));
       if (warm && D.games > 200) { gb += (p0 - y) ** 2; gbD += (p1 - y) ** 2; gn++; }
       if (record && warm && prevW) MOM.push([dd, y, prevW]); prevW = y ? 1 : -1;
-      if (record && warm) GDD.push([dd, y, g.h1, g.h2, m.date, m.league]);
+      if (record && warm) GDD.push([dd, y, g.h1, g.h2, m.date, m.league, m.score, g.n, m.bo]);
       const k = P.k * (A.n < 6 || B.n < 6 ? 1.5 : 1), err = y - p0;
       A.r += k * err; B.r -= k * err; if (m.kind === "intl" && A.region !== B.region && A.region !== "INTL" && B.region !== "INTL") { REG[A.region] = (REG[A.region] || 0) + P.kr * err; REG[B.region] = (REG[B.region] || 0) - P.kr * err; }
       if (y) { A.gw++; B.gl++; } else { B.gw++; A.gl++; }
@@ -137,6 +137,33 @@ const momFit = (() => { let best = { b: 0, ll: -Infinity }; for (let b = -0.6; b
   let ll0 = 0; for (const [d, y] of MOM) { const p = lg(d); ll0 += Math.log(y ? p : 1 - p); } const same = MOM.filter(([, y, s]) => (y ? 1 : -1) === s).length;
   return { b: best.b, n: MOM.length, sameRate: Math.round((same / MOM.length) * 1000) / 1000, lrStat: Math.round(2 * (best.ll - ll0) * 10) / 10 }; })();
 console.log("momentum", JSON.stringify(momFit));
+// COMBINED TEST (run with R7_JSON=<R7 pro drafts file>, private): join R7's pick order to our games by both drafts,
+// pool every source, and test the draft-order and series claims raw and after team ratings. Printed only.
+if (process.env.R7_JSON) {
+  const R7 = JSON.parse(fs.readFileSync(process.env.R7_JSON, "utf8")).games.filter((g) => g.hasDraft), key = (x) => String(x).toLowerCase().replace(/[^a-z]/g, "");
+  const wil = (k, n) => { const z = 1.96, p = k / n, d = 1 + z * z / n, c = p + z * z / (2 * n), r = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)); return [((c - r) / d * 100).toFixed(1), ((c + r) / d * 100).toFixed(1)]; };
+  const set = (hs) => hs.map(key).sort().join(",");
+  const ours = new Map(GDD.filter((g) => g[2].length === 5 && g[3].length === 5).map((g) => [set(g[2]) + "|" + set(g[3]), g]));
+  const joined = [], r7only = [];
+  for (const g of R7) { const pf = g.picksFP.map((p) => p.split(":")[1].split("/")), ps = g.picksSP.map((p) => p.split(":")[1].split("/")), fpSet = set(pf.map((x) => x[0])), spSet = set(ps.map((x) => x[0]));
+    const A = ours.get(fpSet + "|" + spSet), B = ours.get(spSet + "|" + fpSet), hit = A || B; const p1 = g.picksFP.find((p) => p.startsWith("P1:")), p10 = g.picksSP.find((p) => p.startsWith("P10:"));
+    const rec = { p1role: p1?.split("/")[1] || null, p10role: p10?.split("/")[1] || null, fpWon: g.winner === g.teamFP };
+    if (hit) { const ddFP = A ? hit[0] : -hit[0]; joined.push({ ...rec, ddFP, fpWonOurs: A ? !!hit[1] : !hit[1] }); } else r7only.push(rec); }
+  console.log("combined: R7 drafted", R7.length, "| joined to our games (ratings known)", joined.length, "| R7-only", r7only.length, "| our drafted games", ours.size, "| union", ours.size + r7only.length);
+  const agree = joined.filter((j) => j.fpWon === j.fpWonOurs).length; console.log("  winner agreement on joined games", agree + "/" + joined.length);
+  const fit = (rows, feat) => { let best = { b: 0, ll: -Infinity }; for (let b = -0.8; b <= 0.8001; b += 0.01) { let ll = 0; for (const r of rows) { const p = lg(r.ddFP + b * feat(r)); ll += Math.log(r.fpWonOurs ? p : 1 - p); } if (ll > best.ll) best = { b: Math.round(b * 100) / 100, ll }; } let ll0 = 0; for (const r of rows) { const p = lg(r.ddFP); ll0 += Math.log(r.fpWonOurs ? p : 1 - p); } return { b: best.b, lr: Math.round(2 * (best.ll - ll0) * 10) / 10 }; };
+  const all = joined.map((j) => ({ role: j.p1role, won: j.fpWonOurs, exp: lg(j.ddFP) })).concat(r7only.map((j) => ({ role: j.p1role, won: j.fpWon, exp: null })));
+  const ORD = { note: "First-pick lane: which lane the very first pick of the draft was for, and how often that side won. Pick order from a community draft library joined to our Liquipedia games (winners checked); after ratings = the effect left once both teams' ratings are known.", games: all.length, joined: joined.length, roles: {} };
+  for (const role of ["Roam", "Mid", "Jungle", "Gold", "EXP"]) { const rs = all.filter((x) => x.role === role), k = rs.filter((x) => x.won).length, ex = joined.filter((j) => j.p1role === role); const expAvg = ex.length ? (ex.reduce((a, j) => a + lg(j.ddFP), 0) / ex.length * 100).toFixed(1) : "-";
+    const ft = fit(joined, (j) => (j.p1role === role ? 1 : 0)); { const ft2 = fit(joined, (j) => (j.p1role === role ? 1 : 0)), ci = wil(k, rs.length).map(Number); ORD.roles[role] = { n: rs.length, k, rate: Math.round(k / rs.length * 1000) / 1000, lo: ci[0] / 100, hi: ci[1] / 100, expected: ex.length ? Math.round(ex.reduce((a, j) => a + lg(j.ddFP), 0) / ex.length * 1000) / 1000 : null, b: ft2.b, lr: ft2.lr }; }
+    console.log(`  first pick (P1) ${role}: ${rs.length} games, first-pick side wins ${(k / rs.length * 100).toFixed(1)}% (range ${wil(k, rs.length).join("-")}); ratings expected ${expAvg}%; after ratings logit ${ft.b} LR ${ft.lr}`); }
+  for (const role of ["Roam", "Mid", "Jungle", "Gold", "EXP"]) { const rs = joined.concat(r7only).filter((x) => x.p10role === role), k = rs.filter((x) => !(x.fpWonOurs ?? x.fpWon)).length; if (rs.length > 20) console.log(`  last pick (P10) ${role}: ${rs.length} games, second-pick side wins ${(k / rs.length * 100).toFixed(1)}% (range ${wil(k, rs.length).join("-")})`); }
+  writeJSON(path.join(MD, "draft-order.json"), ORD);
+  // series claims on our full data (every source agrees on results): deciding games and the game after a loss
+  let dk = 0, dn = 0, ddSum = 0; for (const g of GDD) { const [dd, y, , , , , score, n, bo] = g; if (!bo || bo < 3) continue; const need = Math.ceil(bo / 2); if (n === 2 * need - 1) { dn++; if (y) dk++; ddSum += lg(dd); } }
+  console.log(`  deciding games: ${dn}, side A wins ${(dk / dn * 100).toFixed(1)}%, ratings expected ${(ddSum / dn * 100).toFixed(1)}%`);
+  console.log("  momentum (after ratings), all our series games:", JSON.stringify(momFit));
+}
 // DAMAGE MIX TEST (run with DMG_CSV=<path to the Fandom hero data>): does the side with more physical heroes win more,
 // and does that add anything once the team ratings are known? Printed only; nothing is written.
 if (process.env.DMG_CSV) {
@@ -264,8 +291,17 @@ function playerArch(s) {
 // per-game shares from the official MPL PH match pages (derived file; raw data kept private)
 // Season 18 per-player numbers (MPL ID, PH, MY) derived from the MLBBHub scoreboard snapshot, with the real player in each game
 const S18 = new Map(Object.values(readJSON(path.join(MD, "s18-players.json"), { players: {} }).players).map((p) => [nk(p.player), { ...p, heroes: p.heroes.slice(0, 12).map((h) => ({ h: h.h, n: h.n, w: h.w, wr: Math.round((h.w / h.n) * 1000) / 1000 })) }]));
+// name matching for the Season 18 numbers: exact, then with repeated letters collapsed ("Morenooo" = "Moreno"), then a
+// prefix of 3+ letters ("NETS" = "Netskie") only when the team also agrees (initials or a shared word)
+const collapse = (x) => nk(x).replace(/(.)\1+/g, "$1"), S18C = new Map(); for (const p of S18.values()) { const c = collapse(p.player); (S18C.get(c) || S18C.set(c, []).get(c)).push(p); }
+const teamWords = (t) => String(t || "").toLowerCase().replace(/[^a-z0-9 ]/g, " ").split(/\s+/).filter(Boolean), initials = (t) => teamWords(t).map((w) => w[0]).join("");
+const sameTeam = (a, b) => { const A = teamWords(a), B = teamWords(b), ia = initials(a), ib = initials(b), ja = A.join(""), jb = B.join(""); return A.some((w) => w.length > 2 && B.includes(w)) || ja.startsWith(jb) || jb.startsWith(ja) || ia === jb || ib === ja || ia.startsWith(jb) || ib.startsWith(ja); };
+const s18Of = (name, team) => { const e = S18.get(nk(name)); if (e) return e; const c = collapse(name), list = S18C.get(c) || [];
+  if (list.length === 1) return list[0]; if (list.length > 1) return list.find((p) => sameTeam(p.team, team)) || null;
+  if (c.length >= 3) { const hits = [...S18.values()].filter((p) => { const q = collapse(p.player); return q.length >= 3 && (q.startsWith(c) || c.startsWith(q)) && sameTeam(p.team, team); }); if (hits.length === 1) return hits[0]; }
+  return null; };
 const SH = new Map(Object.values(readJSON(path.join(MD, "shares-ph-s18.json"), { players: {} }).players).map((p) => [nk(p.player), p]));
-const playersOut = [...PL.values()].map((s) => ({ page: s.page, arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, shares: SH.get(nk(s.name)) || null, s18: S18.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
+const playersOut = [...PL.values()].map((s) => ({ page: s.page, arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, shares: SH.get(nk(s.name)) || null, s18: s18Of(s.name, s.team), id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
   pool: Object.entries(s.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 12),
   signature: Object.entries(s.heroes).filter(([, v]) => v.n >= 4).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n), score: (v.w + 2) / (v.n + 4) * Math.log(1 + v.n) })).sort((a, b) => b.score - a.score).slice(0, 3).map(({ score, ...x }) => x),
   teams: Object.entries(s.teams).map(([t, n]) => ({ t, n })) })).sort((a, b) => b.games - a.games);
@@ -495,6 +531,12 @@ const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > n
   const ltE = ev(lt, ltn), sameE = ev(same, sn), momPts = Math.round((lg(momFit.b) - 0.5) * 1000) / 10;
   rules.push({ id: "series", group: "Series", title: "The last winner usually wins again, mostly because it is the better team", stats: [{ v: ltE.rate, l: `loser takes first pick next game (${ltE.n})`, ...ltE }, { v: sameE.rate, l: `last winner wins the next game (${sameE.n})`, ...sameE }, { v: null, text: `+${momPts} pts`, l: "extra edge after team strength", tag: momFit.lrStat >= 3.84 ? "solid" : "lead" }],
     tag: "solid", use: "in a live series, update on the score but do not add much extra for momentum: the ratings already explain most of it." });
+  // draft order (first-pick lane), from the saved summary
+  const ORDS = readJSON(path.join(MD, "draft-order.json"), null);
+  if (ORDS?.roles?.Roam && ORDS.roles.Mid) { const R = ORDS.roles.Roam, M = ORDS.roles.Mid, sig = (x) => x.lr >= 3.84;
+    rules.push({ id: "order", group: "Draft order", title: "Open the draft with a roam, not a mid laner", tag: sig(R) && sig(M) ? "lead" : "lead",
+      stats: [{ v: R.rate, l: `roam first (${R.n} games; ratings expected ${Math.round(R.expected * 100)}%)`, lo: R.lo, hi: R.hi, tag: sig(R) ? "solid" : "lead" }, { v: M.rate, l: `mid first (${M.n} games; ratings expected ${Math.round(M.expected * 100)}%)`, lo: M.lo, hi: M.hi, tag: sig(M) ? "solid" : "lead" }, ...(ORDS.roles.Jungle ? [{ v: ORDS.roles.Jungle.rate, l: `jungle first (${ORDS.roles.Jungle.n} games)`, lo: ORDS.roles.Jungle.lo, hi: ORDS.roles.Jungle.hi, tag: "lead" }] : [])],
+      use: "with the first pick, lock the roam (or a contested roam/EXP flex) and keep the mid hidden; both effects survive team ratings but only just, so treat it as a lead.", detail: { order: ORDS } }); }
   // heroes: popular is not strong
   const rec = HERO.filter((h) => h.recent.picks >= 40 && h.recent.wr != null).map((h) => { const w = Math.round(h.recent.wr * h.recent.picks); return { h: h.id, pres: h.recent.presence, ...ev(w, h.recent.picks) }; });
   const popular = [...rec].sort((a, b) => b.pres - a.pres).slice(0, 3), weak = [...rec].sort((a, b) => a.rate - b.rate).slice(0, 3), strong = [...rec].sort((a, b) => b.rate - a.rate).slice(0, 3);
