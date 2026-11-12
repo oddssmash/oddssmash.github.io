@@ -14,7 +14,7 @@ permissions:
 
 concurrency:
   group: pages
-  cancel-in-progress: true
+  cancel-in-progress: false # a running build always finishes; the newest push or schedule builds right after it
 
 jobs:
   build:
