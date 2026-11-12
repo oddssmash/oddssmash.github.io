@@ -34,6 +34,8 @@ const addHero = (n, h, g, wl) => { const p = at(n); if (!p || !h) return; const 
 for (const t of T(/top 3 heroes in MPL PH|top heroes in MPL PH/)) for (const r of rows(t)) addHero(r.Player || r.player, r.Hero || r.hero, r.Played || r.played, r["W-L"]);
 for (const t of T(/All-time MPL PH EXP hero rankings/)) for (const r of rows(t)) addHero(r.player, r.hero, r.games, r["W-L"]);
 for (const p of P.values()) if (p.heroes) p.heroes = p.heroes.sort((a, b) => b.g - a.g).slice(0, 5);
+// one player under two names (confirmed by the user): the staff posts use the old handle
+for (const [old, cur] of [["domengkite", "Domeng"], ["flaptzy", "Flap"], ["kyletzy", "Kyle"]]) { const o = P.get(old); if (!o) continue; P.delete(old); const t = P.get(key(cur)); P.set(key(cur), t ? { ...o, ...t, name: cur, s16: t.s16 || o.s16, allTime: t.allTime || o.allTime, mseries: t.mseries || o.mseries, heroes: t.heroes || o.heroes } : { ...o, name: cur, aka: o.name }); }
 const out = Object.fromEntries([...P].filter(([, p]) => p.s16 || p.allTime || p.mseries));
 writeJSON(path.join(ROOT, "derived", "mlbb", "career-ph.json"), { built: new Date().toISOString(), source: "MPL PH staff stat posts, MLBB PH News Events and Tournaments group (Facebook)", players: out });
 console.log(`career context: ${Object.keys(out).length} players (${Object.values(out).filter((p) => p.s16).length} with a Season 16 line, ${Object.values(out).filter((p) => p.allTime).length} all-time, ${Object.values(out).filter((p) => p.mseries).length} M-series)`);

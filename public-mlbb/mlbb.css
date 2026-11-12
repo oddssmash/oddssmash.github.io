@@ -467,3 +467,10 @@ body.mlbb-sub .top { display: none; }
 .ps-vs a { display: grid; justify-items: center; gap: 6px; padding: 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--line); border-top: 3px solid var(--c); color: var(--ink); text-decoration: none; text-align: center; }
 .ps-cmp { display: grid; gap: 8px; } .ps-cmp > div { display: grid; grid-template-columns: 1fr auto 1fr; gap: 10px; align-items: center; } .ps-cmp > div > span { font-size: 12px; color: var(--ink-2); text-align: center; } .ps-cmp > div > b:last-child { text-align: right; } .ps-cmp b.win { color: #F2C94C; }
 .ps-src { margin-top: 16px; }
+
+/* ---- match context and draft comfort badge ---- */
+.cx-h { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; margin: 6px 0 10px; }
+.cx-r { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(30px, 1fr) 54px minmax(30px, 1fr) minmax(0, 1.2fr); gap: 6px; align-items: center; margin: 0 0 8px; }
+.cx-r .lbl { text-align: center; font-size: 9px; letter-spacing: .04em; } .cx-r > .bar:nth-child(2) { transform: scaleX(-1); }
+.cx-n { display: grid; min-width: 0; } .cx-n.r { text-align: right; } .cx-n b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .cx-n em { font-style: normal; font-size: 11px; color: var(--ink-2); }
+.ds-cf { display: block; margin-top: 2px; font-style: normal; font-size: 10px; font-weight: 700; color: #F2C94C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

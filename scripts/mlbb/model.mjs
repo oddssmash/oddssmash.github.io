@@ -21,6 +21,8 @@ const DAY = 86400000, now = Date.now(), r1 = (x) => Math.round(x * 10) / 10, r3 
 const safe = (t) => String(t).replace(/[^A-Za-z0-9]+/g, "_");
 const lg = (p) => 1 / (1 + Math.exp(-p)), logit = (p) => Math.log(p / (1 - p));
 const cap1 = (x) => String(x || "").replace(/\b\w/g, (c) => c.toUpperCase());
+// one player under two names (confirmed by the user): old handle -> current name
+const PALIAS = { domengkite: "Domeng", flaptzy: "Flap", kyletzy: "Kyle" }, palias = (n) => PALIAS[String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "")] || null;
 
 // ---------------------------------------------------------------- load
 const all = [];
@@ -103,7 +105,14 @@ const MOM = [], GDD = [], ALLG = []; // GDD: [team-rating logit before the game,
 // helped single games slightly (Brier 0.2135 -> 0.2130) but made series slightly worse (0.1938 -> 0.1942) with the same
 // winner rate, so it is OFF (FW 0). Re-test with FW=0.05 when more seasons are in.
 const FW = process.env.FW != null ? +process.env.FW : 0, formOf = (t) => FW * (t.f || []).slice(-10).reduce((s, v) => s + v, 0);
+// CAREER WIN RATE WHEN RATINGS ARE UNCERTAIN (ideas test, Nov 2026): while a team has under 10 series or under 5 games
+// this season, the lineup's career win rate (shrunk to 50% with a 20-game prior, from our own games) adds CW logit per point.
+const CW = process.env.CW != null ? +process.env.CW : 1, ROLEI = { EXP: 0, Jungle: 1, Mid: 2, Gold: 3, Roam: 4 };
+const lineupOf = (team, page) => { const out = []; for (const x of rosterFor(team, page)) if (ROLEI[x.role] != null && out[ROLEI[x.role]] == null) out[ROLEI[x.role]] = String(palias(x.player) || x.player).toLowerCase(); return out.length === 5 && !out.includes(undefined) ? out : null; };
+const careerWR = (PLR, L) => L.reduce((s, n) => { const r = PLR.get(n) || { n: 0, w: 0 }; return s + (r.w + 10) / (r.n + 20) - 0.5; }, 0) / 5;
+const cwEdge = (PLR, SGc, A, B, LA, LB, season) => { if (!CW || !LA || !LB) return 0; const unc = A.n < 10 || B.n < 10 || (SGc.get(A.name + "|" + season) || 0) < 5 || (SGc.get(B.name + "|" + season) || 0) < 5; return unc ? CW * (careerWR(PLR, LA) - careerWR(PLR, LB)) : 0; };
 function replay(P, record = false) {
+  const PLR = new Map(), SGc = new Map();
   const T = new Map(), REG = {}, D = makeDraft(); // region offsets, created as regions appear
   const team = (n, region) => { if (!T.has(n)) T.set(n, { name: n, r: 0, n: 0, season: null, region, w: 0, l: 0, gw: 0, gl: 0, f: [] }); return T.get(n); };
   let sb = 0, sll = 0, sn = 0, sright = 0, gb = 0, gn = 0, gbD = 0, ib = 0, inn = 0; const log = [];
@@ -111,7 +120,8 @@ function replay(P, record = false) {
     const A = team(m.a, m.region), B = team(m.b, m.region), season = m.page.split("/").slice(0, -1).join("/");
     for (const t of [A, B]) { if (m.kind === "league" && t.season && t.season !== season) t.r *= P.carry; if (m.kind === "league") { t.season = season; t.region = m.region; } }
     const reg = (t) => (REG[t.region] || 0) * P.regW;
-    const cross = A.region !== B.region, d = (A.r + reg(A) + formOf(A) - (B.r + reg(B) + formOf(B))) * (cross ? P.cx : 1), pg = lg(d), s = series(pg, m.bo), won = m.score[0] > m.score[1] ? 1 : 0;
+    const LA = lineupOf(m.a, m.page), LB = lineupOf(m.b, m.page);
+    const cross = A.region !== B.region, d = (A.r + reg(A) + formOf(A) - (B.r + reg(B) + formOf(B))) * (cross ? P.cx : 1) + cwEdge(PLR, SGc, A, B, LA, LB, season), pg = lg(d), s = series(pg, m.bo), won = m.score[0] > m.score[1] ? 1 : 0;
     const warm = A.n >= 4 && B.n >= 4;
     if (warm && m.kind === "intl" && A.region !== B.region) { ib += (s.win - won) ** 2; inn++; }
     if (warm) { sb += (s.win - won) ** 2; sll += -Math.log(Math.max(1e-6, won ? s.win : 1 - s.win)); sn++; if ((s.win >= 0.5) === !!won) sright++; }
@@ -119,20 +129,22 @@ function replay(P, record = false) {
     // games: grade single games (team-only and with the draft layer), then learn
     let prevW = 0;
     for (const g of m.games) {
-      const y = g.w === 1 ? 1 : 0, raw = (A.r + reg(A) - (B.r + reg(B))) * (cross ? P.cx : 1), dd = (A.r + reg(A) + formOf(A) - (B.r + reg(B) + formOf(B))) * (cross ? P.cx : 1), p0 = lg(dd), e = D.edge(g.h1, g.h2), p1 = lg(dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04));
+      const y = g.w === 1 ? 1 : 0, raw = (A.r + reg(A) - (B.r + reg(B))) * (cross ? P.cx : 1), dd = (A.r + reg(A) + formOf(A) - (B.r + reg(B) + formOf(B))) * (cross ? P.cx : 1) + cwEdge(PLR, SGc, A, B, LA, LB, season), p0 = lg(dd), e = D.edge(g.h1, g.h2), p1 = lg(dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04));
       if (warm && D.games > 200) { gb += (p0 - y) ** 2; gbD += (p1 - y) ** 2; gn++; }
       if (record && warm && prevW) MOM.push([dd, y, prevW]); prevW = y ? 1 : -1;
       if (record && warm) GDD.push([dd, y, g.h1, g.h2, m.date, m.league, m.score, g.n, m.bo]);
-      if (record) ALLG.push({ base: dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04), y, g, m, warm: warm && D.games > 200 }); // every game with the full pre-game logit, for the ideas test
+      if (record) ALLG.push({ base: dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04), y, g, m, warm: warm && D.games > 200, nA: A.n, nB: B.n }); // every game with the full pre-game logit, for the ideas test
       const k = P.k * (A.n < 6 || B.n < 6 ? 1.5 : 1), err = y - p0;
       A.r += k * err; B.r -= k * err; if (m.kind === "intl" && A.region !== B.region && A.region !== "INTL" && B.region !== "INTL") { REG[A.region] = (REG[A.region] || 0) + P.kr * err; REG[B.region] = (REG[B.region] || 0) - P.kr * err; }
-      { const sp = y - lg(raw); A.f.push(sp); B.f.push(-sp); } // surprise against the ratings alone (form excluded)
+      { const sp = y - lg(raw); A.f.push(sp); B.f.push(-sp); }
+      for (const [L, won] of [[LA, y], [LB, 1 - y]]) if (L) for (const n of L) { const r = PLR.get(n) || PLR.set(n, { n: 0, w: 0 }).get(n); r.n++; r.w += won; }
+      for (const t of [A, B]) SGc.set(t.name + "|" + season, (SGc.get(t.name + "|" + season) || 0) + 1); // surprise against the ratings alone (form excluded)
       if (y) { A.gw++; B.gl++; } else { B.gw++; A.gl++; }
       D.learn(g, m.date);
     }
     A.n++; B.n++; if (won) { A.w++; B.l++; } else { B.w++; A.l++; }
   }
-  return { T, REG, D, ibrier: inn ? ib / inn : 0, inn, brier: sb / sn, ll: sll / sn, acc: sright / sn, n: sn, gBrier: gb / gn, gBrierDraft: gbD / gn, gn, log };
+  return { T, REG, D, PLR, SGc, ibrier: inn ? ib / inn : 0, inn, brier: sb / sn, ll: sll / sn, acc: sright / sn, n: sn, gBrier: gb / gn, gBrierDraft: gbD / gn, gn, log };
 }
 const grid = []; for (const k of [0.1, 0.16, 0.24, 0.32]) for (const carry of [0.5, 0.7, 0.85, 1]) for (const kr of [0.04]) for (const cx of (process.env.CX ? [+process.env.CX] : [0.1, 0.2, 0.3, 0.5])) for (const regW of [1]) for (const wd of [0, 0.5, 1, 1.5]) grid.push({ k, carry, kr, regW, wd, cx });
 let best = null; for (const P of grid) { const r = replay(P); const score = r.brier + 0.5 * r.gBrierDraft + 0.5 * r.ibrier; if (!best || score < best.score) best = { P, r, score }; }
@@ -150,7 +162,7 @@ console.log("momentum", JSON.stringify(momFit));
 // Brier score. Results go to derived/mlbb/ideas-test.json.
 if (process.env.IDEAS_TEST) {
   const RV = JSON.parse(fs.readFileSync(process.env.IDEAS_TEST, "utf8")), ROLE = { EXP: 0, Jungle: 1, Mid: 2, Gold: 3, Roam: 4 };
-  const lineup = (team, page) => { const out = []; for (const x of rosterFor(team, page)) if (ROLE[x.role] != null && out[ROLE[x.role]] == null) out[ROLE[x.role]] = String(x.player).toLowerCase(); return out.length === 5 && !out.includes(undefined) ? out : null; };
+  const lineup = (team, page) => { const out = []; for (const x of rosterFor(team, page)) if (ROLE[x.role] != null && out[ROLE[x.role]] == null) out[ROLE[x.role]] = String(palias(x.player) || x.player).toLowerCase(); return out.length === 5 && !out.includes(undefined) ? out : null; };
   const SHORT = readJSON(path.join(MD, "team-short.json"), {}), shortOf = (t) => SHORT[t] || Object.entries(SHORT).find(([k]) => k.toLowerCase() === String(t).toLowerCase())?.[1] || t;
   // per-game research rows: [league, match id, game, team, opp, player, hero, win, minutes, K, D, A, gold, damage, taken, tower, KP]
   const LANE = new Map(RV.season.map((p) => [String(p.p).toLowerCase(), p.lane])); // each player's main lane
@@ -159,11 +171,19 @@ if (process.env.IDEAS_TEST) {
   const meet = new Map(); const rkeys = [...RG.keys()].sort((a, b) => { const [la, ma, ga] = a.split("|"), [lb, mb, gb] = b.split("|"); return la.localeCompare(lb) || +ma - +mb || +ga - +gb; });
   const rOrder = new Map(); { const seen = new Map(); for (const k of rkeys) { const [l, mid] = k.split("|"), rows = RG.get(k), pair = [...new Set(rows.map((r) => r[3]))].sort().join("~"), pk = `${l}|${pair}`; if (!seen.has(pk)) seen.set(pk, []); const lst = seen.get(pk); if (!lst.includes(mid)) lst.push(mid); rOrder.set(k, `${pk}|${lst.indexOf(mid)}|${k.split("|")[2]}`); } }
   const byOrder = new Map([...rOrder].map(([k, o]) => [o, k]));
-  const oSeen = new Map(); const ourKey = (x) => { if (!/Season 18$/.test(seasonOf(x.m.page)) || !["ID", "PH", "MY"].includes(x.m.region)) return null; const pair = [shortOf(x.m.a), shortOf(x.m.b)].sort().join("~"), pk = `${x.m.region} S18|${pair}`; if (!oSeen.has(pk)) oSeen.set(pk, []); const lst = oSeen.get(pk); if (!lst.includes(x.m.id)) lst.push(x.m.id); return `${pk}|${lst.indexOf(x.m.id)}|${x.g.n}`; };
+  // research team names are tags in ID/MY but full names in PH ("Team Falcons", "Smart Omega"): match each of our team names to one research name
+  const RTAGS = {}; for (const r of RV.log) (RTAGS[r[0]] ||= new Set()).add(r[3]);
+  const st = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, ""), wordsOf = (x) => String(x || "").toLowerCase().split(/[^a-z0-9]+/).filter((w) => w.length > 2 && !["team", "esports", "gaming", "pro"].includes(w)), inits = (x) => String(x || "").toLowerCase().split(/[^a-z0-9]+/).filter(Boolean).map((w) => w[0]).join("");
+  const rtagMemo = new Map(), rtag = (lgk, name) => { const k = lgk + "|" + name; if (rtagMemo.has(k)) return rtagMemo.get(k); const sh = st(shortOf(name)), nm = st(name), W = wordsOf(name); let hit = null;
+    for (const t of RTAGS[lgk] || []) { const tt = st(t); if (tt === sh || tt === nm || nm.startsWith(tt) || tt.startsWith(nm) || inits(name) === tt || wordsOf(t).some((w) => W.includes(w))) { hit = t; break; } } rtagMemo.set(k, hit); return hit; };
+  const oSeen = new Map(); const ourKey = (x) => { if (!/Season 18$/.test(seasonOf(x.m.page)) || !["ID", "PH", "MY"].includes(x.m.region)) return null; const lgk = `${x.m.region} S18`, ta = rtag(lgk, x.m.a), tb = rtag(lgk, x.m.b); if (!ta || !tb || ta === tb) return null; const pair = [ta, tb].sort().join("~"), pk = `${x.m.region} S18|${pair}`; if (!oSeen.has(pk)) oSeen.set(pk, []); const lst = oSeen.get(pk); if (!lst.includes(x.m.id)) lst.push(x.m.id); return `${pk}|${lst.indexOf(x.m.id)}|${x.g.n}`; };
   // MENA S10 team-game rows (deaths come from the opponent's kills)
   const MG = RV.menaGames || []; const mSeen = new Map(), mOrder = new Map(); for (const g of [...MG].sort((a, b) => a.id - b.id)) { const pair = [g.L, g.R].sort().join("~"); if (!mSeen.has(pair)) mSeen.set(pair, 0); mOrder.set(`${pair}|${g.n}|${mSeen.get(pair)}`, g); if (g.n === 1) mSeen.set(pair, mSeen.get(pair) + 1); }
   // walk forward through every game, building features before learning from it
-  const PH = new Map(), PL = new Map(), TF = new Map(), ARC = new Map(), ARM = new Map(), PS = new Map(), MD2 = new Map(), FEAT = { comfort: [], comfort70: [], familiar: [], experience: [], intlExp: [], careerWR: [], form10: [], archLane: [], menaDeaths: [], s16Prior: [], s16WinPrior: [] };
+  const PH = new Map(), PL = new Map(), TF = new Map(), ARC = new Map(), ARM = new Map(), PS = new Map(), MD2 = new Map(), FEAT = { comfort: [], comfort70: [], familiar: [], experience: [], intlExp: [], careerWR: [], form10: [], archLane: [], menaDeaths: [], s16Prior: [], s16WinPrior: [], comfortDelta: [], comfortPicks: [], expBigStage: [], careerWRuncertain: [], archMix: [] };
+  // recency-weighted records (half-life 240 days) for the comfort delta: the player on this hero against the player overall
+  const HL = 240 * DAY, RW = new Map(), rw = (k, t) => { const r = RW.get(k); if (!r) return { n: 0, w: 0 }; const f = 0.5 ** ((t - r.t) / HL); return { n: r.n * f, w: r.w * f }; }, rwAdd = (k, t, won) => { const r = rw(k, t); RW.set(k, { n: r.n + 1, w: r.w + won, t }); };
+  const SG = new Map(), ARM2 = new Map(), BIG = /playoff|final|knockout|bracket|upper|lower|elimination/i;
   // Season 16 lines (staff stat posts, derived/mlbb/career-ph.json): KDA percentile within the lane, and win rate shrunk to 50%
   const C16 = readJSON(path.join(ROOT, "derived", "mlbb", "career-ph.json"), { players: {} }).players, ck16 = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
   const byLane16 = {}; for (const p of Object.values(C16)) if (p.s16?.lane && p.s16.kda != null) (byLane16[p.s16.lane] ||= []).push(p.s16.kda);
@@ -172,28 +192,34 @@ if (process.env.IDEAS_TEST) {
   const get = (M, k, d) => M.get(k) || (M.set(k, d()), M.get(k));
   const prior = (M, k) => M.get(k) || { n: 0, w: 0 };
   let joined = 0, s18 = 0, mJoin = 0;
-  const archOf = (pl) => { const s = PS.get(pl); if (!s || s.n < 5) return null; const m = (k) => s[k] / s.n, all = PS.get("*"), z = (k) => (m(k) - all[k] / all.n) / (all.sd?.[k] || 1);
+  const archOf = (pl) => { const s = PS.get(pl); if (!s || s.n < 3) return null; const m = (k) => s[k] / s.n, all = PS.get("*"), z = (k) => (m(k) - all[k] / all.n) / (all.sd?.[k] || 1);
     const sc = { "Hyper-carry": z("gpm") + z("dpm"), Finisher: z("k") + z("dpm"), Playmaker: z("kp") + z("a"), "Frontline anchor": z("tpm") + z("a") - z("gpm"), "Split-pusher": z("tow"), "Safe efficiency": -z("d") + z("kda"), "High-risk aggressor": z("k") + z("d") + z("kp") };
     const best = Object.entries(sc).sort((a, b) => b[1] - a[1])[0]; return best[1] > 0.5 ? best[0] : "Balanced"; };
   for (const x of ALLG) {
     const LA = lineup(x.m.a, x.m.page), LB = lineup(x.m.b, x.m.page), five = x.g.h1?.length === 5 && x.g.h2?.length === 5 && x.g.h1.every(Boolean) && x.g.h2.every(Boolean);
     const side = (L, H) => { if (!L) return null; let c = 0, c70 = 0, fam = 0, ex = 0, ix = 0, wr = 0; for (let i = 0; i < 5; i++) { const ph = five ? prior(PH, `${L[i]}|${H[i]}`) : { n: 0, w: 0 }, pl = prior(PL, L[i]); c += (ph.w + 2.5) / (ph.n + 5) - 0.5; if (ph.n >= 15 && ph.w / ph.n >= 0.7) c70++; fam += Math.log1p(ph.n); ex += Math.log1p(pl.n); ix += Math.log1p(pl.intl || 0); wr += (pl.w + 10) / (pl.n + 20) - 0.5; } return { c, c70, fam, ex: ex / 5, ix: ix / 5, wr: wr / 5 }; };
-    const a = side(LA, x.g.h1), b = side(LB, x.g.h2);
+    const a = side(LA, x.g.h1), b = side(LB, x.g.h2), tms = Date.parse(x.m.date || 0) || 0;
+    const cside = (L, H) => { if (!L || !five) return null; let dl = 0, cp = 0; for (let i = 0; i < 5; i++) { const ph = rw(`${L[i]}|${H[i]}`, tms), pl = rw(L[i], tms), dlt = (ph.w + 2.5) / (ph.n + 5) - (pl.w + 5) / (pl.n + 10); dl += dlt; if (ph.n >= 4 && dlt >= 0.1) cp++; } return { dl, cp }; };
+    const ca = cside(LA, x.g.h1), cb = cside(LB, x.g.h2), sk = (t) => `${t}|${seasonOf(x.m.page)}`, unc = x.nA < 10 || x.nB < 10 || (SG.get(sk(x.m.a)) || 0) < 5 || (SG.get(sk(x.m.b)) || 0) < 5, big = BIG.test(x.m.stage || "") || x.m.kind === "intl";
     const tf = (t) => { const h = TF.get(t) || []; return h.slice(-10).reduce((s, v) => s + v, 0); };
     if (x.warm) {
       const row = (k, v) => FEAT[k].push([x.base, x.y, v, x.m.date]);
       if (a && b) { if (five) { row("comfort", a.c - b.c); row("comfort70", a.c70 - b.c70); row("familiar", a.fam - b.fam); } row("experience", a.ex - b.ex); row("intlExp", a.ix - b.ix); row("careerWR", a.wr - b.wr); }
       row("form10", tf(x.m.a) - tf(x.m.b));
+      if (ca && cb) { row("comfortDelta", ca.dl - cb.dl); row("comfortPicks", ca.cp - cb.cp); }
+      if (a && b) { row("expBigStage", big ? a.ex - b.ex : 0); row("careerWRuncertain", unc ? a.wr - b.wr : 0); }
       if (["MPL/Philippines/Season 17", "MPL/Philippines/Season 18"].includes(seasonOf(x.m.page))) { const sa = s16Side(LA), sb = s16Side(LB); if (sa && sb) { row("s16Prior", sa.k - sb.k); row("s16WinPrior", sa.w - sb.w); } }
     }
     // archetype lane matchups (Season 18 ID/PH/MY): archetypes from each player's earlier S18 games only
     const ok = ourKey(x), rk = ok && byOrder.get(ok);
     if (ok) s18++;
-    if (rk) { joined++; const rows = RG.get(rk), tA = shortOf(x.m.a);
+    if (rk) { joined++; const rows = RG.get(rk), tA = rtag(`${x.m.region} S18`, x.m.a);
       const byTeam = (t) => rows.filter((r) => r[3] === t);
       const LI = (r) => ROLE[LANE.get(r[5].toLowerCase())] ?? 9, byLane = (rs) => { const o = [...rs].sort((p, q) => LI(p) - LI(q)); return new Set(o.map(LI)).size === 5 && LI(o[4]) < 9 ? o : []; };
       const ra = byLane(byTeam(tA)), rb = byLane(rows.filter((r) => r[3] !== tA));
       if (x.warm && ra.length === 5 && rb.length === 5) { let f = 0, used = 0; for (let i = 0; i < 5; i++) { const p1 = ra[i][5].toLowerCase(), p2 = rb[i][5].toLowerCase(), A1 = archOf(p1), B1 = archOf(p2); if (A1 && B1) { const c = prior(ARM, `${A1}|${B1}`); f += (c.w + 5) / (c.n + 10) - 0.5; used++; } } if (used >= 3) FEAT.archLane.push([x.base, x.y, f, x.m.date]); }
+      if (x.warm && ra.length === 5 && rb.length === 5) { const XA = ra.map((r) => archOf(r[5].toLowerCase())).filter(Boolean), XB = rb.map((r) => archOf(r[5].toLowerCase())).filter(Boolean); if (XA.length >= 3 && XB.length >= 3) { let f = 0; for (const p1 of XA) for (const p2 of XB) { const c = prior(ARM2, `${p1}|${p2}`); f += (c.w + 10) / (c.n + 20) - 0.5; } FEAT.archMix.push([x.base, x.y, f / Math.sqrt(XA.length * XB.length), x.m.date]); } }
+      if (ra.length === 5 && rb.length === 5) { const XA = ra.map((r) => archOf(r[5].toLowerCase())).filter(Boolean), XB = rb.map((r) => archOf(r[5].toLowerCase())).filter(Boolean); for (const p1 of XA) for (const p2 of XB) { const c1 = get(ARM2, `${p1}|${p2}`, () => ({ n: 0, w: 0 })), c2 = get(ARM2, `${p2}|${p1}`, () => ({ n: 0, w: 0 })); c1.n++; c2.n++; if (x.y) c1.w++; else c2.w++; } }
       // learn: matchup table, then player stat sums
       if (ra.length === 5 && rb.length === 5) for (let i = 0; i < 5; i++) { const A1 = archOf(ra[i][5].toLowerCase()), B1 = archOf(rb[i][5].toLowerCase()); if (A1 && B1) { const c1 = get(ARM, `${A1}|${B1}`, () => ({ n: 0, w: 0 })), c2 = get(ARM, `${B1}|${A1}`, () => ({ n: 0, w: 0 })); c1.n++; c2.n++; if (x.y) c1.w++; else c2.w++; } }
       for (const r of rows) { const mins = r[8] || 1, v = { k: r[9], d: r[10], a: r[11], gpm: r[12] / mins, dpm: r[13] / mins, tpm: r[14] / mins, tow: r[15] / mins, kp: r[16], kda: Math.min(20, (r[9] + r[11]) / Math.max(1, r[10])) }; if (!isFinite(v.gpm) || !v.gpm) continue;
@@ -207,6 +233,8 @@ if (process.env.IDEAS_TEST) {
     // learn from this game
     const res = (t, won) => get(TF, t, () => []).push(won - lg(t === x.m.a ? x.base : -x.base));
     res(x.m.a, x.y); res(x.m.b, 1 - x.y);
+    for (const t of [x.m.a, x.m.b]) SG.set(sk(t), (SG.get(sk(t)) || 0) + 1);
+    if (five) for (const [L, H, won] of [[LA, x.g.h1, x.y], [LB, x.g.h2, 1 - x.y]]) if (L) for (let i = 0; i < 5; i++) { rwAdd(L[i], tms, won); rwAdd(`${L[i]}|${H[i]}`, tms, won); }
     for (const [L, H, won] of [[LA, x.g.h1, x.y], [LB, x.g.h2, 1 - x.y]]) if (L) for (let i = 0; i < 5; i++) { const pl = get(PL, L[i], () => ({ n: 0, w: 0, intl: 0 })); pl.n++; pl.w += won; if (x.m.kind === "intl") pl.intl++; if (five && H[i]) { const ph = get(PH, `${L[i]}|${H[i]}`, () => ({ n: 0, w: 0 })); ph.n++; ph.w += won; } }
   }
   const fit = (rows) => { let best = { b: 0, ll: -Infinity }; for (let b = -2; b <= 2.0001; b += 0.01) { let ll = 0; for (const [d, y, f] of rows) { const p = lg(d + b * f); ll += Math.log(y ? p : 1 - p); } if (ll > best.ll) best = { b, ll }; } let ll0 = 0; for (const [d, y] of rows) { const p = lg(d); ll0 += Math.log(y ? p : 1 - p); } return { b: Math.round(best.b * 100) / 100, lr: Math.round(2 * (best.ll - ll0) * 10) / 10 }; };
@@ -215,6 +243,10 @@ if (process.env.IDEAS_TEST) {
   for (const [k, rows] of Object.entries(FEAT)) { const nz = rows.filter((r) => r[2] !== 0).length; if (rows.length < 40) { out[k] = { n: rows.length, verdict: "too few games to test" }; continue; }
     const cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), te = rows.slice(cut), all = fit(rows), t = fit(tr), b0 = brier(te, 0), b1 = brier(te, t.b);
     out[k] = { n: rows.length, nonzero: nz, b: all.b, lr: all.lr, test: { n: te.length, b: t.b, brierBase: r3(b0), brierWith: r3(b1), gain: Math.round((b0 - b1) * 10000) / 10000 }, verdict: all.lr > 3.84 && b1 < b0 ? "ADOPT" : all.lr > 3.84 ? "lead: clear in-sample, no held-out gain" : "reject: no clear effect" }; }
+  { const parts = ["comfortDelta", "comfortPicks", "expBigStage", "careerWRuncertain", "careerWR", "experience"], byGame = new Map();
+    for (const k of parts) { const rows = FEAT[k], cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), sd = Math.sqrt(tr.reduce((a2, r) => a2 + r[2] * r[2], 0) / Math.max(1, tr.length)) || 1, sg = Math.sign(fit(tr).b) || 0; for (const r of rows) { const key2 = r[3] + "|" + r[0]; const e = byGame.get(key2) || byGame.set(key2, [r[0], r[1], 0, r[3]]).get(key2); e[2] += sg * r[2] / sd / parts.length; } }
+    const rows = [...byGame.values()], cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), te = rows.slice(cut), all = fit(rows), t = fit(tr), b0 = brier(te, 0), b1 = brier(te, t.b);
+    out.contextScore = { n: rows.length, b: all.b, lr: all.lr, test: { n: te.length, b: t.b, brierBase: r3(b0), brierWith: r3(b1), gain: Math.round((b0 - b1) * 10000) / 10000 }, verdict: all.lr > 3.84 && b1 < b0 ? "ADOPT" : all.lr > 3.84 ? "lead: clear in-sample, no held-out gain" : "reject: no clear effect" }; }
   out._joins = { s18Games: s18, s18Joined: joined, menaJoined: mJoin };
   console.log("IDEAS TEST", JSON.stringify(out, null, 1));
   writeJSON(path.join(ROOT, "derived", "mlbb", "ideas-test.json"), { built: new Date().toISOString(), results: out }, true);
@@ -350,8 +382,8 @@ HERO.forEach((h) => (h.tier = tier(h)));
 const PL = new Map();
 for (const m of done) for (const g of m.games) for (const [team, hs, won] of [[m.a, g.h1, g.w === 1], [m.b, g.h2, g.w === 2]]) {
   const ro = rosterFor(team, m.page); if (!ro.length) continue;
-  hs.forEach((hero, i) => { const pl = ro.find((x) => x.role === ROLES[i]); if (!pl) return; const k = pl.page || pl.player; let s = PL.get(k);
-    if (!s) PL.set(k, (s = { id: safe(k), page: pl.page && !/does not exist/.test(pl.page) ? pl.page : null, name: pl.player, role: pl.role, teams: {}, heroes: {}, games: 0, wins: 0, mvp: 0, last: null }));
+  hs.forEach((hero, i) => { const pl = ro.find((x) => x.role === ROLES[i]); if (!pl) return; const al = palias(pl.page) || palias(pl.player), k = al || pl.page || pl.player; let s = PL.get(k);
+    if (!s) PL.set(k, (s = { id: safe(k), page: pl.page && !/does not exist/.test(pl.page) ? pl.page : null, name: al || pl.player, role: pl.role, teams: {}, heroes: {}, games: 0, wins: 0, mvp: 0, last: null }));
     s.games++; if (won) s.wins++; s.teams[team] = (s.teams[team] || 0) + 1; s.team = team; s.role = pl.role; s.last = m.date;
     const hh = (s.heroes[hero] ||= { n: 0, w: 0 }); hh.n++; if (won) hh.w++; });
 }
@@ -472,8 +504,26 @@ writeJSON(path.join(OUT, "draft.json"), { traits: TR, avgLineup, shortLong: Obje
 writeJSON(path.join(OUT, "heroes.json"), HERO);
 
 // ---------------------------------------------------------------- projections: upcoming matches and any pairing
+// MATCH CONTEXT shown on match pages: experience, career win rate and archetype mix of the listed lineups. Experience and
+// archetypes are context only (they did not pass the ideas test); career win rate is in the prediction only while a team's
+// rating is uncertain (CW above).
+const PEXP = new Map(); { const BIG = /playoff|final|knockout|bracket|upper|lower|elimination/i; for (const m of done) { const big = BIG.test(m.stage || "") || m.kind === "intl"; for (const t of [m.a, m.b]) { const L = lineupOf(t, m.page); if (L) for (const n of L) { const e = PEXP.get(n) || PEXP.set(n, { g: 0, intl: 0, big: 0 }).get(n); e.g += m.games.length; if (m.kind === "intl") e.intl += m.games.length; if (big) e.big += m.games.length; } } } }
+const PSI = readJSON(path.join(ROOT, "derived", "mlbb", "pstats", "index.json"), { players: [], archMatrix: [] }), ARCH = new Map();
+for (const p of PSI.players) { const k = String(palias(p.p) || p.p).toLowerCase(); if (!ARCH.has(k) || ARCH.get(k).g < p.g) ARCH.set(k, { arch: String(p.arch || "").replace(/\s*\(.*\)$/, ""), g: p.g, lg: p.lg }); }
+let rec0ctx = null;
+function contextFor(m) {
+  const side = (t) => { const L = lineupOf(t, m.page); if (!L) return null; const ro = rosterFor(t, m.page);
+    const players = L.map((n, i) => { const e = PEXP.get(n) || { g: 0, intl: 0, big: 0 }, r = R.PLR.get(n) || { n: 0, w: 0 }, ar = ARCH.get(n); return { n: ro.find((x) => String(palias(x.player) || x.player).toLowerCase() === n)?.player || n, role: Object.keys(ROLEI)[i], g: e.g, intl: e.intl, big: e.big, wr: r.n ? r3((r.w + 10) / (r.n + 20)) : null, arch: ar?.arch || null }; });
+    const mix = {}; for (const p of players) if (p.arch) mix[p.arch] = (mix[p.arch] || 0) + 1;
+    return { players, g: players.reduce((x, p) => x + p.g, 0), intl: players.reduce((x, p) => x + p.intl, 0), big: players.reduce((x, p) => x + p.big, 0), wr: r3(careerWR(R.PLR, L) + 0.5), mix }; };
+  const A = side(m.a), B = side(m.b); if (!A || !B) return null;
+  const TA = R.T.get(m.a), TB = R.T.get(m.b), edge = TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(m.a, m.page), lineupOf(m.b, m.page), seasonOf(m.page)) : 0;
+  const cells = []; for (const x of Object.keys(A.mix)) for (const y of Object.keys(B.mix)) { const c = (PSI.archMatrix || []).find((r) => r.a === x && r.b === y); if (c && c.n >= 20) cells.push({ a: x, b: y, wp: c.wp, n: c.n }); }
+  cells.sort((p, q) => Math.abs(q.wp - 50) - Math.abs(p.wp - 50));
+  return { a: A, b: B, careerEdge: r3(edge), careerApplied: !!edge, cells: cells.slice(0, 4) };
+}
 function project(a, b, bo, page) {
-  const pg = lg((ratingOf(a) - ratingOf(b)) * crossOf(a, b)), s = series(pg, bo), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
+  const TA = R.T.get(a), TB = R.T.get(b), pg = lg((ratingOf(a) - ratingOf(b)) * crossOf(a, b) + (TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(a, page), lineupOf(b, page), seasonOf(page)) : 0)), s = series(pg, bo), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
   // scenarios: signature hero banned, likely ban targets, side, early vs late games
   for (const [t, sig, other] of [[a, sa, b], [b, sb2, a]]) if (sig && sig.with[1] >= 3) { const pBan = (t === a ? pb : pa).bansTheyMake.find((x) => x.h === sig.hero); const adj = Math.max(-0.15, Math.min(0.15, -sig.delta * 0.5)); const p2 = Math.min(0.97, Math.max(0.03, pg + (t === a ? adj : -adj))); scen.push({ k: "sigban", team: t, hero: sig.hero, role: sig.role, text: `If ${other} bans ${t}'s ${sig.role} ${sig.hero} (${sig.with[0]}-${sig.with[1] - sig.with[0]} with it, ${sig.without[0]}-${sig.without[1] - sig.without[0]} without): ${a} wins a game ${Math.round(p2 * 100)}% (from ${Math.round(pg * 100)}%)`, pGame: r3(p2), pSeries: r3(series(p2, bo).win), banRate: pBan ? pBan.share : 0 }); }
   const sideTxt = (t, p) => p.side.blue && p.side.red ? `${t}: ${p.side.blue.w}-${p.side.blue.n - p.side.blue.w} on blue, ${p.side.red.w}-${p.side.red.n - p.side.red.w} on red` : null;
@@ -489,7 +539,8 @@ const confOf = (p, n) => (n < 4 ? "low (thin record)" : Math.abs(p - 0.5) < 0.12
 const upOut = [], picks = [];
 for (const m of upcoming) {
   const pr = project(m.a, m.b, m.bo, m.page), n = Math.min(nA(m.a), nA(m.b));
-  const rec = { id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
+  rec0ctx = contextFor(m);
+  const rec = { context: rec0ctx, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
   writeJSON(path.join(OUT, "matches", `${m.id}.json`), rec);
   upOut.push({ id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, pSeries: pr.pSeries, pGame: pr.pGame, expMaps: pr.expMaps, confidence: rec.confidence });
   if (n >= 6) { const fav = pr.pSeries >= 0.5 ? m.a : m.b, pf = Math.min(0.9, Math.max(pr.pSeries, 1 - pr.pSeries)); picks.push({ id: m.id, date: m.date, league: m.league, kind: "series", pick: `${fav} to win the series`, p: r3(pf), game: `${m.a} vs ${m.b}` });
