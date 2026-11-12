@@ -48,6 +48,11 @@ jobs:
       - name: Simulate upcoming games
         run: node scripts/simulate.mjs
 
+      # Picks track record: freeze each pick at the last run before its game, grade it after the final.
+      - name: Picks track record
+        continue-on-error: true
+        run: node scripts/picks-ledger.mjs
+
       - name: Insights and live snapshot
         run: |
           node scripts/insights.mjs

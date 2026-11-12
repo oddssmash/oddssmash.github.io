@@ -3548,11 +3548,51 @@ function pickWhy(pick, sim, gameRaw) {
   }
   return parts.join("") || `<p class="small muted">No extra detail for this pick.</p>`;
 }
+// ---- Picks: track record (every pick frozen before tip-off, graded after the final, followed live while in play)
+async function vPicksLog() {
+  const log = await load("picks-log.json").catch(() => null);
+  const tabs = `<div class="filters" role="group" aria-label="Prop type">${[["main", "Main lines"], ["top", "85%+ picks"], ["player", "Player props"], ["team", "Team props"], ["parlay", "Parlays"], ["log", "Track record"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-kind="${k}" aria-pressed="${S.pkKind === k}">${l}</button>`).join("")}</div>`;
+  const bind = () => app.querySelectorAll("[data-pk-kind]").forEach((b) => b.addEventListener("click", () => { S.pkKind = b.dataset.pkKind; clearInterval(S.pkLogTimer); vPicks(); }));
+  if (!log?.picks?.length) { app.innerHTML = `<h1>Picks</h1>${tabs}<div class="card"><p class="small">The track record starts with the next update: every pick is saved at the last run before its game starts, then graded after the final.</p></div>`; bind(); return; }
+  const ab = (id) => (S.teams || []).find((t) => String(t.id) === String(id))?.abbr || id, now = Date.now();
+  const started = log.picks.filter((p) => p.status === "pending" && Date.parse(p.date) <= now && Date.parse(p.date) > now - 8 * 3600000);
+  const liveIds = [...new Set(started.map((p) => p.game))], L = {};
+  await Promise.all(liveIds.map(async (id) => { L[id] = await liveFetch(id).catch(() => null); }));
+  // live state of one pick: hit already / out / on pace / behind, from the live box score
+  const liveOf = (p) => { const g = L[p.game]; if (!g || g.state === "pre") return { tag: "waiting", txt: "not started yet" };
+    const rem = remShare(g.period, g.clock), el = Math.max(0.05, 1 - rem), fin = g.state === "post", ts = String(p.team) === String(p.home) ? g.hs : g.as, os = String(p.team) === String(p.home) ? g.as : g.hs;
+    let cur, need, pass, txt;
+    if (p.player) { const b = g.box?.get(String(p.player.id)); if (!b) return { tag: "waiting", txt: "not on the box score yet" }; if (b.dnp) return { tag: "void", txt: "did not play" }; cur = b[p.fam] || 0; pass = cur > p.line;
+      const proj = fin ? cur : cur / el; txt = `${cur} now (needs ${Math.floor(p.line) + 1})${fin ? "" : ` · on pace for ${Math.round(proj)}`}`; return { tag: pass ? "hit" : fin ? "miss" : proj > p.line ? "pace" : "behind", txt }; }
+    if (p.fam === "total" || p.fam === "teamTotal") { cur = p.fam === "total" ? g.hs + g.as : ts; const proj = fin ? cur : cur / el, over = p.side === "over";
+      pass = over ? cur > p.line : fin && cur < p.line; const out = !over && cur > p.line; txt = `${cur} now${fin ? " (final)" : ` · on pace for ${Math.round(proj)}`}`;
+      return { tag: pass ? "hit" : out || (fin && !pass) ? "miss" : (over ? proj > p.line : proj < p.line) ? "pace" : "behind", txt }; }
+    const m = ts - os, ok = p.fam === "winner" ? m > 0 : p.side === "plus" ? m + p.line > 0 : m > p.line; txt = `${ab(p.team)} ${m >= 0 ? "+" : ""}${m} now${fin ? " (final)" : ` · ${g.detail}`}`;
+    return { tag: fin ? (ok ? "hit" : "miss") : ok ? "pace" : "behind", txt }; };
+  const TAG = { hit: ["HIT", "ok"], miss: ["MISS", "no"], void: ["VOID", ""], pace: ["ON PACE", "pace"], behind: ["BEHIND", "behind"], waiting: ["", ""], pending: ["", ""] };
+  const row = (p, st) => { const [t, c] = TAG[st.tag] || ["", ""]; return `<li class="pl-r ${c}"><span class="pl-t">${t ? `<b>${t}</b>` : ""}</span><span class="pl-m"><span class="t1">${esc(p.label)}</span><span class="t2">${esc(ab(p.away))} @ ${esc(ab(p.home))} · we said ${pct(p.p)}${st.txt ? ` · ${esc(st.txt)}` : ""}</span></span></li>`; };
+  const done = log.picks.filter((p) => p.status === "hit" || p.status === "miss" || p.status === "void"), byDay = {};
+  for (const p of done) (byDay[dayKey(p.date)] ||= []).push(p);
+  const today = log.picks.filter((p) => p.status === "pending" && Date.parse(p.date) > now).slice(0, 80);
+  const rec = (arr) => { const g = arr.filter((p) => p.status !== "void"), h = g.filter((p) => p.status === "hit").length; return g.length ? `${h}/${g.length} hit (${pct(h / g.length)})` : "-"; };
+  const famName = { pts: "Points", reb: "Rebounds", ast: "Assists", tpm: "Threes", total: "Game totals", teamTotal: "Team totals", spread: "Spreads", winner: "Winners" };
+  const liveRows = started.map((p) => ({ p, st: liveOf(p) })).sort((a, b) => ["hit", "pace", "behind", "miss", "void", "waiting"].indexOf(a.st.tag) - ["hit", "pace", "behind", "miss", "void", "waiting"].indexOf(b.st.tag));
+  app.innerHTML = `<h1>Picks</h1>${tabs}
+    <div class="card"><h2>Track record, last 21 days</h2><p class="big-n">${log.record.n ? `${log.record.hit}/${log.record.n} <span class="small muted">picks hit (${pct(log.record.hit / log.record.n)})</span>` : `<span class="small">First grades come in after the next finished games.</span>`}</p>
+      ${Object.keys(log.byFamily || {}).length ? `<div class="statgrid sg4">${Object.entries(log.byFamily).map(([k, v]) => `<div class="stat"><b>${pct(v.hit / v.n)}</b><span>${esc(famName[k] || k)} · ${v.hit}/${v.n}</span></div>`).join("")}</div>` : ""}
+      <p class="small muted">${esc(log.note)}</p></div>
+    ${liveRows.length ? `<div class="card"><h2>Live now <span class="small muted">· ${liveRows.filter((x) => x.st.tag === "hit").length} hit already, ${liveRows.filter((x) => x.st.tag === "pace").length} on pace, ${liveRows.filter((x) => x.st.tag === "behind").length} behind</span></h2><ul class="plain pl-list">${liveRows.map((x) => row(x.p, x.st)).join("")}</ul><p class="small muted">Straight from the live box score, refreshed every 30 seconds while this page is open. "On pace" scales the current number to a full game.</p></div>` : ""}
+    ${today.length ? `<details class="card"><summary><b>Not started yet</b> <span class="small muted">· ${today.length} picks saved so far; each is frozen at the last update before its tip-off</span></summary><ul class="plain pl-list">${today.map((p) => row(p, { tag: "pending", txt: fmtD(p.date, { weekday: "short", hour: "numeric", minute: "2-digit" }) })).join("")}</ul></details>` : ""}
+    ${Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([d, arr]) => `<details class="card"${d === Object.keys(byDay).sort().pop() ? " open" : ""}><summary><b>${esc(fmtD(arr[0].date, { weekday: "short", month: "short", day: "numeric" }))}</b> <span class="small muted">· ${rec(arr)}</span></summary><ul class="plain pl-list">${arr.sort((a, b) => (a.status === "miss") - (b.status === "miss") || b.p - a.p).map((p) => row(p, { tag: p.status, txt: p.actual != null ? `final ${p.fam === "spread" || p.fam === "winner" ? `margin ${p.actual >= 0 ? "+" : ""}${p.actual}` : p.actual}` : p.why || "" })).join("")}</ul></details>`).join("")}`;
+  bind();
+  clearInterval(S.pkLogTimer); if (liveRows.length) S.pkLogTimer = setInterval(() => { if (S.pkKind === "log" && /^#\/picks/.test(location.hash || "#/picks")) vPicksLog(); else clearInterval(S.pkLogTimer); }, 30000);
+}
 async function vPicks() {
   const [board] = await Promise.all([load("board.json")]);
   const days = [...new Set(board.picks.map((p) => dayKey(p.date)))].sort();
   S.pkDay = days.includes(S.pkDay) ? S.pkDay : days[0];
   S.pkKind = S.pkKind || "main"; S.pkBand = S.pkBand || "all";
+  if (S.pkKind === "log") return vPicksLog();
   if (S.pkBlend === undefined) { try { S.pkBlend = localStorage.getItem("pkBlend") === "1"; } catch { S.pkBlend = false; } }
   const band95 = (board.calibration?.all || []).find((b) => b.band === "95-100%");
   S.pkLow = !!S.pkLow;
@@ -3856,7 +3896,7 @@ const up = await load("upcoming.json").catch(() => []);
       <div class="note"><b>Nothing here is 100%.</b> Questionable players and near-automatic low lines are left out of the suggested parlays. In the back-test, picks the simulation called 95%+ came true ${band95 ? `${esc(band95.happened)}%` : "about 94%"} of the time${band95 ? ` (${num(band95.n)} picks), so about 1 in ${Math.max(2, Math.round(100 / Math.max(0.5, 100 - band95.happened)))} still missed` : ""}. Player props came true a little less often than stated; team picks were close to stated. Statistical analysis only, not betting advice.</div>
       <div class="filters" role="group" aria-label="Day">${days.map((d) => `<button class="fbtn" type="button" data-pk-day="${esc(d)}" aria-pressed="${d === S.pkDay}">${esc(dayName(d))}</button>`).join("")}</div>
       <label class="small low-tog blend-tog"><input type="checkbox" data-blend-tog ${S.pkBlend ? "checked" : ""}> Show EV figures (expected value from our chance, and a market-blended version). Off by default: we compare lines and our record, not profit.</label>
-      <div class="filters" role="group" aria-label="Prop type">${[["main", "Main lines"], ["top", "85%+ picks"], ["player", "Player props"], ["team", "Team props"], ["parlay", "Parlays"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-kind="${k}" aria-pressed="${S.pkKind === k}">${l}</button>`).join("")}</div>
+      <div class="filters" role="group" aria-label="Prop type">${[["main", "Main lines"], ["top", "85%+ picks"], ["player", "Player props"], ["team", "Team props"], ["parlay", "Parlays"], ["log", "Track record"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-kind="${k}" aria-pressed="${S.pkKind === k}">${l}</button>`).join("")}</div>
       ${S.pkKind === "main" ? (() => {
         const ml = mainLines(), flaggedML = ml.filter((x) => x.dv?.unexplained && x.p >= 0.55), shown = ml.filter((x) => x.p >= 0.55 && !x.dv?.unexplained).sort((a, b) => (b.gold - a.gold) || (b.qual - a.qual) || (b.p - a.p)).slice(0, 60);
         const gml = gameMain();
@@ -3905,7 +3945,7 @@ const up = await load("upcoming.json").catch(() => []);
           <div class="statgrid" style="grid-template-columns:repeat(2,1fr)"><div class="stat"><b>${pct(pr(l))}</b><span>Adjusted chance</span></div><div class="stat"><b>${pct(hr(l))}</b><span>Using past hit rates</span></div></div></div>`).join("") || `<p class="empty">Not enough strong legs (88%+ after adjustment, no questionable players, no low lines) in separate games on this day.</p>`}
         ${sameGame.length ? `<div class="card"><h2>Same-game combinations</h2><p class="small muted">These legs are linked (a team win and its star scoring big tend to go together), so their chance is counted directly from the 10,000 simulated games, never multiplied. Shown for information, not as picks: most are well under 50%, and where the two numbers are close the legs barely affect each other.</p><ul class="plain">${sameGame.map((j) => `<li class="spread"><span>${esc(j.label)} <span class="muted">(${esc(T(GAME[j.game]?.away).abbr)} at ${esc(T(GAME[j.game]?.home).abbr)})</span></span><span class="num">${pct(j.p)} <span class="muted">vs ${pct(j.ifUnrelated)} if unrelated</span></span></li>`).join("")}</ul></div>` : ""}`}`;
     app.querySelectorAll("[data-pk-day]").forEach((b) => b.addEventListener("click", () => { S.pkDay = b.dataset.pkDay; route(); }));
-    app.querySelectorAll("[data-pk-kind]").forEach((b) => b.addEventListener("click", () => { S.pkKind = b.dataset.pkKind; draw(); }));
+    app.querySelectorAll("[data-pk-kind]").forEach((b) => b.addEventListener("click", () => { S.pkKind = b.dataset.pkKind; if (S.pkKind === "log") vPicks(); else draw(); }));
     app.querySelectorAll("[data-gs-go]").forEach((b) => b.addEventListener("click", () => { const c = app.querySelector(`[data-gs="${b.dataset.gsGo}"]`); if (!c) return; c.querySelector(".gw-more")?.setAttribute("open", ""); window.scrollTo({ top: c.getBoundingClientRect().top + window.scrollY - 80, behavior: "auto" }); }));
     app.querySelector("[data-blend-tog]")?.addEventListener("change", (e) => { S.pkBlend = e.target.checked; try { localStorage.setItem("pkBlend", S.pkBlend ? "1" : ""); } catch { /* */ } draw(); });
     app.querySelectorAll("[data-pk-band]").forEach((b) => b.addEventListener("click", () => { S.pkBand = b.dataset.pkBand; draw(); }));

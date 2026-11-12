@@ -1132,3 +1132,10 @@ a.gtab { color: var(--ink-2); }
 .lg-switch a { min-height: 34px; display: inline-flex; align-items: center; padding: 0 12px; border-radius: 999px; font-size: 13px; font-weight: 650; color: var(--ink-2); text-decoration: none; }
 .lg-switch a:hover { text-decoration: none; color: var(--ink); }
 .lg-switch a[aria-current="page"] { background: var(--silver-metal); color: #0b0b0b; }
+
+/* Picks track record: each pick with its result or live state */
+.pl-list { margin: 0; } .pl-r { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); } .pl-r:first-child { border-top: 0; }
+.pl-t { width: 64px; flex: none; } .pl-t b { display: inline-block; font-size: 11px; letter-spacing: .06em; padding: 3px 6px; border-radius: 6px; background: var(--surface-2); color: var(--muted); }
+.pl-r.ok .pl-t b { background: rgba(12, 163, 12, .16); color: var(--good-ink); } .pl-r.no .pl-t b { background: rgba(208, 59, 59, .16); color: var(--crit-ink); } .pl-r.pace .pl-t b { background: var(--accent-wash); color: var(--accent-ink); } .pl-r.behind .pl-t b { background: rgba(250, 178, 25, .16); color: var(--warn); }
+.pl-m { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .pl-m .t1 { font-weight: 600; } .pl-m .t2 { font-size: 12px; color: var(--muted); }
+.big-n { font-size: 28px; font-weight: 700; margin: 4px 0 10px; } details.card > summary { cursor: pointer; min-height: 32px; }
