@@ -1,17 +1,17 @@
 {
- "built": "2026-11-12T08:22:04.164Z",
+ "built": "2026-11-12T08:45:23.327Z",
  "results": {
   "comfort": {
    "n": 3473,
    "nonzero": 3467,
-   "b": 0.14,
-   "lr": 2.6,
+   "b": 0.12,
+   "lr": 2.1,
    "test": {
     "n": 1042,
-    "b": 0.08,
+    "b": 0.06,
     "brierBase": 0.21,
     "brierWith": 0.209,
-    "gain": 0.0003
+    "gain": 0.0002
    },
    "verdict": "reject: no clear effect"
   },
@@ -19,7 +19,7 @@
    "n": 3473,
    "nonzero": 440,
    "b": -0.14,
-   "lr": 3.4,
+   "lr": 3.2,
    "test": {
     "n": 1042,
     "b": -0.23,
@@ -47,7 +47,7 @@
    "n": 3544,
    "nonzero": 3451,
    "b": 0.03,
-   "lr": 0.4,
+   "lr": 0.3,
    "test": {
     "n": 1064,
     "b": -0.03,
@@ -61,27 +61,27 @@
    "n": 3544,
    "nonzero": 1962,
    "b": -0.04,
-   "lr": 1.7,
+   "lr": 1.5,
    "test": {
     "n": 1064,
     "b": -0.08,
     "brierBase": 0.208,
-    "brierWith": 0.208,
-    "gain": -0.0007
+    "brierWith": 0.209,
+    "gain": -0.0008
    },
    "verdict": "reject: no clear effect"
   },
   "careerWR": {
    "n": 3544,
    "nonzero": 3534,
-   "b": 0.63,
-   "lr": 3.5,
+   "b": 0.55,
+   "lr": 2.7,
    "test": {
     "n": 1064,
-    "b": 0.47,
+    "b": 0.34,
     "brierBase": 0.208,
     "brierWith": 0.207,
-    "gain": 0.0004
+    "gain": 0.0003
    },
    "verdict": "reject: no clear effect"
   },
@@ -89,27 +89,27 @@
    "n": 3730,
    "nonzero": 3730,
    "b": 0.05,
-   "lr": 10.8,
+   "lr": 7.7,
    "test": {
     "n": 1119,
-    "b": 0.05,
+    "b": 0.04,
     "brierBase": 0.206,
     "brierWith": 0.205,
-    "gain": 0.001
+    "gain": 0.0008
    },
    "verdict": "lead: helped single games (Brier 0.2135 -> 0.2130) but series got slightly worse (0.1938 -> 0.1942) in the full model; kept off"
   },
   "archLane": {
-   "n": 308,
-   "nonzero": 280,
-   "b": 0.19,
-   "lr": 0.1,
+   "n": 322,
+   "nonzero": 290,
+   "b": 0.64,
+   "lr": 1.1,
    "test": {
-    "n": 93,
-    "b": 1.38,
-    "brierBase": 0.245,
-    "brierWith": 0.253,
-    "gain": -0.0072
+    "n": 97,
+    "b": 1.34,
+    "brierBase": 0.246,
+    "brierWith": 0.254,
+    "gain": -0.0082
    },
    "verdict": "reject: no clear effect"
   },
@@ -125,11 +125,11 @@
    "test": {
     "n": 36,
     "b": -2,
-    "brierBase": 0.213,
-    "brierWith": 0.209,
+    "brierBase": 0.214,
+    "brierWith": 0.21,
     "gain": 0.0035
    },
-   "verdict": "not adopted: only 117 games (36 held out) and the fit sits at its bound, so the sign and size are not reliable"
+   "verdict": "not adopted: only 117 games (36 held out) and the fit sits at its bound"
   },
   "s16WinPrior": {
    "n": 117,
@@ -139,20 +139,20 @@
    "test": {
     "n": 36,
     "b": -2,
-    "brierBase": 0.213,
-    "brierWith": 0.203,
-    "gain": 0.0099
+    "brierBase": 0.214,
+    "brierWith": 0.204,
+    "gain": 0.0098
    },
-   "verdict": "not adopted: only 117 games (36 held out) and the fit sits at its bound, so the sign and size are not reliable"
+   "verdict": "not adopted: only 117 games (36 held out) and the fit sits at its bound"
   },
   "comfortDelta": {
    "n": 3473,
    "nonzero": 3473,
-   "b": -0.14,
-   "lr": 2.7,
+   "b": -0.11,
+   "lr": 1.9,
    "test": {
     "n": 1042,
-    "b": -0.14,
+    "b": -0.1,
     "brierBase": 0.21,
     "brierWith": 0.209,
     "gain": 0.0002
@@ -162,11 +162,11 @@
   "comfortPicks": {
    "n": 3473,
    "nonzero": 1082,
-   "b": 0.04,
-   "lr": 0.5,
+   "b": 0.03,
+   "lr": 0.4,
    "test": {
     "n": 1042,
-    "b": 0.05,
+    "b": 0.04,
     "brierBase": 0.21,
     "brierWith": 0.21,
     "gain": 0
@@ -177,77 +177,91 @@
    "n": 3544,
    "nonzero": 1289,
    "b": 0.1,
-   "lr": 1.3,
+   "lr": 1.1,
    "test": {
     "n": 1064,
-    "b": 0.17,
+    "b": 0.15,
     "brierBase": 0.208,
     "brierWith": 0.208,
-    "gain": -0.0004
+    "gain": -0.0003
    },
    "verdict": "reject: no clear effect"
   },
   "careerWRuncertain": {
    "n": 3544,
    "nonzero": 1376,
-   "b": 1.78,
-   "lr": 9,
+   "b": 1.09,
+   "lr": 3.3,
    "test": {
     "n": 1064,
-    "b": 1.66,
+    "b": 0.96,
     "brierBase": 0.208,
-    "brierWith": 0.207,
-    "gain": 0.0005
+    "brierWith": 0.208,
+    "gain": 0.0002
    },
-   "verdict": "ADOPTED (weight 1.0): in the full model series Brier 0.1938 -> 0.1935, log-loss 0.5711 -> 0.5700, winners 69.7% -> 70.0%, single games 0.2135 -> 0.2133"
+   "verdict": "ADOPTED (weight 1.0) on the first test (LR 9.0, held-out gain 0.0005) and in the full model: series Brier 0.1938 -> 0.1935, log-loss 0.5711 -> 0.5700, winners 69.7% -> 70.0%. This re-run sits on top of the adopted term, so it shows what is left over"
   },
   "archMix": {
-   "n": 310,
-   "nonzero": 305,
-   "b": 0.32,
-   "lr": 0.2,
+   "n": 324,
+   "nonzero": 320,
+   "b": 0.87,
+   "lr": 2.2,
    "test": {
-    "n": 93,
-    "b": 1.62,
-    "brierBase": 0.245,
-    "brierWith": 0.256,
-    "gain": -0.0111
+    "n": 98,
+    "b": 2,
+    "brierBase": 0.25,
+    "brierWith": 0.268,
+    "gain": -0.0176
    },
    "verdict": "reject: no clear effect"
   },
   "contextScore": {
    "n": 3544,
-   "b": 0.31,
-   "lr": 9.5,
+   "b": 0.24,
+   "lr": 5.9,
    "test": {
     "n": 1064,
-    "b": 0.39,
-    "brierBase": 0.208,
+    "b": 0.32,
+    "brierBase": 0.209,
     "brierWith": 0.209,
-    "gain": -0.0003
+    "gain": -0.0002
    },
-   "verdict": "lead: clear in-sample (combined comfort, experience and career signals) but no held-out gain; not used"
+   "verdict": "lead: clear in-sample but no held-out gain; not used as a weight"
+  },
+  "nudges": {
+   "comfortPicks": {
+    "weight": 0.04,
+    "cap": 0.12,
+    "n": 1042,
+    "gain": 0
+   },
+   "expBigStage": {
+    "weight": 0.05,
+    "cap": 0.06,
+    "n": 1064,
+    "gain": -0.00003
+   },
+   "archMix": {
+    "weight": 0.3,
+    "cap": 0.06,
+    "n": 98,
+    "gain": -0.00149
+   },
+   "archLane": {
+    "weight": 0.3,
+    "cap": 0.06,
+    "n": 97,
+    "gain": -0.00127
+   }
   },
   "_joins": {
    "s18Games": 557,
-   "s18Joined": 453,
+   "s18Joined": 464,
    "menaJoined": 38
   }
  },
+ "nudgesNote": "The user asked for comfort, experience and archetypes to count. They are applied as small capped nudges, labelled on the site as not proven: comfort picks 0.04 logit each (cap 0.12) in the draft board, big-stage experience 0.05 (cap 0.06) and archetype lane matchups 0.3 x shrunk cell edge (cap 0.06) in match predictions. Cost on held-out games is in results.nudges (Brier change, negative = worse).",
  "notes": {
-  "method": "Each feature uses only games before the one predicted, added on top of the full pre-game logit (ratings + draft). Fitted on the first 70% of games by date, judged on the last 30%. Adopt only if LR > 3.84 and held-out Brier improves, then re-run inside the whole model.",
-  "comfort": "player record on the picked hero (shrunk); comfort70 = 15+ games at 70%+; familiar = games on the hero",
-  "comfortDelta": "the player's recency-weighted record on the picked hero minus their own recency-weighted average (half-life 240 days), pooled across every league in our history; comfortPicks = such picks with 4+ weighted games and +10 points, counted per draft",
-  "experience": "career games in our data; intlExp = international games; expBigStage = experience gap only in playoffs, finals and international events",
-  "careerWR": "career game win rate shrunk toward 50% (20-game prior); careerWRuncertain = only while a team has under 10 series or under 5 games this season",
-  "archLane": "archetypes rebuilt from each player's earlier Season 18 games (3+ games); lane-opponent pairs. archMix = whole-team mix, all 25 cross pairs. Research games joined to ours by fuzzy team names: 453 of 557 Season 18 games",
-  "menaDeaths": "team deaths per game in earlier MENA S10 games",
-  "s16Prior": "Season 16 lines from the MPL PH staff stat posts (lane KDA percentile, win rate shrunk), used only for later S17-S18 PH games",
-  "contextScore": "comfortDelta, comfortPicks, expBigStage, careerWRuncertain, careerWR and experience, each standardised on the training games, signed by its training fit, averaged into one score",
-  "notTested": {
-   "gkLongGames": "game length is not known before a game",
-   "turtles": "the model does not use turtle control",
-   "staffAllTime": "the staff all-time and M-series totals include later games and would leak the future; career numbers were rebuilt from our own games instead"
-  }
+  "archetypesV2": "Re-run after the research session fixed PH match ids (PH games had collapsed) and rebuilt archetypes (v2: hero-adjusted, lane-relative, with resample confidence). Research games joined to ours: 464 of 557 Season 18 games. Our test still rebuilds archetypes from earlier games only, so it never sees later results"
  }
 }

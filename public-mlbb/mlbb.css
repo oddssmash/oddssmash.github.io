@@ -474,3 +474,10 @@ body.mlbb-sub .top { display: none; }
 .cx-r .lbl { text-align: center; font-size: 9px; letter-spacing: .04em; } .cx-r > .bar:nth-child(2) { transform: scaleX(-1); }
 .cx-n { display: grid; min-width: 0; } .cx-n.r { text-align: right; } .cx-n b { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .cx-n em { font-style: normal; font-size: 11px; color: var(--ink-2); }
 .ds-cf { display: block; margin-top: 2px; font-style: normal; font-size: 10px; font-weight: 700; color: #F2C94C; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- archetype confidence, lane style matchups ---- */
+.ps-conf { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 10.5px; font-weight: 700; letter-spacing: .02em; background: var(--surface-2); color: var(--ink-2); box-shadow: inset 0 0 0 1px var(--line); vertical-align: middle; }
+.ps-conf-High { color: #3DDC97; box-shadow: inset 0 0 0 1px rgba(61,220,151,.5); } .ps-conf-Medium { color: #F2C94C; box-shadow: inset 0 0 0 1px rgba(242,201,76,.45); } .ps-conf-Low { color: #FF6B5E; box-shadow: inset 0 0 0 1px rgba(255,107,94,.45); }
+.ps-hm td.ps-sig { box-shadow: inset 0 0 0 2px #F2C94C; }
+.cx-l { display: grid; grid-template-columns: 52px minmax(0, 1fr) 18px minmax(0, 1fr); gap: 4px 6px; align-items: center; margin: 0 0 10px; }
+.cx-l > span:last-child { grid-column: 2 / -1; color: var(--ink-2); }

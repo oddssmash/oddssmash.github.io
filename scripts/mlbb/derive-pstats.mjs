@@ -20,7 +20,7 @@ const split = (r) => ({ label: r.label, n: r.n, wp: r1(r.wp), kda: r1(r.kda), gp
 const players = [];
 for (const s of keep(d.season, (x) => x.lg)) {
   const id = idOf(s.lg, s.p), det = d.detail[`${s.lg}|${s.p}`] || {};
-  players.push({ id, lg: s.lg, p: s.p, t: s.t, role: s.role, lane: s.lane, laneShare: s.laneShare, g: s.g, w: s.w, wp: s.wp, k: s.k, d: s.d, a: s.a, kda: s.kda, kp: s.kp ?? det.base?.kp, gpm: s.gpm || det.base?.gpm || null, dpm: s.dpm || det.base?.dpm || null, tpm: s.tpm, gs: s.gs || null, ds: s.ds || null, tow: s.tow || null, hp: s.hp, arch: s.arch, arch2: s.arch2, archWhy: s.archWhy, tags: s.tags, blend: s.blend, radar: s.radar });
+  players.push({ id, lg: s.lg, p: s.p, t: s.t, role: s.role, lane: s.lane, laneShare: s.laneShare, g: s.g, w: s.w, wp: s.wp, k: s.k, d: s.d, a: s.a, kda: s.kda, kp: s.kp ?? det.base?.kp, gpm: s.gpm || det.base?.gpm || null, dpm: s.dpm || det.base?.dpm || null, tpm: s.tpm, gs: s.gs || null, ds: s.ds || null, tow: s.tow || null, hp: s.hp, arch: s.arch, arch2: s.arch2, archWhy: s.archWhy, archConf: s.archConf ?? null, archConfLabel: s.archConfLabel || null, archRaw: s.archRaw || null, archRawWhy: s.archRawWhy || null, tags: s.tags, blend: s.blend, radar: s.radar });
   writeJSON(path.join(OUT, "p", id + ".json"), {
     vsLaneArch: (det.vsLaneArch || []).map(split), vsTeamArch: (det.vsTeamArch || []).map(split), vsTeam: (det.vsTeam || []).map(split), vsLanePlayer: (det.vsLanePlayer || []).map(split), splits: (det.splits || []).map(split),
     heroes: (det.heroes || []).map((h) => ({ h: h.h, n: h.n, wp: r1(h.wp), kda: r1(h.kda), gpm: h.gpm || null, dpm: h.dpm || null })), emblems: det.emblems || [], items: det.items || [], talents: det.talents || [], lanes: det.lanes || [],

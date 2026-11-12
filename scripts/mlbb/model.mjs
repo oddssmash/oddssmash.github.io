@@ -168,7 +168,9 @@ if (process.env.IDEAS_TEST) {
   const LANE = new Map(RV.season.map((p) => [String(p.p).toLowerCase(), p.lane])); // each player's main lane
   const RG = new Map(); for (const r of RV.log) { const k = `${r[0]}|${r[1]}|${r[2]}`; (RG.get(k) || RG.set(k, []).get(k)).push(r); }
   // join research games to ours: same league, same pair of team tags, k-th meeting of the pair, same game number
-  const meet = new Map(); const rkeys = [...RG.keys()].sort((a, b) => { const [la, ma, ga] = a.split("|"), [lb, mb, gb] = b.split("|"); return la.localeCompare(lb) || +ma - +mb || +ga - +gb; });
+  const meet = new Map(); // match ids are numbers in ID/MY and text slugs ending in a date in PH (flcn-rora-20261025): order by number, else by that date
+  const mOrd = (m) => (/^d+$/.test(m) ? +m : +(String(m).match(/(d{8})$/)?.[1] || 0));
+  const rkeys = [...RG.keys()].sort((a, b) => { const [la, ma, ga] = a.split("|"), [lb, mb, gb] = b.split("|"); return la.localeCompare(lb) || mOrd(ma) - mOrd(mb) || ma.localeCompare(mb) || +ga - +gb; });
   const rOrder = new Map(); { const seen = new Map(); for (const k of rkeys) { const [l, mid] = k.split("|"), rows = RG.get(k), pair = [...new Set(rows.map((r) => r[3]))].sort().join("~"), pk = `${l}|${pair}`; if (!seen.has(pk)) seen.set(pk, []); const lst = seen.get(pk); if (!lst.includes(mid)) lst.push(mid); rOrder.set(k, `${pk}|${lst.indexOf(mid)}|${k.split("|")[2]}`); } }
   const byOrder = new Map([...rOrder].map(([k, o]) => [o, k]));
   // research team names are tags in ID/MY but full names in PH ("Team Falcons", "Smart Omega"): match each of our team names to one research name
@@ -247,6 +249,10 @@ if (process.env.IDEAS_TEST) {
     for (const k of parts) { const rows = FEAT[k], cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), sd = Math.sqrt(tr.reduce((a2, r) => a2 + r[2] * r[2], 0) / Math.max(1, tr.length)) || 1, sg = Math.sign(fit(tr).b) || 0; for (const r of rows) { const key2 = r[3] + "|" + r[0]; const e = byGame.get(key2) || byGame.set(key2, [r[0], r[1], 0, r[3]]).get(key2); e[2] += sg * r[2] / sd / parts.length; } }
     const rows = [...byGame.values()], cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), te = rows.slice(cut), all = fit(rows), t = fit(tr), b0 = brier(te, 0), b1 = brier(te, t.b);
     out.contextScore = { n: rows.length, b: all.b, lr: all.lr, test: { n: te.length, b: t.b, brierBase: r3(b0), brierWith: r3(b1), gain: Math.round((b0 - b1) * 10000) / 10000 }, verdict: all.lr > 3.84 && b1 < b0 ? "ADOPT" : all.lr > 3.84 ? "lead: clear in-sample, no held-out gain" : "reject: no clear effect" }; }
+  // FIXED SMALL NUDGES (the user wants these signals to count): cost of each at the exact small, capped weight used on the
+  // site, on the held-out 30% of games (Brier change; positive = better, negative = worse)
+  { const cl = (v, c) => Math.max(-c, Math.min(c, v)), ev2 = (rows, b, cap) => { const cut = Math.floor(rows.length * 0.7), te = rows.slice(cut); let b0 = 0, b1 = 0; for (const [d, y, f] of te) { b0 += (lg(d) - y) ** 2; b1 += (lg(d + cl(b * f, cap)) - y) ** 2; } return { n: te.length, gain: Math.round(((b0 - b1) / te.length) * 100000) / 100000 }; };
+    out.nudges = { comfortPicks: { weight: 0.04, cap: 0.12, ...ev2(FEAT.comfortPicks, 0.04, 0.12) }, expBigStage: { weight: 0.05, cap: 0.06, ...ev2(FEAT.expBigStage, 0.05, 0.06) }, archMix: { weight: 0.3, cap: 0.06, ...ev2(FEAT.archMix, 0.3, 0.06) }, archLane: { weight: 0.3, cap: 0.06, ...ev2(FEAT.archLane, 0.3, 0.06) } }; }
   out._joins = { s18Games: s18, s18Joined: joined, menaJoined: mJoin };
   console.log("IDEAS TEST", JSON.stringify(out, null, 1));
   writeJSON(path.join(ROOT, "derived", "mlbb", "ideas-test.json"), { built: new Date().toISOString(), results: out }, true);
@@ -509,7 +515,14 @@ writeJSON(path.join(OUT, "heroes.json"), HERO);
 // rating is uncertain (CW above).
 const PEXP = new Map(); { const BIG = /playoff|final|knockout|bracket|upper|lower|elimination/i; for (const m of done) { const big = BIG.test(m.stage || "") || m.kind === "intl"; for (const t of [m.a, m.b]) { const L = lineupOf(t, m.page); if (L) for (const n of L) { const e = PEXP.get(n) || PEXP.set(n, { g: 0, intl: 0, big: 0 }).get(n); e.g += m.games.length; if (m.kind === "intl") e.intl += m.games.length; if (big) e.big += m.games.length; } } } }
 const PSI = readJSON(path.join(ROOT, "derived", "mlbb", "pstats", "index.json"), { players: [], archMatrix: [] }), ARCH = new Map();
-for (const p of PSI.players) { const k = String(palias(p.p) || p.p).toLowerCase(); if (!ARCH.has(k) || ARCH.get(k).g < p.g) ARCH.set(k, { arch: String(p.arch || "").replace(/\s*\(.*\)$/, ""), g: p.g, lg: p.lg }); }
+for (const p of PSI.players) { const k = String(palias(p.p) || p.p).toLowerCase(); if (!ARCH.has(k) || ARCH.get(k).g < p.g) ARCH.set(k, { arch: String(p.arch || "").replace(/\s*\(.*\)$/, ""), conf: p.archConfLabel || null, g: p.g, lg: p.lg }); }
+// SMALL NUDGES (the user asked for these signals to count): capped, and labelled on the site as not proven. Measured cost on
+// held-out games at these weights: experience -0.00003 Brier, archetype lane matchups -0.0013 (97 games), so both are small.
+const EXPW = 0.05, EXPCAP = 0.06, ARCW = 0.3, ARCCAP = 0.06, BIGST = /playoff|final|knockout|bracket|upper|lower|elimination/i, clampN = (v, c) => Math.max(-c, Math.min(c, v));
+const cellOf = (a, b) => (PSI.archMatrix || []).find((r) => r.a === a && r.b === b) || null;
+function nudgeOf(m, ctx) { if (!ctx) return { exp: 0, arch: 0, total: 0 }; const big = BIGST.test(m.stage || "") || m.kind === "intl", ml = (S) => S.players.reduce((x, q) => x + Math.log1p(q.g), 0) / 5;
+  const exp = big ? clampN(EXPW * (ml(ctx.a) - ml(ctx.b)), EXPCAP) : 0; let av = 0; for (const l of ctx.lanes || []) if (l.n) av += (l.wp / 100 - 0.5) * l.n / (l.n + 100); const arch = clampN(ARCW * av, ARCCAP);
+  return { exp: r3(exp), arch: r3(arch), total: r3(exp + arch) }; }
 let rec0ctx = null;
 function contextFor(m) {
   const side = (t) => { const L = lineupOf(t, m.page); if (!L) return null; const ro = rosterFor(t, m.page);
@@ -520,10 +533,11 @@ function contextFor(m) {
   const TA = R.T.get(m.a), TB = R.T.get(m.b), edge = TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(m.a, m.page), lineupOf(m.b, m.page), seasonOf(m.page)) : 0;
   const cells = []; for (const x of Object.keys(A.mix)) for (const y of Object.keys(B.mix)) { const c = (PSI.archMatrix || []).find((r) => r.a === x && r.b === y); if (c && c.n >= 20) cells.push({ a: x, b: y, wp: c.wp, n: c.n }); }
   cells.sort((p, q) => Math.abs(q.wp - 50) - Math.abs(p.wp - 50));
-  return { a: A, b: B, careerEdge: r3(edge), careerApplied: !!edge, cells: cells.slice(0, 4) };
+  const lanes = A.players.map((q, i) => { const o = B.players[i], c = q.arch && o.arch ? cellOf(q.arch, o.arch) : null; return { role: q.role, a: q.arch, aConf: ARCH.get(String(palias(q.n) || q.n).toLowerCase())?.conf || null, b: o.arch, bConf: ARCH.get(String(palias(o.n) || o.n).toLowerCase())?.conf || null, ...(c ? { wp: c.wp, lo: c.lo ?? null, hi: c.hi ?? null, n: c.n } : {}) }; });
+  return { a: A, b: B, careerEdge: r3(edge), careerApplied: !!edge, cells: cells.slice(0, 4), lanes };
 }
-function project(a, b, bo, page) {
-  const TA = R.T.get(a), TB = R.T.get(b), pg = lg((ratingOf(a) - ratingOf(b)) * crossOf(a, b) + (TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(a, page), lineupOf(b, page), seasonOf(page)) : 0)), s = series(pg, bo), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
+function project(a, b, bo, page, nudge = 0) {
+  const TA = R.T.get(a), TB = R.T.get(b), pg = lg((ratingOf(a) - ratingOf(b)) * crossOf(a, b) + (TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(a, page), lineupOf(b, page), seasonOf(page)) : 0) + nudge), s = series(pg, bo), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
   // scenarios: signature hero banned, likely ban targets, side, early vs late games
   for (const [t, sig, other] of [[a, sa, b], [b, sb2, a]]) if (sig && sig.with[1] >= 3) { const pBan = (t === a ? pb : pa).bansTheyMake.find((x) => x.h === sig.hero); const adj = Math.max(-0.15, Math.min(0.15, -sig.delta * 0.5)); const p2 = Math.min(0.97, Math.max(0.03, pg + (t === a ? adj : -adj))); scen.push({ k: "sigban", team: t, hero: sig.hero, role: sig.role, text: `If ${other} bans ${t}'s ${sig.role} ${sig.hero} (${sig.with[0]}-${sig.with[1] - sig.with[0]} with it, ${sig.without[0]}-${sig.without[1] - sig.without[0]} without): ${a} wins a game ${Math.round(p2 * 100)}% (from ${Math.round(pg * 100)}%)`, pGame: r3(p2), pSeries: r3(series(p2, bo).win), banRate: pBan ? pBan.share : 0 }); }
   const sideTxt = (t, p) => p.side.blue && p.side.red ? `${t}: ${p.side.blue.w}-${p.side.blue.n - p.side.blue.w} on blue, ${p.side.red.w}-${p.side.red.n - p.side.red.w} on red` : null;
@@ -538,8 +552,8 @@ const nA = (name) => R.T.get(name)?.n || 0;
 const confOf = (p, n) => (n < 4 ? "low (thin record)" : Math.abs(p - 0.5) < 0.12 ? "low (near coin-flip)" : n < 10 ? "medium (fewer than 10 series for one side)" : Math.abs(p - 0.5) >= 0.25 ? "high" : "medium");
 const upOut = [], picks = [];
 for (const m of upcoming) {
-  const pr = project(m.a, m.b, m.bo, m.page), n = Math.min(nA(m.a), nA(m.b));
-  rec0ctx = contextFor(m);
+  rec0ctx = contextFor(m); const ndg = nudgeOf(m, rec0ctx); if (rec0ctx) rec0ctx.nudge = ndg;
+  const pr = project(m.a, m.b, m.bo, m.page, ndg.total), n = Math.min(nA(m.a), nA(m.b));
   const rec = { context: rec0ctx, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
   writeJSON(path.join(OUT, "matches", `${m.id}.json`), rec);
   upOut.push({ id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, pSeries: pr.pSeries, pGame: pr.pGame, expMaps: pr.expMaps, confidence: rec.confidence });
