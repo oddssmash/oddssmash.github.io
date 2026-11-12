@@ -20,6 +20,7 @@ for (const d of ["", "matches", "teams", "players"]) fs.mkdirSync(path.join(OUT,
 const DAY = 86400000, now = Date.now(), r1 = (x) => Math.round(x * 10) / 10, r3 = (x) => Math.round(x * 1000) / 1000;
 const safe = (t) => String(t).replace(/[^A-Za-z0-9]+/g, "_");
 const lg = (p) => 1 / (1 + Math.exp(-p)), logit = (p) => Math.log(p / (1 - p));
+const cap1 = (x) => String(x || "").replace(/\b\w/g, (c) => c.toUpperCase());
 
 // ---------------------------------------------------------------- load
 const all = [];
@@ -341,9 +342,10 @@ for (const m of upcoming) {
   if (n >= 6) { const fav = pr.pSeries >= 0.5 ? m.a : m.b, pf = Math.min(0.9, Math.max(pr.pSeries, 1 - pr.pSeries)); picks.push({ id: m.id, date: m.date, league: m.league, kind: "series", pick: `${fav} to win the series`, p: r3(pf), game: `${m.a} vs ${m.b}` });
     if (pr.over != null) picks.push({ id: m.id, date: m.date, league: m.league, kind: "maps", pick: `${pr.over >= 0.5 ? "Over" : "Under"} ${pr.mapsLine} maps`, p: r3(Math.min(0.85, Math.max(pr.over, 1 - pr.over))), game: `${m.a} vs ${m.b}` }); }
 }
+for (const p of picks) if (p.p < 0.6) { p.noPick = true; p.why = "Too close to call: under 60%."; }
 picks.sort((a, b) => b.p - a.p);
 writeJSON(path.join(OUT, "upcoming.json"), upOut);
-writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series math (game chance from team ratings). Capped at 90% (maps 85%) and only for teams with 6+ series in our data. No sportsbook data.", picks });
+writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series math (game chance from team ratings). Capped at 90% (maps 85%) and only for teams with 6+ series in our data; under 60% is listed as too close to call. No sportsbook data.", picks });
 
 // ---------------------------------------------------------------- DRAFT LIBRARY, counter matrix, maps, ban priority
 // Every pro game with its draft, side, battlefield map, length and result, one file per league for the Library page.
@@ -440,6 +442,58 @@ writeJSON(PT_FILE, PT);
 const ptg = Object.values(PT.matches).filter((x) => x.score);
 writeJSON(path.join(OUT, "pretip.json"), { started: PT.started, graded: ptg.length, waiting: Object.values(PT.matches).filter((x) => !x.score).length, winner: ptg.length ? r3(ptg.filter((x) => x.right).length / ptg.length) : null, matches: ptg.slice(-100).reverse() });
 const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > now).map((m) => m.league);
+// ---------------------------------------------------------------- PLAYBOOK and PATCH TRACKER
+// Plain rules from our own Liquipedia games, each with its evidence: the rate, the games behind it and a 95% range
+// (Wilson). SOLID = the range clears the reference (50%, or the other group); LEAD = it points that way but does not.
+{
+  const wil = (k, n) => { if (!n) return [0, 1]; const z = 1.96, p = k / n, d = 1 + z * z / n, c = p + z * z / (2 * n), r = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)); return [r3((c - r) / d), r3((c + r) / d)]; };
+  const ev = (k, n) => { const ci = wil(k, n); return { k, n, rate: n ? r3(k / n) : null, lo: ci[0], hi: ci[1], tag: ci[0] > 0.5 || ci[1] < 0.5 ? "solid" : "lead" }; };
+  const yr = done.filter((m) => Date.parse(m.date) > now - 365 * DAY), rules = [];
+  // sides
+  let bw = 0, bn = 0; const byMap = {}, byLg = {};
+  for (const m of yr) for (const g of m.games) { if (g.side1 !== "blue" && g.side1 !== "red") continue; const blueWon = (g.side1 === "blue") === (g.w === 1); bn++; if (blueWon) bw++;
+    if (g.map) { const v = (byMap[g.map.trim()] ||= [0, 0]); v[1]++; if (blueWon) v[0]++; } if (m.kind === "league") { const v = (byLg[m.league] ||= [0, 0]); v[1]++; if (blueWon) v[0]++; } }
+  const mapsE = Object.entries(byMap).filter(([, v]) => v[1] >= 30).map(([k, v]) => ({ name: k, ...ev(v[0], v[1]) })).sort((a, b) => b.rate - a.rate);
+  const lgE = Object.entries(byLg).filter(([, v]) => v[1] >= 60).map(([k, v]) => ({ name: k, ...ev(v[0], v[1]) })).sort((a, b) => b.rate - a.rate);
+  const all = ev(bw, bn);
+  rules.push({ id: "sides", group: "Sides", title: all.tag === "solid" ? "First pick (blue side) is a real but small edge" : "First pick (blue side) is close to a coin flip overall",
+    stats: [{ v: all.rate, l: `blue side, all games (${all.n})`, ...all }, ...(mapsE[0] ? [{ v: mapsE[0].rate, l: `on ${mapsE[0].name} (${mapsE[0].n})`, ...mapsE[0] }] : []), ...(lgE[0] ? [{ v: lgE[0].rate, l: `in ${lgE[0].name} (${lgE[0].n})`, ...lgE[0] }] : [])],
+    tag: all.tag, use: "check the league and the map event before trusting a side edge; across all games it is small.", detail: { maps: mapsE, leagues: lgE } });
+  // series
+  let lt = 0, ltn = 0, same = 0, sn = 0;
+  for (const m of yr) { const gs = m.games.filter((g) => g.w === 1 || g.w === 2); for (let i = 1; i < gs.length; i++) { const prev = gs[i - 1].w; sn++; if (gs[i].w === prev) same++; if (gs[i].side1 === "blue" || gs[i].side1 === "red") { ltn++; const loser = prev === 1 ? 2 : 1; if ((gs[i].side1 === "blue") === (loser === 1)) lt++; } } }
+  const ltE = ev(lt, ltn), sameE = ev(same, sn), momPts = Math.round((lg(momFit.b) - 0.5) * 1000) / 10;
+  rules.push({ id: "series", group: "Series", title: "The last winner usually wins again, mostly because it is the better team", stats: [{ v: ltE.rate, l: `loser takes first pick next game (${ltE.n})`, ...ltE }, { v: sameE.rate, l: `last winner wins the next game (${sameE.n})`, ...sameE }, { v: null, text: `+${momPts} pts`, l: "extra edge after team strength", tag: momFit.lrStat >= 3.84 ? "solid" : "lead" }],
+    tag: "solid", use: "in a live series, update on the score but do not add much extra for momentum: the ratings already explain most of it." });
+  // heroes: popular is not strong
+  const rec = HERO.filter((h) => h.recent.picks >= 40 && h.recent.wr != null).map((h) => { const w = Math.round(h.recent.wr * h.recent.picks); return { h: h.id, pres: h.recent.presence, ...ev(w, h.recent.picks) }; });
+  const popular = [...rec].sort((a, b) => b.pres - a.pres).slice(0, 3), weak = [...rec].sort((a, b) => a.rate - b.rate).slice(0, 3), strong = [...rec].sort((a, b) => b.rate - a.rate).slice(0, 3);
+  rules.push({ id: "popular", group: "Heroes", title: "Popular is not the same as strong", stats: popular.map((x) => ({ v: x.rate, l: `${x.h}: ${Math.round(x.pres * 100)}% picked or banned, ${x.n} picks`, hero: x.h, ...x })), tag: popular.some((x) => x.tag === "solid") ? "solid" : "lead",
+    use: "do not rate a draft higher just because it has the most contested heroes.", detail: { weak, strong } });
+  // bans
+  const top2 = [...HERO].sort((a, b) => b.recent.presence - a.recent.presence).slice(0, 2);
+  rules.push({ id: "bans", group: "Heroes", title: `${cap1(top2[0]?.id)} and ${cap1(top2[1]?.id)} decide the ban phase`, stats: top2.map((h) => ({ v: h.recent.presence, l: `${h.id} picked or banned (${h.recent.picks} picks, ${h.recent.bans} bans)`, hero: h.id, tag: "solid" })), tag: "solid", use: "if either gets through the bans, expect the draft chance to move." });
+  // lanes
+  const lanes = HERO.filter((h) => h.bestLane && h.bestLane.length > 1 && h.bestLane[0].n >= 20 && h.bestLane[1].n >= 20 && h.bestLane[0].wr - h.bestLane[1].wr >= 0.05).map((h) => { const [a, b] = h.bestLane; const sep = wil(a.w, a.n)[0] > wil(b.w, b.n)[1]; return { h: h.id, a, b, tag: sep ? "solid" : "lead" }; }).sort((x, y) => (y.a.wr - y.b.wr) - (x.a.wr - x.b.wr)).slice(0, 4);
+  if (lanes.length) rules.push({ id: "lanes", group: "Lanes", title: "Some flex heroes win more in one lane", stats: lanes.slice(0, 3).map((x) => ({ v: x.a.wr, l: `${x.h} ${x.a.r} (${x.b.r} ${Math.round(x.b.wr * 100)}%)`, hero: x.h, tag: x.tag })), tag: lanes.some((x) => x.tag === "solid") ? "solid" : "lead", use: "score a flex hero by the lane it is actually played in.", detail: { lanes } });
+  // timing
+  const tim = HERO.filter((h) => h.timing), early = tim.filter((h) => h.timing.tempo >= 0.08).sort((a, b) => b.timing.tempo - a.timing.tempo).slice(0, 5), late = tim.filter((h) => h.timing.tempo <= -0.08).sort((a, b) => a.timing.tempo - b.timing.tempo).slice(0, 5);
+  const lens = yr.flatMap((m) => m.games.map((g) => secs(g.len)).filter(Boolean)).sort((a, b) => a - b), median = lens.length ? Math.round(lens[Math.floor(lens.length / 2)] / 6) / 10 : null;
+  writeJSON(path.join(OUT, "playbook.json"), { note: "Our own Liquipedia games, last 365 days (heroes: last 150 days). 95% ranges by the Wilson method.", games: yr.reduce((a, m) => a + m.games.length, 0), rules,
+    timing: { median, early: early.map((h) => ({ h: h.id, short: h.timing.short, long: h.timing.long })), late: late.map((h) => ({ h: h.id, short: h.timing.short, long: h.timing.long })) },
+    cannot: "Draft order (which lane to pick first) is not measured: Liquipedia lists each team's picks by role, not in the order they were made." });
+  // patch tracker: watch list, did the last real patch change anything, risers and fallers by date
+  const real = LP.patches.filter((p) => !p.manual && Date.parse(p.release) <= now), prevP = real.at(-1), cutP = prevP ? Date.parse(prevP.release) : now - 60 * DAY;
+  const win2 = (h, from, to) => { let w = 0, n = 0; for (const m of done) { const t = Date.parse(m.date); if (t < from || t >= to) continue; for (const g of m.games) { if (g.h1.includes(h)) { n++; if (g.w === 1) w++; } if (g.h2.includes(h)) { n++; if (g.w === 2) w++; } } } return [w, n]; };
+  const changed = (prevP?.changes || []).map((c) => { const b = win2(c.hero, cutP - 90 * DAY, cutP), a = win2(c.hero, cutP, now + DAY); return { h: c.hero, type: c.type, before: ev(b[0], b[1]), after: ev(a[0], a[1]) }; }).filter((x) => x.before.n + x.after.n > 0);
+  const moves = HERO.map((h) => { const b = win2(h.id, cutP - 90 * DAY, cutP), a = win2(h.id, cutP, now + DAY); return { h: h.id, before: ev(b[0], b[1]), after: ev(a[0], a[1]) }; }).filter((x) => x.before.n >= 20 && x.after.n >= 20).map((x) => ({ ...x, d: r3(x.after.rate - x.before.rate) }));
+  const sepd = (x) => x.after.lo > x.before.hi || x.after.hi < x.before.lo;
+  writeJSON(path.join(OUT, "patch.json"), { cut: prevP ? { patch: prevP.patch, release: prevP.release } : null, current: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release, manual: !!lastPatch.manual } : null,
+    patches: LP.patches.slice(-6).reverse().map((p) => ({ patch: p.patch, release: p.release, manual: !!p.manual, changes: p.changes })),
+    watch: HERO.filter((h) => h.untested || (lastPatch && h.patches?.some((p) => p.patch === lastPatch.patch))).map((h) => ({ h: h.id, picks: h.thisPatch?.picks || 0, type: h.patches.find((p) => p.patch === lastPatch.patch)?.type || "" })),
+    changed, risers: moves.filter((x) => x.d > 0).sort((a, b) => b.d - a.d).slice(0, 5).map((x) => ({ ...x, tag: sepd(x) ? "solid" : "lead" })), fallers: moves.filter((x) => x.d < 0).sort((a, b) => a.d - b.d).slice(0, 5).map((x) => ({ ...x, tag: sepd(x) ? "solid" : "lead" })),
+    note: "Before = 90 days before the patch date; after = since. Heroes need 20+ pro games on each side." });
+}
 writeJSON(path.join(OUT, "meta.json"), { momentum: momFit, patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release, changes: lastPatch.changes } : null, patches: LP.patches.slice(-8).reverse().map((p) => ({ patch: p.patch, release: p.release, changes: p.changes.length })), built: new Date().toISOString(), series: done.length, games: totalGames, teams: teamsOut.length, players: playersOut.length, heroes: HERO.length, upcoming: upOut.length, leagues: [...new Set(EVENTS.map((e) => e.league))], ratingScale: "Elo-style: 1500 average, 100 points = about 64% in a single game",
   roles: ROLES, source: "Liquipedia (CC-BY-SA) for matches, drafts and rosters; MLBBHub for ranked-game hero rates. No betting data." });
 console.log(`wrote ${upOut.length} upcoming, ${teamsOut.length} teams, ${playersOut.length} players, ${HERO.length} heroes, ${picks.length} picks`);
