@@ -548,7 +548,7 @@ function project(a, b, bo, page, nudge = 0) {
   const tempo = (t, p) => p.early.n + p.late.n >= 4 ? `${t}: ${p.early.w}-${p.early.n - p.early.w} in games under 14 min, ${p.late.w}-${p.late.n - p.late.w} in games of 18+ min` : null;
   const banTargets = (t, p) => p.comfort.slice(0, 3).map((c) => `${c.h} (${c.role}, ${c.n} games)`).join(", ");
   const exp = Object.entries(s.scores).reduce((acc, [k, v]) => acc + v * k.split("-").reduce((x, y) => +x + +y, 0), 0);
-  return { pGame: r3(pg), pSeries: r3(s.win), scores: Object.fromEntries(Object.entries(s.scores).map(([k, v]) => [k, r3(v)])), expMaps: r1(exp), mapsLine: bo === 3 ? 2.5 : bo === 5 ? 4.5 : bo === 7 ? 5.5 : null,
+  return { pGame: r3(pg), pSeries: r3(Math.min(0.9, Math.max(0.1, s.win))), /* shown capped at 90%, as on Picks */ scores: Object.fromEntries(Object.entries(s.scores).map(([k, v]) => [k, r3(v)])), expMaps: r1(exp), mapsLine: bo === 3 ? 2.5 : bo === 5 ? 4.5 : bo === 7 ? 5.5 : null,
     over: bo >= 3 ? r3(Object.entries(s.scores).filter(([k]) => k.split("-").reduce((x, y) => +x + +y, 0) > (bo === 3 ? 2.5 : bo === 5 ? 4.5 : 5.5)).reduce((x, [, v]) => x + v, 0)) : null,
     scenarios: scen, sides: [sideTxt(a, pa), sideTxt(b, pb)].filter(Boolean), tempo: [tempo(a, pa), tempo(b, pb)].filter(Boolean), comfort: [banTargets(a, pa), banTargets(b, pb)], profiles: [pa, pb] };
 }
@@ -658,8 +658,10 @@ writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series m
 // why a series was missed: how sure we were, the drafts in the games the favourite lost, its signature hero banned,
 // a deciding game, a cross-region match
 const SIG = new Map(teamsOut.filter((t) => t.signature).map((t) => [t.name, t.signature.hero]));
+// shown series chances are capped at 90% (10% the other way), as on Picks; accuracy checks use the raw numbers
+const capS = (p) => Math.min(0.9, Math.max(0.1, p));
 function whyMissed(x) {
-  const aFav = x.pS >= 0.5, fav = aFav ? x.A : x.B, dog = aFav ? x.B : x.A, fp = Math.max(x.pS, 1 - x.pS), out = [];
+  const aFav = x.pS >= 0.5, fav = aFav ? x.A : x.B, dog = aFav ? x.B : x.A, fp = Math.max(capS(x.pS), 1 - capS(x.pS)), out = [];
   out.push(fp < 0.6 ? `close to a coin flip: we gave ${fav} only ${Math.round(fp * 100)}%` : fp >= 0.75 ? `a real upset: ${fav} were ${Math.round(fp * 100)}% favourites` : `${dog} won as the underdog (${Math.round((1 - fp) * 100)}%)`);
   const lost = x.m.games.filter((g) => (g.w === 1) !== aFav); let draftLost = 0, sigBanned = 0; const sig = SIG.get(fav);
   for (const g of lost) { const gx = GAMEX.get(g); if (gx && g.h1.every(Boolean) && g.h2.every(Boolean)) { const v = lg(gx.base) - lg(gx.pre); if ((aFav ? -v : v) >= 0.01) draftLost++; } /* the draft tables as they stood before that game */ if (sig && [...(aFav ? g.b2 : g.b1)].includes(sig)) sigBanned++; }
@@ -687,7 +689,7 @@ function gameNotes(x, g) { const gx = GAMEX.get(g); if (!gx) return null; const 
   const hit = (post >= 0.5) === wA; notes.push(hit ? `our call held: ${post >= 0.5 ? A : B} at ${Math.round(Math.max(post, 1 - post) * 100)}%` : Math.max(post, 1 - post) < 0.56 ? `close to a coin flip (${Math.round(Math.max(post, 1 - post) * 100)}%), and it went the other way` : `an upset: ${post >= 0.5 ? A : B} were ${Math.round(Math.max(post, 1 - post) * 100)}% favourites for this game`);
   return { pre: r3(pre), post: r3(post), notes }; }
 function whyHit(x) {
-  const aFav = x.pS >= 0.5, fav = aFav ? x.A : x.B, dog = aFav ? x.B : x.A, fp = Math.max(x.pS, 1 - x.pS), out = [];
+  const aFav = x.pS >= 0.5, fav = aFav ? x.A : x.B, dog = aFav ? x.B : x.A, fp = Math.max(capS(x.pS), 1 - capS(x.pS)), out = [];
   out.push(fp >= 0.75 ? `a clear favourite delivered: we gave ${fav} ${Math.round(fp * 100)}%` : fp >= 0.6 ? `${fav} won as the favourite (${Math.round(fp * 100)}%)` : `a close call went our way: ${fav} at ${Math.round(fp * 100)}%`);
   const won = x.m.games.filter((g) => (g.w === 1) === aFav); let draftWon = 0, sigPlayed = 0; const sig = SIG.get(fav);
   for (const g of won) { const pg = GAMEP.get(g); if (pg != null && (aFav ? pg : 1 - pg) > 0.5) draftWon++; if (sig && (aFav ? g.h1 : g.h2).includes(sig)) sigPlayed++; }
@@ -696,14 +698,14 @@ function whyHit(x) {
   const [s1, s2] = x.m.score; if (x.m.bo > 1 && Math.min(s1, s2) === 0) out.push(`a clean sweep: ${dog} did not take a game`); else if (x.m.bo > 1 && Math.abs(s1 - s2) === 1 && s1 + s2 === x.m.bo) out.push("won the deciding game");
   return out.join("; ");
 }
-const results = R.log.map((x) => { const right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]); return { id: safe(x.m.id), date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(x.pS), graded: x.warm, right, mvp: x.m.mvp, ...(right ? { whyHit: whyHit(x) } : { why: whyMissed(x) }) }; }).reverse();
+const results = R.log.map((x) => { const right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]); return { id: safe(x.m.id), date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(capS(x.pS)), graded: x.warm, right, mvp: x.m.mvp, ...(right ? { whyHit: whyHit(x) } : { why: whyMissed(x) }) }; }).reverse();
 // HISTORY: every finished series, with every game (drafts, sides, length, winner) and our predictions before the series and
 // before each game. history.json is the index; series/<id>.json holds one series.
 { fs.rmSync(path.join(OUT, "series"), { recursive: true, force: true }); fs.mkdirSync(path.join(OUT, "series"), { recursive: true });
   const idx = [];
   for (const x of R.log) { const id = safe(x.m.id), right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]);
-    idx.push([id, x.m.date, x.m.league, x.m.stage, x.A, x.B, x.m.score[0], x.m.score[1], r3(x.pS), x.warm ? 1 : 0, right ? 1 : 0]);
-    writeJSON(path.join(OUT, "series", id + ".json"), { id, date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(x.pS), graded: x.warm, right, mvp: x.m.mvp || null, why: right ? whyHit(x) : whyMissed(x),
+    idx.push([id, x.m.date, x.m.league, x.m.stage, x.A, x.B, x.m.score[0], x.m.score[1], r3(capS(x.pS)), x.warm ? 1 : 0, right ? 1 : 0]);
+    writeJSON(path.join(OUT, "series", id + ".json"), { id, date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(capS(x.pS)), graded: x.warm, right, mvp: x.m.mvp || null, why: right ? whyHit(x) : whyMissed(x),
       games: x.m.games.map((g) => { const pg = GAMEP.get(g), an = gameNotes(x, g); return { n: g.n, w: g.w, len: g.len || null, map: g.map || null, side1: g.side1 || null, pA: pg == null ? null : r3(pg), pre: an?.pre ?? null, notes: an?.notes || [], h1: g.h1, h2: g.h2, b1: g.b1, b2: g.b2 }; }) }); }
   writeJSON(path.join(OUT, "history.json"), idx.reverse()); }
 writeJSON(path.join(OUT, "results.json"), results.slice(0, 400));

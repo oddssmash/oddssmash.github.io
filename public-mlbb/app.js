@@ -28,7 +28,7 @@ const seriesOf = (p, bo) => { const need = Math.ceil(bo / 2), C = (n, k) => { le
 const noArchOf = (m) => { if (!m) return m; if (!m.parts) return m.noArch && !archOn() ? { ...m, ...m.noArch, archOff: true } : m;
   const P0 = m.parts, on = { career: optOn("career"), exp: optOn("exp"), arch: optOn("arch") }; if (on.career && on.exp && on.arch) return m;
   const L = P0.base + (on.career ? P0.cw : 0) + (on.exp ? P0.exp : 0) + (on.arch ? P0.arch : 0), pg = 1 / (1 + Math.exp(-L)), s = seriesOf(pg, m.bo || 1), r3x = (x) => Math.round(x * 1000) / 1000;
-  return { ...m, pGame: r3x(pg), pSeries: r3x(s.win), scores: Object.fromEntries(Object.entries(s.sc).map(([k, v]) => [k, r3x(v)])), expMaps: Math.round(s.exp * 10) / 10, archOff: !on.arch, optsOff: Object.keys(on).filter((k) => !on[k]) }; };
+  return { ...m, pGame: r3x(pg), pSeries: r3x(Math.min(0.9, Math.max(0.1, s.win))), scores: Object.fromEntries(Object.entries(s.sc).map(([k, v]) => [k, r3x(v)])), expMaps: Math.round(s.exp * 10) / 10, archOff: !on.arch, optsOff: Object.keys(on).filter((k) => !on[k]) }; };
 const optsPanel = () => { const offN = OPTS.filter(([k]) => !optOn(k)).length; return `<details class="op-panel"${S.opOpen ? " open" : ""}><summary><span><b>Analysis settings</b><em>${offN ? `${offN} of ${OPTS.length} switched off` : "All parts switched on"}</em></span><span class="op-chev" aria-hidden="true">▾</span></summary>
     ${OPTS.map(([k, l, d]) => `<label class="ar-tg op-row"><input type="checkbox" data-opt="${k}"${optOn(k) ? " checked" : ""}><span class="ar-sw" aria-hidden="true"></span><span><b>${l}</b><em>${d}</em></span></label>`).join("")}
     <p class="small muted">Ratings and drafts are always on. Past results stay as we predicted them at the time.</p></details>`; };
