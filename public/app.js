@@ -4270,13 +4270,15 @@ function gameCardNew(g) {
 function linesBlock(g, L) { const o = S.oddsPub?.games?.[g.id], ph = g.pred.pHome, A = T(g.away).abbr, H = T(g.home).abbr, ml = (v) => (v == null ? "-" : (v > 0 ? "+" : "") + v);
   const pm = g.pred.hs - g.pred.as, pt = g.pred.hs + g.pred.as;
   const call = o ? [ph >= 0.5 ? `${H} ML` : `${A} ML`, Number.isFinite(o.spreadHome) ? (pm + o.spreadHome > 0 ? `${H} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : `${A} ${-o.spreadHome > 0 ? "+" : ""}${-o.spreadHome}`) : null, Number.isFinite(o.total) ? `${pt > o.total ? "Over" : "Under"} ${o.total}` : null].filter(Boolean) : [];
-  const picks = (S.boardPub?.picks || []).filter((q) => String(q.game) === String(g.id)).sort((a, b) => b.p - a.p).slice(0, 3);
+  // top player props at the SPORTSBOOK MAIN LINE: our chance at the book's own line, Over or Under, one per player and stat
+  const famN = { pts: "pts", reb: "reb", ast: "ast", tpm: "3PM" }, seenP = new Set();
+  const picks = (S.boardPub?.picks || []).filter((q) => String(q.game) === String(g.id) && q.player && q.comparison?.bookLine != null && q.comparison.ourProbAtBookLine != null).map((q) => { const c = q.comparison.ourProbAtBookLine; return { k: q.player.id + "|" + q.fam, n: q.player.n, fam: q.fam, line: q.comparison.bookLine, side: c >= 0.5 ? "Over" : "Under", p: Math.max(c, 1 - c) }; }).sort((a, b) => b.p - a.p).filter((q) => (seenP.has(q.k) ? false : seenP.add(q.k))).slice(0, 3);
   return `<div class="gl-t"><div class="gl-r gl-h"><span></span><span>Ours</span><span>Sportsbook</span></div>
     <div class="gl-r"><span>Moneyline</span><span>${esc(A)} ${ml(fairML(1 - ph))} · ${esc(H)} ${ml(fairML(ph))}</span><span>${o ? `${esc(A)} ${ml(o.mlAway)} · ${esc(H)} ${ml(o.mlHome)}` : "-"}</span></div>
     <div class="gl-r"><span>Spread</span><span>${esc(T(L.fav).abbr)} ${spreadTxt(L.spread)}</span><span>${o && Number.isFinite(o.spreadHome) ? `${esc(H)} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : "-"}</span></div>
     <div class="gl-r"><span>Total</span><span>${L.total.toFixed(1)}</span><span>${o && Number.isFinite(o.total) ? o.total : "-"}</span></div></div>
     ${call.length ? `<div class="gc-x gl-call"><b>Our call at the main line:</b> ${call.map((c) => `<span class="chip">${esc(c)}</span>`).join(" ")}</div>` : ""}
-    ${picks.length ? `<div class="gc-x gl-call"><b>Top picks:</b> ${picks.map((q) => `<span class="chip good">${esc(q.label)} ${pct(q.p)}</span>`).join(" ")}</div>` : ""}`; }
+    <div class="gc-x gl-call"><b>Top props at the main line:</b> ${picks.length ? picks.map((q) => `<span class="chip ${q.p >= 0.6 ? "good" : ""}">${esc(shortName(q.n))} ${q.side} ${q.line} ${famN[q.fam] || q.fam} · ${pct(q.p)}</span>`).join(" ") : `<span class="small muted">no sportsbook prop lines posted yet</span>`}</div>`; }
 // a finished game on a past day of the Games tab: final, projection, and what we hit against the main lines
 function pastGameCard(r) { const ph = r.pred.pHome, fav = ph >= 0.5 ? r.home : r.away;
   return `<a class="card gc" href="#/result/${esc(r.id)}"><div class="gc-h">${teamLogo(r.away, { size: "lg" })}<div class="gc-m"><b>${esc(T(r.away).abbr)} ${r.act.as} @ ${esc(T(r.home).abbr)} ${r.act.hs}</b><span>FINAL${r.act.ot ? " (OT)" : ""}</span></div>${teamLogo(r.home, { size: "lg" })}</div>
