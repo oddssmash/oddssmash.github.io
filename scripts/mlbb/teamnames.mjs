@@ -28,5 +28,13 @@ for (let i = 0; i < todo.length; i += 40) {
   } catch (e) { console.log("team names:", e.message); break; }
 }
 writeJSON(FILE, cache);
+// short names (the tag shown where a full name does not fit), cached in data/mlbb/team-short.json
+const SFILE = path.join(MD, "team-short.json"), short = readJSON(SFILE, {}), want = [...new Set([...names].map((n) => cache[n.toLowerCase()] || n))].filter((n) => !(n in short) && !/[{}|[\]]/.test(n));
+for (let i = 0; i < want.length; i += 40) { const chunk = want.slice(i, i + 40); await sleep(2100);
+  try { const r = await fetch(API + "?" + new URLSearchParams({ action: "expandtemplates", format: "json", prop: "wikitext", text: chunk.map((n) => `{{TeamShort|${n}}}`).join(SEP) }), { headers: UA }); if (!r.ok) break;
+    const out = (await r.json()).expandtemplates?.wikitext?.split(SEP) || []; if (out.length !== chunk.length) continue;
+    chunk.forEach((n, j) => { const t = out[j].replace(/\[\[File:[^\]]*\]\]/g, "").replace(/<[^>]+>/g, " "), m = /\[\[[^\]|]*\|([^\]]+)\]\]/.exec(t) || /^\s*([^{[]{1,14}?)\s*$/.exec(t); short[n] = m ? m[1].trim() : null; }); } catch { break; } }
+writeJSON(SFILE, short);
+console.log(`team short names: ${Object.values(short).filter(Boolean).length} on file`);
 const changed = Object.entries(cache).filter(([k, v]) => v && v.toLowerCase() !== k);
 console.log(`team names: ${names.size} seen, ${asked} looked up now, ${changed.length} short names mapped to a full name`);

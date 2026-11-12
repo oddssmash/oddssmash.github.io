@@ -13,6 +13,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms)); let last = 0;
 async function api(base, params) { const w = last + 2100 - Date.now(); if (w > 0) await sleep(w); last = Date.now(); try { const r = await fetch(`https://liquipedia.net/${base}/api.php?` + new URLSearchParams({ format: "json", ...params }), { headers: UA }); return r.ok ? r.json() : null; } catch { return null; } }
 const safe = (t) => String(t).replace(/[^A-Za-z0-9]+/g, "_");
 const MAP = readJSON(path.join(MD, "images.json"), { heroes: {}, teams: {}, players: {}, checked: {} });
+// team logos v2: the team template's icon (the symbol, without the wordmark) for every team; refetch all once
+if (MAP.teamsV !== 2) { MAP.teams = {}; for (const k of Object.keys(MAP.checked)) if (k.startsWith("tpl:") || k.startsWith("teams:")) delete MAP.checked[k]; MAP.teamsV = 2; }
 const fresh = (k) => MAP.checked[k] && Date.now() - Date.parse(MAP.checked[k]) < 30 * 86400000;
 
 const heroes = Object.values(readJSON(path.join(MD, "heroes-lp.json"), { heroes: {} }).heroes).map((h) => ({ key: h.name.toLowerCase(), title: h.name }));
@@ -61,10 +63,10 @@ const ext = (f) => (/\.jpe?g$/i.test(f) ? ".jpg" : /\.webp$/i.test(f) ? ".webp" 
 let got = 0;
 for (const [kind, list, width] of [["heroes", heroes, 96], ["teams", teams, 96], ["players", players, 120]]) {
   const names = await infoboxImages(list, kind);
-  if (kind === "teams") for (const [k, v] of await templateIcons(list.filter((x) => !MAP.teams[x.key] && !names.get(x.key)?.light && !names.get(x.key)?.dark))) names.set(k, v);
+  if (kind === "teams") for (const [k, v] of await templateIcons(list.filter((x) => !MAP.teams[x.key]))) names.set(k, v); // the icon wins over the infobox logo
   const urls = await thumbs([...names.values()].flatMap((v) => [v.light, v.dark]), width);
   for (const [key, v] of names) {
-    const one = async (f, tag) => (f && urls.get(f) ? download(urls.get(f), `${kind[0]}/x_${safe(key)}${tag}${ext(f)}`) /* x_ prefix: Windows refuses names like AUX or CON */ : null);
+    const one = async (f, tag) => (f && urls.get(f) ? download(urls.get(f), `${kind[0]}/x_${safe(key)}${kind === "teams" ? "-i" : ""}${tag}${ext(f)}`) /* x_ prefix: Windows refuses names like AUX or CON */ : null);
     const light = await one(v.light, ""), dark = await one(v.dark, "-dark");
     if (light || dark) { MAP[kind][key] = kind === "teams" ? { light: light || dark, dark: dark || light } : light || dark; got++; }
   }

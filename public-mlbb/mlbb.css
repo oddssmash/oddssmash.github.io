@@ -404,3 +404,13 @@ body.mlbb-sub .top { display: none; }
 .pt-m { display: flex; align-items: center; gap: 8px; min-height: 44px; color: var(--ink); } .pt-m:hover { text-decoration: none; } .pt-m > span { display: flex; flex-direction: column; } .pt-m img, .pt-m .hph { border-radius: 10px; margin: 0; }
 .pt-tl { display: flex; gap: 12px; padding: 10px 0; border-top: 1px solid var(--line); } .pt-tl:first-child { border-top: 0; } .pt-tl > span:first-child { width: 78px; flex: none; display: flex; flex-direction: column; }
 .vs-t .vs-pick { width: 100%; } .vs-t .field { width: 100%; font-size: 13px; padding: 4px 2px; text-overflow: ellipsis; }
+
+/* ---- How it works, Data sources, missing page: own screens in the canvas theme ---- */
+.card.doc-c, body .card.doc-c { background: var(--surface, #11221C); border: 1px solid var(--line, #2C4A3C); border-left: 3px solid #2FC3FF !important; border-radius: 14px; padding: 14px 16px; margin: 0 0 10px; }
+.doc-c h2 { font-family: "Space Grotesk", Inter, sans-serif; font-size: 12px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #2FC3FF; margin: 0 0 8px; }
+.doc-c p, .doc-c li { color: #C9D6D0; font-size: 14px; line-height: 1.55; }
+.doc-c b { color: #F2F6F4; }
+.doc-c ul.dots { padding-left: 18px; margin: 0; }
+.doc-c ul.dots li { margin: 0 0 8px; }
+.doc-c ul.dots li::marker { color: #F2C94C; }
+.doc-c a { color: #2FC3FF; }
