@@ -540,6 +540,9 @@ function nudgeOf(m, ctx) { if (!ctx) return { exp: 0, arch: 0, total: 0 }; const
   const exp = big ? clampN(EXPW * (ml(ctx.a) - ml(ctx.b)), EXPCAP) : 0; let av = 0; for (const l of ctx.lanes || []) if (l.n) av += (l.wp / 100 - 0.5) * l.n / (l.n + 100); const arch = clampN(ARCW * av, ARCCAP);
   return { exp: r3(exp), arch: r3(arch), total: r3(exp + arch) }; }
 let rec0ctx = null;
+// a team's last five series: our chance for it before each, the result, and how far it ran above or below our numbers
+const formOfTeam = (t) => { const rows = R.log.filter((x) => (x.A === t || x.B === t) && x.warm).slice(-5).map((x) => { const isA = x.A === t, p = isA ? x.pS : 1 - x.pS, won = (x.m.score[0] > x.m.score[1]) === isA; return { date: x.m.date, opp: isA ? x.B : x.A, p: r3(Math.min(0.9, Math.max(0.1, p))), won, score: isA ? x.m.score : [x.m.score[1], x.m.score[0]], raw: p }; });
+  return { rows: rows.map(({ raw, ...r }) => r), wins: rows.filter((r) => r.won).length, expected: r3(rows.reduce((a, r) => a + r.raw, 0)), diff: r3(rows.reduce((a, r) => a + (r.won ? 1 : 0) - r.raw, 0)) }; };
 function contextFor(m) {
   const side = (t) => { const L = lineupOf(t, m.page); if (!L) return null; const ro = rosterFor(t, m.page);
     const players = L.map((n, i) => { const e = PEXP.get(n) || { g: 0, intl: 0, big: 0 }, r = R.PLR.get(n) || { n: 0, w: 0 }, ar = ARCH.get(n); return { n: ro.find((x) => String(palias(x.player) || x.player).toLowerCase() === n)?.player || n, role: Object.keys(ROLEI)[i], g: e.g, intl: e.intl, big: e.big, wr: r.n ? r3((r.w + 10) / (r.n + 20)) : null, arch: ar?.arch || null }; });
@@ -550,7 +553,7 @@ function contextFor(m) {
   const cells = []; for (const x of Object.keys(A.mix)) for (const y of Object.keys(B.mix)) { const c = (PSI.archMatrix || []).find((r) => r.a === x && r.b === y); if (c && c.n >= 20) cells.push({ a: x, b: y, wp: c.wp, n: c.n }); }
   cells.sort((p, q) => Math.abs(q.wp - 50) - Math.abs(p.wp - 50));
   const lanes = A.players.map((q, i) => { const o = B.players[i], c = q.arch && o.arch ? cellOf(q.arch, o.arch) : null; return { role: q.role, a: q.arch, aConf: ARCH.get(String(palias(q.n) || q.n).toLowerCase())?.conf || null, b: o.arch, bConf: ARCH.get(String(palias(o.n) || o.n).toLowerCase())?.conf || null, ...(c ? { wp: c.wp, lo: c.lo ?? null, hi: c.hi ?? null, n: c.n } : {}) }; });
-  return { a: A, b: B, careerEdge: r3(edge), careerApplied: !!edge, cells: cells.slice(0, 4), lanes };
+  return { a: A, b: B, careerEdge: r3(edge), careerApplied: !!edge, cells: cells.slice(0, 4), lanes, form: { a: formOfTeam(m.a), b: formOfTeam(m.b) } };
 }
 function project(a, b, bo, page, nudge = 0) {
   const TA = R.T.get(a), TB = R.T.get(b), pg = lg((ratingOf(a) - ratingOf(b)) * crossOf(a, b) + (TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(a, page), lineupOf(b, page), seasonOf(page)) : 0) + nudge), s = series(pg, bo), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
@@ -565,7 +568,10 @@ function project(a, b, bo, page, nudge = 0) {
     scenarios: scen, sides: [sideTxt(a, pa), sideTxt(b, pb)].filter(Boolean), tempo: [tempo(a, pa), tempo(b, pb)].filter(Boolean), comfort: [banTargets(a, pa), banTargets(b, pb)], profiles: [pa, pb] };
 }
 const nA = (name) => R.T.get(name)?.n || 0;
-const confOf = (p, n) => (n < 4 ? "low (thin record)" : Math.abs(p - 0.5) < 0.12 ? "low (near coin-flip)" : n < 10 ? "medium (fewer than 10 series for one side)" : Math.abs(p - 0.5) >= 0.25 ? "high" : "medium");
+const confOf0 = (p, n) => (n < 4 ? "low (thin record)" : Math.abs(p - 0.5) < 0.12 ? "low (near coin-flip)" : n < 10 ? "medium (fewer than 10 series for one side)" : Math.abs(p - 0.5) >= 0.25 ? "high" : "medium");
+// confidence also looks at form against our numbers: a favourite 1.5+ wins below expectation over its last five, or an
+// underdog 1+ above, lowers it one level
+const confOf = (p, n, m) => { const c = confOf0(p, n); if (!m || /^low/.test(c)) return c; const fa = formOfTeam(p >= 0.5 ? m.a : m.b), fd = formOfTeam(p >= 0.5 ? m.b : m.a), why = fa.diff <= -1.5 ? `${p >= 0.5 ? m.a : m.b} has won ${Math.abs(fa.diff).toFixed(1)} fewer of its last five than we expected` : fd.diff >= 1 ? `${p >= 0.5 ? m.b : m.a} has won ${fd.diff.toFixed(1)} more of its last five than we expected` : null; return why ? `${/^high/.test(c) ? "medium" : "low"} (${why})` : c; };
 const upOut = [], picks = [];
 for (const m of upcoming) {
   rec0ctx = contextFor(m); const ndg = nudgeOf(m, rec0ctx); if (rec0ctx) rec0ctx.nudge = ndg;
@@ -575,7 +581,7 @@ for (const m of upcoming) {
   // the parts of the single-game chance (logits), so the site's analysis switches can rebuild the odds: ratings, career win
   // rate while ratings settle, big-stage experience, archetype matchups
   const TA0 = R.T.get(m.a), TB0 = R.T.get(m.b), parts = { base: Math.round((ratingOf(m.a) - ratingOf(m.b)) * crossOf(m.a, m.b) * 10000) / 10000, cw: TA0 && TB0 ? Math.round(cwEdge(R.PLR, R.SGc, TA0, TB0, lineupOf(m.a, m.page), lineupOf(m.b, m.page), seasonOf(m.page)) * 10000) / 10000 : 0, exp: ndg.exp, arch: ndg.arch };
-  const rec = { context: rec0ctx, noArch, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
+  const rec = { context: rec0ctx, noArch, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n, m), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
   writeJSON(path.join(OUT, "matches", `${m.id}.json`), rec);
   upOut.push({ noArch: { pSeries: noArch.pSeries, pGame: noArch.pGame, expMaps: noArch.expMaps }, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, pSeries: pr.pSeries, pGame: pr.pGame, expMaps: pr.expMaps, confidence: rec.confidence });
   if (n >= 6) { const fav = pr.pSeries >= 0.5 ? m.a : m.b, pf = Math.min(0.9, Math.max(pr.pSeries, 1 - pr.pSeries)); picks.push({ id: m.id, date: m.date, league: m.league, kind: "series", pick: `${fav} to win the series`, p: r3(pf), game: `${m.a} vs ${m.b}` });
