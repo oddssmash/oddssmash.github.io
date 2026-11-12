@@ -1162,3 +1162,7 @@ a.gtab { color: var(--ink-2); }
 .ml-card > details { margin-top: 10px; } .ml-card > details > summary { cursor: pointer; }
 
 .rv-sw { margin: 4px 0 2px; } .rv-note { margin: 0 0 10px; }
+
+.sd-l { display: grid; gap: 6px; } .sd-r { display: grid; grid-template-columns: 74px 1fr; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); } .sd-r:last-child { border-bottom: 0; }
+.sd-r > b { font-size: 12px; } .sd-r.hit > b { color: var(--ok, #2e9e5b); } .sd-r.miss > b { color: var(--bad, #d64545); } .sd-r em { display: block; font-style: normal; font-size: 12.5px; color: var(--muted); }
+a.card .ml-cs { margin-top: 8px; }

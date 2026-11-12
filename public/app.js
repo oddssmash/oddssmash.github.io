@@ -1398,8 +1398,24 @@ function playerWhy(p) {
 }
 
 // ---------------------------------------------------------------- Results (back-test)
+// ---- main-line scorecard helpers (graded against the sportsbook main line saved before tip-off; lines never feed our numbers)
+async function loadScore() { if (!S.mlMap) { const ML = await load("mainline-log.json").catch(() => null), PL = await load("picks-log.json").catch(() => null); S.mlMap = new Map((ML?.games || []).map((g) => [String(g.game), g])); S.plMap = new Map(); for (const q of PL?.picks || []) (S.plMap.get(String(q.game)) || S.plMap.set(String(q.game), []).get(String(q.game))).push(q); S.mlRec = ML?.record || null; } }
+const scChip = (st, txt) => `<span class="ml-c ${st === "hit" ? "ok" : st === "miss" ? "no" : ""}"><b>${st === "hit" ? "✓" : st === "miss" ? "✗" : st === "push" ? "=" : "–"}</b> ${txt}</span>`;
+function scoreChips(id) { const g = S.mlMap?.get(String(id)), pk = (S.plMap?.get(String(id)) || []).filter((q) => q.status === "hit" || q.status === "miss"); if (!g && !pk.length) return "";
+  const ab = (t) => T(t).abbr, sg = (v) => (v > 0 ? "+" : "") + v, props = (g?.props || []).filter((x) => x.status !== "void"), ph = props.filter((x) => x.status === "hit").length, kh = pk.filter((q) => q.status === "hit").length;
+  return `<div class="ml-cs">${g ? scChip(g.ml.status, `ML ${esc(ab(g.ml.pick))}${g.ml.odds ? ` (${g.ml.odds > 0 ? "+" : ""}${g.ml.odds})` : ""}`) : ""}${g?.spread ? scChip(g.spread.status, `Spread ${esc(ab(g.spread.pick))} ${sg(g.spread.line)}`) : ""}${g?.total ? scChip(g.total.status, `${g.total.side === "over" ? "Over" : "Under"} ${g.total.line}`) : ""}${props.length ? scChip(ph * 2 >= props.length ? "hit" : "miss", `Props ${ph}/${props.length}`) : ""}${pk.length ? scChip(kh * 2 >= pk.length ? "hit" : "miss", `Our picks ${kh}/${pk.length}`) : ""}</div>`; }
+function scoreDetail(id) { const g = S.mlMap?.get(String(id)), pk = (S.plMap?.get(String(id)) || []).slice().sort((a, b) => b.p - a.p); if (!g && !pk.length) return "";
+  const ab = (t) => T(t).abbr, sg = (v) => (v > 0 ? "+" : "") + v, row = (st, label, extra) => `<li class="sd-r ${st}"><b>${st === "hit" ? "✓ HIT" : st === "miss" ? "✗ MISS" : st === "push" ? "= PUSH" : st === "void" ? "VOID" : "…"}</b><span>${label}<em>${extra}</em></span></li>`;
+  const famN = { pts: "points", reb: "rebounds", ast: "assists", tpm: "threes" };
+  return `<div class="card"><h2>Against the sportsbook main lines</h2><ul class="plain sd-l">
+    ${g ? row(g.ml.status, `Moneyline: ${esc(ab(g.ml.pick))}${g.ml.odds ? ` (${g.ml.odds > 0 ? "+" : ""}${g.ml.odds})` : ""}`, `we gave ${esc(ab(g.ml.pick))} ${pct(g.ml.p)} · final ${esc(ab(g.away))} ${g.as}, ${esc(ab(g.home))} ${g.hs}`) : ""}
+    ${g?.spread ? row(g.spread.status, `Spread: ${esc(ab(g.spread.pick))} ${sg(g.spread.line)}`, `our margin ${esc(ab(g.home))} ${sg(g.spread.ours)} · final ${esc(ab(g.home))} ${sg(g.hs - g.as)}`) : ""}
+    ${g?.total ? row(g.total.status, `Total: ${g.total.side === "over" ? "Over" : "Under"} ${g.total.line}`, `our total ${g.total.ours} · final ${g.total.actual}`) : ""}
+    ${(g?.props || []).map((x) => row(x.status, `${esc(x.player.n)} ${x.side} ${x.line} ${famN[x.fam] || x.fam}`, `we said ${pct(x.p)} · final ${x.actual ?? "did not play"}`)).join("")}
+  </ul>${g ? "" : '<p class="small muted">No sportsbook main line was saved for this game.</p>'}<p class="small muted">Main lines saved just before tip-off; player props: our chance at the main prop line was 60%+ on one side.</p></div>
+  ${pk.length ? `<div class="card"><h2>Our picks for this game</h2><ul class="plain sd-l">${pk.map((q) => row(q.status, esc(q.label), `we said ${pct(q.p)}${q.actual != null ? ` · final ${q.actual}` : ""}${q.why ? ` · ${esc(q.why)}` : ""}`)).join("")}</ul></div>` : ""}`; }
 async function vResults() {
-  const res = await load("results.json");
+  const res = await load("results.json"); await loadScore();
   const phases = [...new Map(res.map((r) => [r.pk, r.phase])).entries()];
   const draw = () => {
     const rows = (S.resFilter === "all" ? res : S.resFilter === "upsets" ? res.filter((r) => r.upset) : res.filter((r) => r.pk === S.resFilter)).slice().reverse();
@@ -1410,6 +1426,7 @@ async function vResults() {
       <div class="filters" role="group" aria-label="Filter results">
         ${[["all", "All games"], ...phases, ["upsets", "Misses only"]].map(([k, l]) => `<button class="fbtn" type="button" data-f="${esc(k)}" aria-pressed="${S.resFilter === k}">${esc(l)}</button>`).join("")}
       </div>
+      ${S.mlRec ? `<div class="card"><h2>Against the sportsbook main lines · last 21 days</h2><div class="statgrid sg4">${[["ml", "Moneyline"], ["spread", "Spread"], ["total", "Total"], ["props", "Player props"]].map(([k, l]) => { const r = S.mlRec[k]; return `<div class="stat"><b>${r.n ? pct(r.hit / r.n) : "-"}</b><span>${l} · ${r.hit}/${r.n}</span></div>`; }).join("")}</div><p class="small muted">Tap a game for every line, prop and pick, hit or miss.</p></div>` : ""}
       <div class="tiles">
         <div class="tile"><div class="l">Games graded</div><div class="v">${n.toLocaleString()}</div></div>
         <div class="tile"><div class="l">Winner called</div><div class="v">${n ? pct(hit / n) : "-"}</div><div class="s">${hit} of ${n}</div></div>
@@ -1433,14 +1450,14 @@ function resRow(r) {
     <span class="l">Final <b>${r.act.as}–${r.act.hs}</b>${r.act.ot ? " (OT)" : ""} · margin off by ${f1(r.err)}</span>
     <span>${r.upsetFlag ? `<span class="chip warn">⚠ flagged</span>` : ""}</span>
     ${!r.correct && r.why ? `<span class="l why-miss"><b>Why we missed:</b> ${esc(r.why)}</span><span></span>` : ""}
-  </div></a>`;
+  </div>${scoreChips(r.id)}</a>`;
 }
 
 async function vResult(id) {
-  const g = await load(`games/${id}.json`);
+  const g = await load(`games/${id}.json`); await loadScore();
   const [home, away] = [g.teams.find((t) => t.isHome), g.teams.find((t) => !t.isHome)];
   app.innerHTML = `<a class="back" href="#/results">‹ All results</a>
-    <h1 class="vh">${esc(T(away.tid).name)} at ${esc(T(home.tid).name)}: projected versus actual</h1>
+    ${scoreDetail(id)}<h1 class="vh">${esc(T(away.tid).name)} at ${esc(T(home.tid).name)}: projected versus actual</h1>
     <div class="card hero">
       <div class="muted small">${esc(dayLong(g.date))} · ${esc(g.phase)}</div>
       <div class="teams">
