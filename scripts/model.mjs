@@ -1275,6 +1275,7 @@ for (const g of walk) {
     results.push(sum);
     refCheck.n++; refCheck.withRef += Math.abs(g.hs + g.as - pred.h.pts - pred.a.pts); refCheck.without += Math.abs(g.hs + g.as - (pred.h.pts + pred.a.pts - pred.ref.tot)); if (pred.ref.tot) refCheck.applied++;
     details[g.id] = { ...sum, models: Object.fromEntries(MODEL_KEYS.map((k) => [k, round(pred.models[k])])), weights: Object.fromEntries(MODEL_KEYS.map((k) => [k, round(learn.w[k], 2)])), ref: { tot: round(pred.ref.tot), home: round(pred.ref.home) }, headline: headline(g, pred, teamAnalysis, playerRows), upsetReasons: upsetWatch.reasons, teams: teamAnalysis, players: playerRows, pace: round(pred.expPace), homeAdv: round(pred.homeAdv), sigma: round(learn.sigma), officials: g.officials, venue: g.venue };
+    if (!correct) { const w = String(details[g.id].headline || "").split("Why: ")[1]; if (w) sum.why = w.trim(); } // why a missed game was missed, for the results list
     for (const ta of teamAnalysis) ledger.push({ date: g.date.slice(0, 10), pk: phase.key, tid: ta.tid, ...ta.why, absErr: Math.abs(ta.err), players: ta.players, tags: ta.tags });
     if (predicted % 100 === 0) {
       learn.history.push({ date: g.date.slice(0, 10), homeAdv: round(learn.homeAdv, 2), sigma: round(learn.sigma, 2), shrink: round(learn.k, 2), slope: round(learn.a, 3), scenarios: Object.keys(learn.scen).length });

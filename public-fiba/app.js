@@ -28,7 +28,7 @@ const face = (n, px = 40) => `<span class="pf" style="width:${px}px;height:${px}
 // ---------------------------------------------------------------- chrome
 const NAV = [["games", "Games", "M4 5h16v14H4zM4 10h16M9 5v14"], ["picks", "Picks", "M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.6 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"],
   ["players", "Players", "M10.5 17a6.5 6.5 0 100-13 6.5 6.5 0 000 13zM20 20l-4.9-4.9M10.5 7.5v6M7.5 10.5h6"], ["teams", "Teams", "M12 3l8 4v5c0 5-3.5 8-8 9-4.5-1-8-4-8-9V7z"], ["more", "More", "M4 7h16M4 12h16M4 17h16"]];
-const TAB = { games: "games", game: "games", picks: "picks", players: "players", player: "players", teams: "teams", team: "teams", results: "more", accuracy: "more", result: "more", why: "more", lab: "more", board: "picks", scout: "players", insights: "games", today: "more", more: "more", how: "more", sources: "more", news: "more" };
+const TAB = { games: "games", game: "games", picks: "picks", players: "players", player: "players", teams: "teams", team: "teams", results: "more", record: "picks", accuracy: "more", result: "more", why: "more", lab: "more", board: "picks", scout: "players", insights: "games", today: "more", more: "more", how: "more", sources: "more", news: "more" };
 function drawNav(active) {
   const nav = document.getElementById("nav");
   if (!nav.childElementCount) nav.innerHTML = NAV.map(([k, l, d]) => `<a href="#/${k}" data-tab="${k}"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg></span><span class="nav-l">${l}</span></a>`).join("");
@@ -128,13 +128,30 @@ async function newsCard(el, keep, title) {
 }
 
 // ---------------------------------------------------------------- picks
+// ---- Picks track record: frozen before tip-off, graded after the final, every miss with a reason; live score while in play
+async function vRecord() {
+  const log = await load("picks-log.json").catch(() => null); await liveData().catch(() => null);
+  if (!log?.picks?.length) { app.innerHTML = `<a class="back" href="#/picks">‹ Picks</a><h1>Track record</h1><div class="card"><p class="small">The track record starts with the next update: every pick is saved at the last run before its game starts, then graded after the final.</p></div>`; return; }
+  const now = Date.now(), K = { winner: "Winners", total: "Totals", prop: "Player points" };
+  const row = (p, tag, txt) => `<li class="pl-r ${tag === "hit" ? "ok" : tag === "miss" ? "no" : tag === "live" ? "pace" : ""}"><span class="pl-t">${tag && tag !== "pending" ? `<b>${tag.toUpperCase()}</b>` : ""}</span><span class="pl-m"><span class="t1">${esc(p.pick)}</span><span class="t2">${esc(p.game)} · ${esc(p.comp)} · we said ${pct(p.p)}${txt ? ` · ${txt}` : ""}</span></span></li>`;
+  const live = log.picks.filter((p) => p.status === "pending" && Date.parse(p.date) <= now && Date.parse(p.date) > now - 6 * 3600000);
+  const upcoming = log.picks.filter((p) => p.status === "pending" && Date.parse(p.date) > now).slice(0, 80);
+  const done = log.picks.filter((p) => ["hit", "miss", "void"].includes(p.status)), byDay = {}; for (const p of done) (byDay[dayKey(p.date)] ||= []).push(p);
+  const rec = (arr) => { const g = arr.filter((p) => p.status !== "void"), h = g.filter((p) => p.status === "hit").length; return g.length ? `${h}/${g.length} hit (${pct(h / g.length)})` : "-"; };
+  app.innerHTML = `<a class="back" href="#/picks">‹ Picks</a><h1>Track record</h1>
+    <div class="card"><h2>Last 30 days</h2><p style="font-size:26px;font-weight:700;margin:4px 0 10px">${log.record.n ? `${log.record.hit}/${log.record.n} <span class="small muted">hit (${pct(log.record.hit / log.record.n)})</span>` : `<span class="small">First grades come in after the next finished games.</span>`}</p>
+      ${Object.keys(log.byKind || {}).length ? `<div class="statgrid">${Object.entries(log.byKind).map(([k, v]) => `<div class="stat"><b>${pct(v.hit / v.n)}</b><span>${esc(K[k] || k)} · ${v.hit}/${v.n}</span></div>`).join("")}</div>` : ""}<p class="small muted">${esc(log.note)}</p></div>
+    ${live.length ? `<div class="card"><h2>In play</h2><ul class="plain pl-list">${live.map((p) => { const L = liveOf(p.gid); return row(p, L?.live ? "live" : "", L ? `${L.live ? "LIVE" : L.final ? "final" : ""} ${esc(L.period || "")} · ${L.a}-${L.b}` : "waiting for the score"); }).join("")}</ul><p class="small muted">Live scores update about every 10 minutes. Player numbers are graded after the final.</p></div>` : ""}
+    ${upcoming.length ? `<details class="card"><summary><b>Not started yet</b> <span class="small muted">· ${upcoming.length} picks; each is frozen at the last update before its tip-off</span></summary><ul class="plain pl-list">${upcoming.map((p) => row(p, "pending", esc(dayShort(p.date)))).join("")}</ul></details>` : ""}
+    ${Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([d, arr], i) => `<details class="card"${i === 0 ? " open" : ""}><summary><b>${esc(dayLabel(arr[0].date))}</b> <span class="small muted">· ${rec(arr)}</span></summary><ul class="plain pl-list">${arr.sort((a, b) => (a.status === "miss") - (b.status === "miss") || b.p - a.p).map((p) => row(p, p.status, `${p.actual != null ? `final ${esc(p.actual)}` : esc(p.why || "")}${p.status === "miss" && p.why ? ` · <b>Why we missed:</b> ${esc(p.why)}` : ""}`)).join("")}</ul></details>`).join("")}`;
+}
 async function vPicks() {
   const { picks, note } = await load("picks.json");
   const now = Date.now(), kinds = { all: "All", winner: "Winners", total: "Totals", prop: "Player points" };
   const list = picks.filter((p) => Date.parse(p.date) > now - 3600000 && (S.pf === "all" || p.kind === S.pf) && p.p >= 0.6);
   const days = [...new Set(list.map((p) => dayKey(p.date)))].sort();
   app.innerHTML = `<h1>Picks</h1><p class="lead">Our own lines for every upcoming FIBA game, sorted by how often they came true in 10,000 simulated games. Only picks at 60% or better are listed.</p>
-    <div class="callout small"><b>Nothing here is 100%.</b> ${esc(note)} The chance is ours; "fair odds" is what that chance is worth in decimal odds.</div>
+    <p><a class="go" href="#/record">Track record: every pick, hit or missed, and why ›</a></p><div class="callout small"><b>Nothing here is 100%.</b> ${esc(note)} The chance is ours; "fair odds" is what that chance is worth in decimal odds.</div>
     <div class="filters" role="group" aria-label="Pick type">${Object.entries(kinds).map(([k, l]) => `<button class="fbtn" data-pf="${k}" aria-pressed="${S.pf === k}">${l}</button>`).join("")}</div>
     ${days.map((d) => { const ps = list.filter((p) => dayKey(p.date) === d).slice(0, 40); return `<h3 class="dayh">${esc(dayLabel(ps[0].date))}</h3><div class="tgrid">${ps.map((p) => `<a class="titem" href="#/game/${esc(p.gid)}"><span class="pk-p ${p.p >= 0.75 ? "hi" : ""}">${pct(p.p)}</span><span><span class="t1">${esc(p.pick)}</span><span class="t2">${esc(p.game)} · ${esc(p.comp)}${p.why ? " · " + esc(p.why) : ""}</span></span><span class="t3">fair ${dec(p.p)}</span></a>`).join("")}</div>`; }).join("") || `<p class="empty">No picks at 60% or better right now.</p>`}`;
   app.querySelectorAll("[data-pf]").forEach((b) => b.addEventListener("click", () => { S.pf = b.dataset.pf; vPicks(); }));
@@ -339,7 +356,7 @@ async function vResults() {
     <div class="card"><h2>By competition</h2><table class="ft"><thead><tr><th>Competition</th><th class="n">Games</th><th class="n">Winners</th><th class="n">Margin miss</th></tr></thead><tbody>${acc.byComp.map((c) => `<tr><td>${esc(c.comp)}${c.low ? ` <span class="chip warn">low confidence: only ${c.n} graded</span>` : ""}</td><td class="n">${c.n}</td><td class="n">${pct(c.winner)}</td><td class="n">${f1(c.marginMAE)}</td></tr>`).join("")}</tbody></table></div>
     <div class="card"><h2>What the model learned</h2><p class="small">Update speed ${acc.learned.k}, home court ${acc.learned.hca?.nt ?? acc.learned.hca} pts for national teams and ${acc.learned.hca?.club ?? acc.learned.hca} for clubs, ratings fade halfway in ${acc.learned.hl} days, result spread ${acc.learned.sd} pts.</p><p class="small muted">${esc(acc.learned.note)} ${acc.grid} combinations tried.</p></div>
     <h2>Latest results</h2><div class="tgrid">${res.slice(0, 80).map((r) => { const won = r.a.score > r.b.score; return `<div class="titem rs"><span class="rs-c ${r.graded ? (r.right ? "ok" : "no") : ""}" aria-label="${r.graded ? (r.right ? "Called it" : "Missed") : "Not graded (thin record)"}">${r.graded ? (r.right ? "✓" : "✗") : "·"}</span>
-      <span><span class="t1">${won ? "<b>" : ""}${esc(r.a.name)} ${r.a.score}${won ? "</b>" : ""} - ${!won ? "<b>" : ""}${r.b.score} ${esc(r.b.name)}${!won ? "</b>" : ""}</span><span class="t2">${esc(dayShort(r.date))} · ${esc(r.comp)} · we said ${f0(r.proj.a)}-${f0(r.proj.b)}, ${esc(r.proj.pA >= 0.5 ? r.a.code : r.b.code)} ${pct(Math.max(r.proj.pA, 1 - r.proj.pA))}</span>${r.why ? `<span class="t2 why">${esc(r.why)}</span>` : ""}</span><span></span></div>`; }).join("")}</div>`;
+      <span><span class="t1">${won ? "<b>" : ""}${esc(r.a.name)} ${r.a.score}${won ? "</b>" : ""} - ${!won ? "<b>" : ""}${r.b.score} ${esc(r.b.name)}${!won ? "</b>" : ""}</span><span class="t2">${esc(dayShort(r.date))} · ${esc(r.comp)} · we said ${f0(r.proj.a)}-${f0(r.proj.b)}, ${esc(r.proj.pA >= 0.5 ? r.a.code : r.b.code)} ${pct(Math.max(r.proj.pA, 1 - r.proj.pA))}</span>${r.why ? `<span class="t2 why">${r.right === false ? "<b>Why we missed:</b> " : ""}${esc(r.why)}</span>` : ""}</span><span></span></div>`; }).join("")}</div>`;
 }
 
 // ---------------------------------------------------------------- More, how it works, sources, news
@@ -395,7 +412,7 @@ async function route() {
   if (st.length > 1 && st[st.length - 2] === h) st.pop(); else if (st[st.length - 1] !== h) st.push(h);
   const [, view = "games", arg] = h.split("/");
   drawNav(TAB[view] || "games");
-  try { await ({ games: vGames, game: vGame, picks: vPicks, players: vPlayers, player: vPlayer, teams: vTeams, team: vTeam, results: vResults, accuracy: vResults, result: vResults, why: vResults, lab: vMore, board: vPicks, scout: vPlayers, insights: vGames, today: vNews, more: vMore, how: vHow, sources: vSources, news: vNews }[view] || vMissing)(decodeURIComponent(arg || "")); }
+  try { await ({ games: vGames, game: vGame, picks: vPicks, record: vRecord, players: vPlayers, player: vPlayer, teams: vTeams, team: vTeam, results: vResults, accuracy: vResults, result: vResults, why: vResults, lab: vMore, board: vPicks, scout: vPlayers, insights: vGames, today: vNews, more: vMore, how: vHow, sources: vSources, news: vNews }[view] || vMissing)(decodeURIComponent(arg || "")); }
   catch (e) { if (seq === S.seq) app.innerHTML = `<div class="card"><h2>Could not load this page</h2><p class="muted">${esc(e.message)}</p><p><a class="go" href="#/games">Back to games</a></p></div>`; }
   if (st.length > 1) app.querySelectorAll("a.back").forEach((a) => (a.textContent = "‹ Back"));
   if (S.last !== h) window.scrollTo(0, 0);

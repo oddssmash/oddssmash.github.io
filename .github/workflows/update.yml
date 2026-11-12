@@ -66,6 +66,7 @@ jobs:
         run: |
           node scripts/fiba/fetch.mjs
           node scripts/fiba/model.mjs
+          node scripts/fiba/picks-ledger.mjs
           node scripts/fiba/news.mjs
 
       # MLBB section: matches, drafts and season lineups from Liquipedia (API, one request every 2 seconds, only

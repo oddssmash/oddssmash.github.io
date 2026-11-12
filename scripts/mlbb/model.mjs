@@ -493,7 +493,21 @@ writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series m
   }
 }
 // ---------------------------------------------------------------- results, accuracy, pre-tip ledger
-const results = R.log.map((x) => ({ date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(x.pS), graded: x.warm, right: (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]), mvp: x.m.mvp })).reverse();
+// why a series was missed: how sure we were, the drafts in the games the favourite lost, its signature hero banned,
+// a deciding game, a cross-region match
+const SIG = new Map(teamsOut.filter((t) => t.signature).map((t) => [t.name, t.signature.hero]));
+function whyMissed(x) {
+  const aFav = x.pS >= 0.5, fav = aFav ? x.A : x.B, dog = aFav ? x.B : x.A, fp = Math.max(x.pS, 1 - x.pS), out = [];
+  out.push(fp < 0.6 ? `close to a coin flip: we gave ${fav} only ${Math.round(fp * 100)}%` : fp >= 0.75 ? `a real upset: ${fav} were ${Math.round(fp * 100)}% favourites` : `${dog} won as the underdog (${Math.round((1 - fp) * 100)}%)`);
+  const lost = x.m.games.filter((g) => (g.w === 1) !== aFav); let draftLost = 0, sigBanned = 0; const sig = SIG.get(fav);
+  for (const g of lost) { if (g.h1.length === 5 && g.h2.length === 5) { const e = R.D.edge(g.h1, g.h2), v = e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04; if ((aFav ? -v : v) > 0.05) draftLost++; } if (sig && [...(aFav ? g.b2 : g.b1)].includes(sig)) sigBanned++; }
+  if (draftLost) out.push(`our draft model favoured ${dog}'s picks in ${draftLost} of the ${lost.length} games ${fav} lost`);
+  if (sigBanned) out.push(`${fav}'s signature ${cap1(sig)} was banned in ${sigBanned} of those games`);
+  const [s1, s2] = x.m.score; if (x.m.bo > 1 && Math.abs(s1 - s2) === 1 && s1 + s2 === x.m.bo) out.push("lost the deciding game");
+  if (x.m.kind === "intl" && R.T.get(x.A)?.region !== R.T.get(x.B)?.region) out.push("cross-region match: ratings between regions are less certain");
+  return out.join("; ");
+}
+const results = R.log.map((x) => { const right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]); return { date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(x.pS), graded: x.warm, right, mvp: x.m.mvp, ...(right ? {} : { why: whyMissed(x) }) }; }).reverse();
 writeJSON(path.join(OUT, "results.json"), results.slice(0, 400));
 const cal = Array.from({ length: 5 }, (_, i) => ({ lo: 50 + i * 10, hi: 60 + i * 10, n: 0, won: 0 }));
 for (const x of R.log.filter((x) => x.warm)) { const p = Math.max(x.pS, 1 - x.pS), won = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]), b = cal[Math.min(4, Math.floor((p - 0.5) * 10))]; b.n++; if (won) b.won++; }

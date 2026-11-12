@@ -1432,6 +1432,7 @@ function resRow(r) {
     <span class="l">Projected ${f0(r.pred.as)}–${f0(r.pred.hs)} · ${esc(T(fav).abbr)} ${pct(Math.max(ph, 1 - ph))}</span><span></span>
     <span class="l">Final <b>${r.act.as}–${r.act.hs}</b>${r.act.ot ? " (OT)" : ""} · margin off by ${f1(r.err)}</span>
     <span>${r.upsetFlag ? `<span class="chip warn">⚠ flagged</span>` : ""}</span>
+    ${!r.correct && r.why ? `<span class="l why-miss"><b>Why we missed:</b> ${esc(r.why)}</span><span></span>` : ""}
   </div></a>`;
 }
 
@@ -3583,7 +3584,7 @@ async function vPicksLog() {
       <p class="small muted">${esc(log.note)}</p></div>
     ${liveRows.length ? `<div class="card"><h2>Live now <span class="small muted">· ${liveRows.filter((x) => x.st.tag === "hit").length} hit already, ${liveRows.filter((x) => x.st.tag === "pace").length} on pace, ${liveRows.filter((x) => x.st.tag === "behind").length} behind</span></h2><ul class="plain pl-list">${liveRows.map((x) => row(x.p, x.st)).join("")}</ul><p class="small muted">Straight from the live box score, refreshed every 30 seconds while this page is open. "On pace" scales the current number to a full game.</p></div>` : ""}
     ${today.length ? `<details class="card"><summary><b>Not started yet</b> <span class="small muted">· ${today.length} picks saved so far; each is frozen at the last update before its tip-off</span></summary><ul class="plain pl-list">${today.map((p) => row(p, { tag: "pending", txt: fmtD(p.date, { weekday: "short", hour: "numeric", minute: "2-digit" }) })).join("")}</ul></details>` : ""}
-    ${Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([d, arr]) => `<details class="card"${d === Object.keys(byDay).sort().pop() ? " open" : ""}><summary><b>${esc(fmtD(arr[0].date, { weekday: "short", month: "short", day: "numeric" }))}</b> <span class="small muted">· ${rec(arr)}</span></summary><ul class="plain pl-list">${arr.sort((a, b) => (a.status === "miss") - (b.status === "miss") || b.p - a.p).map((p) => row(p, { tag: p.status, txt: p.actual != null ? `final ${p.fam === "spread" || p.fam === "winner" ? `margin ${p.actual >= 0 ? "+" : ""}${p.actual}` : p.actual}` : p.why || "" })).join("")}</ul></details>`).join("")}`;
+    ${Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([d, arr]) => `<details class="card"${d === Object.keys(byDay).sort().pop() ? " open" : ""}><summary><b>${esc(fmtD(arr[0].date, { weekday: "short", month: "short", day: "numeric" }))}</b> <span class="small muted">· ${rec(arr)}</span></summary><ul class="plain pl-list">${arr.sort((a, b) => (a.status === "miss") - (b.status === "miss") || b.p - a.p).map((p) => row(p, { tag: p.status, txt: (p.actual != null ? `final ${p.fam === "spread" || p.fam === "winner" ? `margin ${p.actual >= 0 ? "+" : ""}${p.actual}` : p.actual}` : p.why || "") + (p.status === "miss" && p.why ? ` · Why we missed: ${p.why}` : "") })).join("")}</ul></details>`).join("")}`;
   bind();
   clearInterval(S.pkLogTimer); if (liveRows.length) S.pkLogTimer = setInterval(() => { if (S.pkKind === "log" && /^#\/picks/.test(location.hash || "#/picks")) vPicksLog(); else clearInterval(S.pkLogTimer); }, 30000);
 }
