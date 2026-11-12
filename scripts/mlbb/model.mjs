@@ -96,7 +96,7 @@ function makeDraft() {
 }
 
 // ---------------------------------------------------------------- replay (team ratings + draft check)
-const MOM = []; // [team-rating logit before the game, result, +1 if side A won the previous game in the series else -1]
+const MOM = [], GDD = []; // GDD: [team-rating logit before the game, result, picks A, picks B, date, league] // [team-rating logit before the game, result, +1 if side A won the previous game in the series else -1]
 function replay(P, record = false) {
   const T = new Map(), REG = {}, D = makeDraft(); // region offsets, created as regions appear
   const team = (n, region) => { if (!T.has(n)) T.set(n, { name: n, r: 0, n: 0, season: null, region, w: 0, l: 0, gw: 0, gl: 0 }); return T.get(n); };
@@ -116,6 +116,7 @@ function replay(P, record = false) {
       const y = g.w === 1 ? 1 : 0, dd = (A.r + reg(A) - (B.r + reg(B))) * (cross ? P.cx : 1), p0 = lg(dd), e = D.edge(g.h1, g.h2), p1 = lg(dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04));
       if (warm && D.games > 200) { gb += (p0 - y) ** 2; gbD += (p1 - y) ** 2; gn++; }
       if (record && warm && prevW) MOM.push([dd, y, prevW]); prevW = y ? 1 : -1;
+      if (record && warm) GDD.push([dd, y, g.h1, g.h2, m.date, m.league]);
       const k = P.k * (A.n < 6 || B.n < 6 ? 1.5 : 1), err = y - p0;
       A.r += k * err; B.r -= k * err; if (m.kind === "intl" && A.region !== B.region && A.region !== "INTL" && B.region !== "INTL") { REG[A.region] = (REG[A.region] || 0) + P.kr * err; REG[B.region] = (REG[B.region] || 0) - P.kr * err; }
       if (y) { A.gw++; B.gl++; } else { B.gw++; A.gl++; }
@@ -134,6 +135,28 @@ const momFit = (() => { let best = { b: 0, ll: -Infinity }; for (let b = -0.6; b
   let ll0 = 0; for (const [d, y] of MOM) { const p = lg(d); ll0 += Math.log(y ? p : 1 - p); } const same = MOM.filter(([, y, s]) => (y ? 1 : -1) === s).length;
   return { b: best.b, n: MOM.length, sameRate: Math.round((same / MOM.length) * 1000) / 1000, lrStat: Math.round(2 * (best.ll - ll0) * 10) / 10 }; })();
 console.log("momentum", JSON.stringify(momFit));
+// DAMAGE MIX TEST (run with DMG_CSV=<path to the Fandom hero data>): does the side with more physical heroes win more,
+// and does that add anything once the team ratings are known? Printed only; nothing is written.
+if (process.env.DMG_CSV) {
+  const rows = fs.readFileSync(process.env.DMG_CSV, "utf8").split(/\r?\n/).filter(Boolean), head = rows[0].split(","), key = (x) => String(x).toLowerCase().replace(/[^a-z]/g, "");
+  const DT = new Map(rows.slice(1).map((r) => { const c = r.split(","); return [key(c[0]), (c[head.indexOf("dmg_type")] || "").replace("Phyiscal", "Physical")]; }));
+  const phys = (hs) => hs.filter((h) => DT.get(key(h)) === "Physical").length, known = (hs) => hs.every((h) => DT.has(key(h)));
+  const wil = (k, n) => { const z = 1.96, p = k / n, d = 1 + z * z / n, c = p + z * z / (2 * n), r = z * Math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)); return [((c - r) / d * 100).toFixed(1), ((c + r) / d * 100).toFixed(1)]; };
+  const G = GDD.filter(([, , a, b]) => a.length === 5 && b.length === 5 && known(a) && known(b)).map(([dd, y, a, b, date, lgN]) => ({ dd, y, d: phys(a) - phys(b), pa: phys(a), pb: phys(b), date, lgN }));
+  const more = (gs) => { let k = 0, n = 0; for (const g of gs) { if (!g.d) continue; n++; if ((g.d > 0) === !!g.y) k++; } return { n, rate: n ? (k / n * 100).toFixed(1) : "-", ci: n ? wil(k, n) : null }; };
+  const magic3 = (gs) => { let k = 0, n = 0; for (const g of gs) for (const [p, won] of [[g.pa, g.y], [g.pb, 1 - g.y]]) if (5 - p >= 3) { n++; if (won) k++; } return { n, rate: (k / n * 100).toFixed(1), ci: wil(k, n) }; };
+  const fit = (gs, feat) => { let best = { b: 0, ll: -Infinity }; for (let b = -0.5; b <= 0.5001; b += 0.01) { let ll = 0; for (const g of gs) { const p = lg(g.dd + b * feat(g)); ll += Math.log(g.y ? p : 1 - p); } if (ll > best.ll) best = { b: Math.round(b * 100) / 100, ll }; } let ll0 = 0; for (const g of gs) { const p = lg(g.dd); ll0 += Math.log(g.y ? p : 1 - p); } return { b: best.b, lr: Math.round(2 * (best.ll - ll0) * 10) / 10 }; };
+  const loss = (gs, b, feat) => gs.reduce((a, g) => { const p = lg(g.dd + b * feat(g)); return a - Math.log(g.y ? p : 1 - p); }, 0) / gs.length;
+  const sign = (g) => Math.sign(g.d), lin = (g) => g.d;
+  const mix = (gs) => { let n = 0, s2 = 0; for (const g of gs) if (g.d) { n++; s2 += g.d > 0 ? lg(g.dd) : 1 - lg(g.dd); } return n ? (s2 / n * 100).toFixed(1) : "-"; };
+  console.log("damage-mix: games with both drafts typed", G.length, "of", GDD.length);
+  console.log("  more physical wins:", JSON.stringify(more(G)), "| ratings alone expected the more-physical side to win", mix(G) + "%");
+  console.log("  3+ magic/mixed heroes:", JSON.stringify(magic3(G)));
+  for (const L of ["MPL MENA", "MCC", "MPL MY", "BetBoom RoL", "MPL PH", "MPL ID", "MTC TR", "MSL TH"]) { const gs = G.filter((g) => g.lgN === L); if (gs.length > 40) console.log("  ", L, JSON.stringify(more(gs)), "ratings expected", mix(gs) + "%"); }
+  console.log("  after ratings (sign):", JSON.stringify(fit(G, sign)), "(linear):", JSON.stringify(fit(G, lin)), "| LR > 3.84 = 95%");
+  const cut = "2026-06-01", tr = G.filter((g) => g.date < cut), te = G.filter((g) => g.date >= cut), fb = fit(tr, sign);
+  console.log("  out of sample: fit before", cut, JSON.stringify(fb), "n", tr.length, "| test n", te.length, "log loss ratings only", loss(te, 0, sign).toFixed(4), "with damage mix", loss(te, fb.b, sign).toFixed(4), "| test more-physical", JSON.stringify(more(te)), "expected", mix(te) + "%");
+}
 console.log("learned", JSON.stringify(P), `series Brier ${r3(R.brier)} (cross-region ${r3(R.ibrier)} on ${R.inn}) winner ${(R.acc * 100).toFixed(1)}% (${R.n}); games Brier team-only ${r3(R.gBrier)} with draft ${r3(R.gBrierDraft)} (${R.gn})`, "regions", JSON.stringify(Object.fromEntries(Object.entries(R.REG).map(([k, v]) => [k, r3(v)]))));
 
 // ---------------------------------------------------------------- heroes, players, teams (from all history)
