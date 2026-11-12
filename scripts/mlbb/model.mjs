@@ -262,8 +262,10 @@ function playerArch(s) {
   return { labels: out, profile: Object.fromEntries(TRAITS.map((k) => [k, Math.round(p[k] * 100) / 100])) };
 }
 // per-game shares from the official MPL PH match pages (derived file; raw data kept private)
+// Season 18 per-player numbers (MPL ID, PH, MY) derived from the MLBBHub scoreboard snapshot, with the real player in each game
+const S18 = new Map(Object.values(readJSON(path.join(MD, "s18-players.json"), { players: {} }).players).map((p) => [nk(p.player), { ...p, heroes: p.heroes.slice(0, 12).map((h) => ({ h: h.h, n: h.n, w: h.w, wr: Math.round((h.w / h.n) * 1000) / 1000 })) }]));
 const SH = new Map(Object.values(readJSON(path.join(MD, "shares-ph-s18.json"), { players: {} }).players).map((p) => [nk(p.player), p]));
-const playersOut = [...PL.values()].map((s) => ({ page: s.page, arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, shares: SH.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
+const playersOut = [...PL.values()].map((s) => ({ page: s.page, arch: playerArch(s), official: offPlayer.get(nk(s.name)) || null, shares: SH.get(nk(s.name)) || null, s18: S18.get(nk(s.name)) || null, id: s.id, name: s.name, role: s.role, team: s.team, games: s.games, wr: r3(s.wins / s.games), mvp: s.mvp, last: s.last,
   pool: Object.entries(s.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 12),
   signature: Object.entries(s.heroes).filter(([, v]) => v.n >= 4).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n), score: (v.w + 2) / (v.n + 4) * Math.log(1 + v.n) })).sort((a, b) => b.score - a.score).slice(0, 3).map(({ score, ...x }) => x),
   teams: Object.entries(s.teams).map(([t, n]) => ({ t, n })) })).sort((a, b) => b.games - a.games);
