@@ -673,13 +673,26 @@ writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series m
 const SIG = new Map(teamsOut.filter((t) => t.signature).map((t) => [t.name, t.signature.hero]));
 // shown series chances are capped at 90% (10% the other way), as on Picks; accuracy checks use the raw numbers
 const capS = (p) => Math.min(0.9, Math.max(0.1, p));
+// each team's series in date order (our chance for that team, and whether it won), for streaks and upset records in reviews
+const poss = (n) => (/s$/i.test(String(n)) ? `${n}'` : `${n}'s`); // PRO Esports' / TNR's
+const TEAMLOG = new Map(); R.log.forEach((x, i) => { x.i = i; const aWon = x.m.score[0] > x.m.score[1]; for (const [t, isA] of [[x.A, true], [x.B, false]]) (TEAMLOG.get(t) || TEAMLOG.set(t, []).get(t)).push({ i, p: isA ? x.pS : 1 - x.pS, won: aWon === isA }); });
+const priorOf = (t, i) => (TEAMLOG.get(t) || []).filter((e) => e.i < i);
+const ORDW = ["", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth", "ninth", "tenth"], ordw = (n) => ORDW[n] || `${n}th`;
+// a lane where one hero won every game and another lost every game for the same team
+function heroSwing(x, team, isA) { const won = x.m.games.filter((g) => (g.w === 1) === isA), lost = x.m.games.filter((g) => (g.w === 1) !== isA);
+  for (let i = 0; i < 5; i++) { const W = won.map((g) => (isA ? g.h1 : g.h2)[i]).filter(Boolean), L = lost.map((g) => (isA ? g.h1 : g.h2)[i]).filter(Boolean);
+    if (W.length >= 1 && L.length >= 2 && new Set(W).size === 1 && new Set(L).size === 1 && W[0] !== L[0]) return `${team} won ${W.length}-0 on ${cap1(W[0])} and lost 0-${L.length} on ${cap1(L[0])} in the ${ROLES[i] === "Jungle" ? "jungle" : ROLES[i] + " lane"}`; }
+  return null; }
 function whyMissed(x) {
   const aFav = x.pS >= 0.5, fav = aFav ? x.A : x.B, dog = aFav ? x.B : x.A, fp = Math.max(capS(x.pS), 1 - capS(x.pS)), out = [];
   out.push(fp <= 0.55 ? `close to a coin flip: we gave ${fav} only ${Math.round(fp * 100)}%` : fp < 0.6 ? `a narrow call: ${fav} were only ${Math.round(fp * 100)}% favourites` : fp >= 0.75 ? `a real upset: ${fav} were ${Math.round(fp * 100)}% favourites` : `${dog} won as the underdog (${Math.round((1 - fp) * 100)}%)`);
   const lost = x.m.games.filter((g) => (g.w === 1) !== aFav); let draftLost = 0, sigBanned = 0; const sig = SIG.get(fav);
   for (const g of lost) { const gx = GAMEX.get(g); if (gx && g.h1.every(Boolean) && g.h2.every(Boolean)) { const v = lg(gx.base) - lg(gx.pre); if ((aFav ? -v : v) >= 0.01) draftLost++; } /* the draft tables as they stood before that game */ if (sig && [...(aFav ? g.b2 : g.b1)].includes(sig)) sigBanned++; }
-  if (draftLost) out.push(`our draft model favoured ${dog}'s picks in ${draftLost} of the ${lost.length} games ${fav} lost`);
-  if (sigBanned) out.push(`${fav}'s signature ${cap1(sig)} was banned in ${sigBanned} of those games`);
+  if (draftLost) out.push(`our draft model favoured ${poss(dog)} picks in ${draftLost} of the ${lost.length} games ${fav} lost`);
+  { let k = 0; for (const e of priorOf(fav, x.i).reverse()) { if (e.p >= 0.5 && !e.won) k++; else break; } if (k >= 1) out.push(`${poss(fav)} ${ordw(k + 1)} straight loss as favourite`); }
+  { const pd = priorOf(dog, x.i).filter((e) => e.p < 0.5).slice(-4), w = pd.filter((e) => e.won).length; if (pd.length >= 2 && w >= 1) out.push(`${poss(dog)} ${ordw(w + 1)} upset in ${pd.length + 1} tries as the underdog`); }
+  { const sw = heroSwing(x, fav, aFav); if (sw) out.push(sw); }
+  if (sigBanned) out.push(`${poss(fav)} signature ${cap1(sig)} was banned in ${sigBanned} of those games`);
   const [s1, s2] = x.m.score; if (x.m.bo > 1 && Math.abs(s1 - s2) === 1 && s1 + s2 === x.m.bo) out.push("lost the deciding game");
   if (x.m.kind === "intl" && R.T.get(x.A)?.region !== R.T.get(x.B)?.region) out.push("cross-region match: ratings between regions are less certain");
   return out.join("; ");
@@ -696,7 +709,7 @@ function gameNotes(x, g) { const gx = GAMEX.get(g); if (!gx) return null; const 
     if ((pre >= 0.5) !== (post >= 0.5)) notes.push(`the draft swung our call: ratings favoured ${pre >= 0.5 ? A : B}, both drafts together favoured ${post >= 0.5 ? A : B}`);
     const sigW = SIG.get(wA ? A : B), sigL = SIG.get(wA ? B : A);
     if (sigW && (wA ? g.h1 : g.h2).includes(sigW)) notes.push(`${wA ? A : B} got their signature ${cap1(sigW)}`);
-    if (sigL && (wA ? g.b1 : g.b2).includes(sigL)) notes.push(`${wA ? B : A}'s signature ${cap1(sigL)} was banned`);
+    if (sigL && (wA ? g.b1 : g.b2).includes(sigL)) notes.push(`${poss(wA ? B : A)} signature ${cap1(sigL)} was banned`);
   } else notes.push("no draft recorded for this game, so the call used ratings only");
   const len = mmss(g.len); if (len != null) notes.push(len < 12 ? `a fast game (${g.len}): early pressure decided it` : len >= 18 ? `a long game (${g.len}): it went to the late game` : `a mid-length game (${g.len})`);
   const hit = (post >= 0.5) === wA; notes.push(hit ? `our call held: ${post >= 0.5 ? A : B} at ${Math.round(Math.max(post, 1 - post) * 100)}%` : Math.max(post, 1 - post) < 0.56 ? `close to a coin flip (${Math.round(Math.max(post, 1 - post) * 100)}%), and it went the other way` : `an upset: ${post >= 0.5 ? A : B} were ${Math.round(Math.max(post, 1 - post) * 100)}% favourites for this game`);
