@@ -43,8 +43,9 @@ const dshort = (d) => (d ? new Date(d).toLocaleDateString("en-US", { timeZone: T
 const IMG = () => S.img || { heroes: {}, teams: {}, players: {} };
 const teamLogo = (name, px) => { const t = IMG().teams[name]; return t ? `<span class="tlogo" style="width:${px}px;height:${px}px"><img class="on-dark-i" src="img/${esc(t.dark)}" alt="" loading="lazy"><img class="on-light-i" src="img/${esc(t.light)}" alt="" loading="lazy"></span>` : null; };
 const heroImg = (h, px = 22) => { const u = IMG().heroes[String(h).toLowerCase()]; return u ? `<img class="himg" src="img/${esc(u)}" alt="" width="${px}" height="${px}" loading="lazy">` : ""; };
-const face = (id, name, px = 40) => { const u = IMG().players[id]; return u ? `<img class="pface" src="img/${esc(u)}" alt="" style="width:${px}px;height:${px}px" loading="lazy">` : tb(name, px, true); };
-const tb = (name, px = 40, plain = false) => (!plain && teamLogo(name, px)) || `<span class="tb" style="width:${px}px;height:${px}px;font-size:${Math.round(px / 3.4)}px" aria-hidden="true">${esc(String(name).replace(/[^A-Za-z0-9 ]/g, "").split(/\s+/).filter(Boolean).slice(0, 3).map((w) => w[0]).join("").toUpperCase())}</span>`;
+const face = (id, name, px = 40) => { const u = IMG().players[id]; return u ? `<img class="pface" src="img/${esc(u)}" alt="" style="width:${px}px;height:${px}px" loading="lazy" data-fb="${esc(initialsOf(name))}" onerror="this.outerHTML='<span class=&quot;tb&quot; style=&quot;width:${px}px;height:${px}px&quot;>'+this.dataset.fb+'</span>'">` : tb(name, px, true); }; /* a photo that fails to load shows the initials */
+const initialsOf = (name) => { const s = String(name || ""), w = s.replace(/[^A-Za-z0-9 ]/g, "").split(/ +/).filter(Boolean).slice(0, 3).map((x) => x[0]).join("").toUpperCase(); return w || Array.from(s.trim()).slice(0, 2).join("").toUpperCase() || "?"; }; /* never blank */
+const tb = (name, px = 40, plain = false) => (!plain && teamLogo(name, px)) || `<span class="tb" style="width:${px}px;height:${px}px;font-size:${Math.round(px / 3.4)}px" aria-hidden="true">${esc(initialsOf(name))}</span>`;
 // a team's official short name (TLPH, RORA) where a full name would be cut off
 const sn = (n) => (S.short || {})[n] || n;
 const heroChip = (h) => `<a class="hchip" href="#/hero/${encodeURIComponent(h)}">${heroImg(h, 18)}${esc(cap(h))}</a>`;
