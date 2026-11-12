@@ -233,7 +233,7 @@ if (process.env.IDEAS_TEST) {
     const ca = cside(LA, x.g.h1), cb = cside(LB, x.g.h2), sk = (t) => `${t}|${seasonOf(x.m.page)}`, unc = x.nA < 10 || x.nB < 10 || (SG.get(sk(x.m.a)) || 0) < 5 || (SG.get(sk(x.m.b)) || 0) < 5, big = BIG.test(x.m.stage || "") || x.m.kind === "intl";
     const tf = (t) => { const h = TF.get(t) || []; return h.slice(-10).reduce((s, v) => s + v, 0); };
     if (x.warm) {
-      const row = (k, v) => FEAT[k].push([x.base, x.y, v, x.m.date]);
+      const row = (k, v) => FEAT[k].push([x.base, x.y, v, x.m.date, x.m.id + "|" + x.g.n]);
       if (a && b) { if (five) { row("comfort", a.c - b.c); row("comfort70", a.c70 - b.c70); row("familiar", a.fam - b.fam); } row("experience", a.ex - b.ex); row("intlExp", a.ix - b.ix); row("careerWR", a.wr - b.wr); }
       row("form10", tf(x.m.a) - tf(x.m.b));
       row("seriesForm5", sf5(x.m.a) - sf5(x.m.b));
@@ -248,7 +248,7 @@ if (process.env.IDEAS_TEST) {
       const byTeam = (t) => rows.filter((r) => r[3] === t);
       const LI = (r) => ROLE[LANE.get(r[5].toLowerCase())] ?? 9, byLane = (rs) => { const o = [...rs].sort((p, q) => LI(p) - LI(q)); return new Set(o.map(LI)).size === 5 && LI(o[4]) < 9 ? o : []; };
       const ra = byLane(byTeam(tA)), rb = byLane(rows.filter((r) => r[3] !== tA));
-      if (x.warm && ra.length === 5 && rb.length === 5) { let f = 0, used = 0; for (let i = 0; i < 5; i++) { const p1 = ra[i][5].toLowerCase(), p2 = rb[i][5].toLowerCase(), A1 = archOf(p1), B1 = archOf(p2); if (A1 && B1) { const c = prior(ARM, `${A1}|${B1}`); f += (c.w + 5) / (c.n + 10) - 0.5; used++; } } if (used >= 3) FEAT.archLane.push([x.base, x.y, f, x.m.date]); }
+      if (x.warm && ra.length === 5 && rb.length === 5) { let f = 0, used = 0; for (let i = 0; i < 5; i++) { const p1 = ra[i][5].toLowerCase(), p2 = rb[i][5].toLowerCase(), A1 = archOf(p1), B1 = archOf(p2); if (A1 && B1) { const c = prior(ARM, `${A1}|${B1}`); f += (c.w + 5) / (c.n + 10) - 0.5; used++; } } if (used >= 3) FEAT.archLane.push([x.base, x.y, f, x.m.date, x.m.id + "|" + x.g.n]); }
       if (x.warm && ra.length === 5 && rb.length === 5) { const XA = ra.map((r) => archOf(r[5].toLowerCase())).filter(Boolean), XB = rb.map((r) => archOf(r[5].toLowerCase())).filter(Boolean); if (XA.length >= 3 && XB.length >= 3) { let f = 0; for (const p1 of XA) for (const p2 of XB) { const c = prior(ARM2, `${p1}|${p2}`); f += (c.w + 10) / (c.n + 20) - 0.5; } FEAT.archMix.push([x.base, x.y, f / Math.sqrt(XA.length * XB.length), x.m.date]); } }
       if (ra.length === 5 && rb.length === 5) { const XA = ra.map((r) => archOf(r[5].toLowerCase())).filter(Boolean), XB = rb.map((r) => archOf(r[5].toLowerCase())).filter(Boolean); for (const p1 of XA) for (const p2 of XB) { const c1 = get(ARM2, `${p1}|${p2}`, () => ({ n: 0, w: 0 })), c2 = get(ARM2, `${p2}|${p1}`, () => ({ n: 0, w: 0 })); c1.n++; c2.n++; if (x.y) c1.w++; else c2.w++; } }
       // learn: matchup table, then player stat sums
@@ -283,6 +283,13 @@ if (process.env.IDEAS_TEST) {
   // site, on the held-out 30% of games (Brier change; positive = better, negative = worse)
   { const cl = (v, c) => Math.max(-c, Math.min(c, v)), ev2 = (rows, b, cap) => { const cut = Math.floor(rows.length * 0.7), te = rows.slice(cut); let b0 = 0, b1 = 0; for (const [d, y, f] of te) { b0 += (lg(d) - y) ** 2; b1 += (lg(d + cl(b * f, cap)) - y) ** 2; } return { n: te.length, gain: Math.round(((b0 - b1) / te.length) * 100000) / 100000 }; };
     out.nudges = { comfortPicks: { weight: 0.04, cap: 0.12, ...ev2(FEAT.comfortPicks, 0.04, 0.12) }, expBigStage: { weight: 0.05, cap: 0.06, ...ev2(FEAT.expBigStage, 0.05, 0.06) }, archMix: { weight: 0.3, cap: 0.06, ...ev2(FEAT.archMix, 0.3, 0.06) }, archLane: { weight: 0.3, cap: 0.06, ...ev2(FEAT.archLane, 0.3, 0.06) } }; }
+  // SWITCH COMBINATIONS (the site's analysis settings) on every past game: winner calls and Brier with experience,
+  // archetype and comfort nudges on or off at the site's exact weights and caps
+  { const cl = (v, c) => Math.max(-c, Math.min(c, v)), by = (k) => new Map(FEAT[k].map((r) => [r[4], r[2]])), EX = by("expBigStage"), AR = by("archLane"), CF = by("comfortPicks");
+    const base = FEAT.expBigStage.map((r) => ({ key: r[4], d: r[0], y: r[1] }));
+    const run = (rows, e, a, c) => { let n = 0, right = 0, b = 0; for (const r of rows) { const L = r.d + (e ? cl(0.05 * (EX.get(r.key) || 0), 0.06) : 0) + (a ? cl(0.3 * (AR.get(r.key) || 0), 0.06) : 0) + (c ? cl(0.04 * (CF.get(r.key) || 0), 0.12) : 0), p = lg(L); n++; if ((p >= 0.5) === !!r.y) right++; b += (p - r.y) ** 2; } return { n, winner: r3(right / n), brier: Math.round((b / n) * 100000) / 100000 }; };
+    const combos = []; for (const e of [0, 1]) for (const a of [0, 1]) for (const c of [0, 1]) combos.push({ exp: !!e, arch: !!a, comfort: !!c, all: run(base, e, a, c), archGames: run(base.filter((r) => AR.has(r.key)), e, a, c) });
+    out.combos = combos; }
   out._joins = { s18Games: s18, s18Joined: joined, menaJoined: mJoin };
   console.log("IDEAS TEST", JSON.stringify(out, null, 1));
   writeJSON(path.join(ROOT, "derived", "mlbb", "ideas-test.json"), { built: new Date().toISOString(), results: out }, true);

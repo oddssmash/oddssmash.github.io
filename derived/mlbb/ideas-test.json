@@ -1,267 +1,399 @@
 {
- "built": "2026-11-12T08:45:23.327Z",
- "results": {
-  "comfort": {
-   "n": 3473,
-   "nonzero": 3467,
-   "b": 0.12,
-   "lr": 2.1,
-   "test": {
-    "n": 1042,
-    "b": 0.06,
-    "brierBase": 0.21,
-    "brierWith": 0.209,
-    "gain": 0.0002
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "comfort70": {
-   "n": 3473,
-   "nonzero": 440,
-   "b": -0.14,
-   "lr": 3.2,
-   "test": {
-    "n": 1042,
-    "b": -0.23,
-    "brierBase": 0.21,
-    "brierWith": 0.21,
-    "gain": -0.0008
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "familiar": {
-   "n": 3473,
-   "nonzero": 3460,
-   "b": 0,
-   "lr": 0,
-   "test": {
-    "n": 1042,
-    "b": -0.01,
-    "brierBase": 0.21,
-    "brierWith": 0.21,
-    "gain": -0.0002
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "experience": {
-   "n": 3544,
-   "nonzero": 3451,
-   "b": 0.03,
-   "lr": 0.3,
-   "test": {
-    "n": 1064,
-    "b": -0.03,
-    "brierBase": 0.208,
-    "brierWith": 0.208,
-    "gain": -0.0002
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "intlExp": {
-   "n": 3544,
-   "nonzero": 1962,
-   "b": -0.04,
-   "lr": 1.5,
-   "test": {
-    "n": 1064,
-    "b": -0.08,
-    "brierBase": 0.208,
-    "brierWith": 0.209,
-    "gain": -0.0008
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "careerWR": {
-   "n": 3544,
-   "nonzero": 3534,
-   "b": 0.55,
-   "lr": 2.7,
-   "test": {
-    "n": 1064,
-    "b": 0.34,
-    "brierBase": 0.208,
-    "brierWith": 0.207,
-    "gain": 0.0003
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "form10": {
-   "n": 3730,
-   "nonzero": 3730,
-   "b": 0.05,
-   "lr": 7.7,
-   "test": {
-    "n": 1119,
-    "b": 0.04,
-    "brierBase": 0.206,
-    "brierWith": 0.205,
-    "gain": 0.0008
-   },
-   "verdict": "lead: helped single games (Brier 0.2135 -> 0.2130) but series got slightly worse (0.1938 -> 0.1942) in the full model; kept off"
-  },
-  "archLane": {
-   "n": 322,
-   "nonzero": 290,
-   "b": 0.64,
-   "lr": 1.1,
-   "test": {
-    "n": 97,
-    "b": 1.34,
-    "brierBase": 0.246,
-    "brierWith": 0.254,
-    "gain": -0.0082
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "menaDeaths": {
-   "n": 32,
-   "verdict": "too few games to test"
-  },
-  "s16Prior": {
-   "n": 117,
-   "nonzero": 117,
-   "b": -1.76,
-   "lr": 9.3,
-   "test": {
-    "n": 36,
-    "b": -2,
-    "brierBase": 0.214,
-    "brierWith": 0.21,
-    "gain": 0.0035
-   },
-   "verdict": "not adopted: only 117 games (36 held out) and the fit sits at its bound"
-  },
-  "s16WinPrior": {
-   "n": 117,
-   "nonzero": 117,
-   "b": -2,
-   "lr": 4.7,
-   "test": {
-    "n": 36,
-    "b": -2,
-    "brierBase": 0.214,
-    "brierWith": 0.204,
-    "gain": 0.0098
-   },
-   "verdict": "not adopted: only 117 games (36 held out) and the fit sits at its bound"
-  },
-  "comfortDelta": {
-   "n": 3473,
-   "nonzero": 3473,
-   "b": -0.11,
-   "lr": 1.9,
-   "test": {
-    "n": 1042,
-    "b": -0.1,
-    "brierBase": 0.21,
-    "brierWith": 0.209,
-    "gain": 0.0002
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "comfortPicks": {
-   "n": 3473,
-   "nonzero": 1082,
-   "b": 0.03,
-   "lr": 0.4,
-   "test": {
-    "n": 1042,
-    "b": 0.04,
-    "brierBase": 0.21,
-    "brierWith": 0.21,
-    "gain": 0
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "expBigStage": {
-   "n": 3544,
-   "nonzero": 1289,
-   "b": 0.1,
-   "lr": 1.1,
-   "test": {
-    "n": 1064,
-    "b": 0.15,
-    "brierBase": 0.208,
-    "brierWith": 0.208,
-    "gain": -0.0003
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "careerWRuncertain": {
-   "n": 3544,
-   "nonzero": 1376,
-   "b": 1.09,
-   "lr": 3.3,
-   "test": {
-    "n": 1064,
-    "b": 0.96,
-    "brierBase": 0.208,
-    "brierWith": 0.208,
-    "gain": 0.0002
-   },
-   "verdict": "ADOPTED (weight 1.0) on the first test (LR 9.0, held-out gain 0.0005) and in the full model: series Brier 0.1938 -> 0.1935, log-loss 0.5711 -> 0.5700, winners 69.7% -> 70.0%. This re-run sits on top of the adopted term, so it shows what is left over"
-  },
-  "archMix": {
-   "n": 324,
-   "nonzero": 320,
-   "b": 0.87,
-   "lr": 2.2,
-   "test": {
-    "n": 98,
-    "b": 2,
-    "brierBase": 0.25,
-    "brierWith": 0.268,
-    "gain": -0.0176
-   },
-   "verdict": "reject: no clear effect"
-  },
-  "contextScore": {
-   "n": 3544,
-   "b": 0.24,
-   "lr": 5.9,
-   "test": {
-    "n": 1064,
-    "b": 0.32,
-    "brierBase": 0.209,
-    "brierWith": 0.209,
-    "gain": -0.0002
-   },
-   "verdict": "lead: clear in-sample but no held-out gain; not used as a weight"
-  },
-  "nudges": {
-   "comfortPicks": {
-    "weight": 0.04,
-    "cap": 0.12,
-    "n": 1042,
-    "gain": 0
-   },
-   "expBigStage": {
-    "weight": 0.05,
-    "cap": 0.06,
-    "n": 1064,
-    "gain": -0.00003
-   },
-   "archMix": {
-    "weight": 0.3,
-    "cap": 0.06,
-    "n": 98,
-    "gain": -0.00149
-   },
-   "archLane": {
-    "weight": 0.3,
-    "cap": 0.06,
-    "n": 97,
-    "gain": -0.00127
-   }
-  },
-  "_joins": {
-   "s18Games": 557,
-   "s18Joined": 464,
-   "menaJoined": 38
+  "built": "2026-11-12T13:46:22.061Z",
+  "results": {
+    "comfort": {
+      "n": 3473,
+      "nonzero": 3467,
+      "b": 0.15,
+      "lr": 3.4,
+      "test": {
+        "n": 1042,
+        "b": 0.08,
+        "brierBase": 0.21,
+        "brierWith": 0.21,
+        "gain": 0.0004
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "comfort70": {
+      "n": 3473,
+      "nonzero": 440,
+      "b": -0.13,
+      "lr": 2.9,
+      "test": {
+        "n": 1042,
+        "b": -0.23,
+        "brierBase": 0.21,
+        "brierWith": 0.211,
+        "gain": -0.0009
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "familiar": {
+      "n": 3473,
+      "nonzero": 3460,
+      "b": 0,
+      "lr": 0,
+      "test": {
+        "n": 1042,
+        "b": -0.01,
+        "brierBase": 0.21,
+        "brierWith": 0.21,
+        "gain": -0.0002
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "experience": {
+      "n": 3544,
+      "nonzero": 3451,
+      "b": 0.05,
+      "lr": 0.9,
+      "test": {
+        "n": 1064,
+        "b": -0.01,
+        "brierBase": 0.208,
+        "brierWith": 0.208,
+        "gain": -0.0001
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "intlExp": {
+      "n": 3544,
+      "nonzero": 1962,
+      "b": -0.03,
+      "lr": 0.9,
+      "test": {
+        "n": 1064,
+        "b": -0.08,
+        "brierBase": 0.208,
+        "brierWith": 0.209,
+        "gain": -0.001
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "careerWR": {
+      "n": 3544,
+      "nonzero": 3534,
+      "b": 0.77,
+      "lr": 5.2,
+      "test": {
+        "n": 1064,
+        "b": 0.48,
+        "brierBase": 0.208,
+        "brierWith": 0.208,
+        "gain": 0.0005
+      },
+      "verdict": "ADOPT"
+    },
+    "form10": {
+      "n": 3730,
+      "nonzero": 3730,
+      "b": 0.04,
+      "lr": 6.4,
+      "test": {
+        "n": 1119,
+        "b": 0.04,
+        "brierBase": 0.206,
+        "brierWith": 0.206,
+        "gain": 0.0007
+      },
+      "verdict": "ADOPT"
+    },
+    "archLane": {
+      "n": 322,
+      "nonzero": 290,
+      "b": 0.71,
+      "lr": 1.3,
+      "test": {
+        "n": 97,
+        "b": 1.39,
+        "brierBase": 0.245,
+        "brierWith": 0.254,
+        "gain": -0.0084
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "menaDeaths": {
+      "n": 32,
+      "verdict": "too few games to test"
+    },
+    "s16Prior": {
+      "n": 117,
+      "nonzero": 117,
+      "b": -1.75,
+      "lr": 9.3,
+      "test": {
+        "n": 36,
+        "b": -2,
+        "brierBase": 0.215,
+        "brierWith": 0.211,
+        "gain": 0.0034
+      },
+      "verdict": "ADOPT"
+    },
+    "s16WinPrior": {
+      "n": 117,
+      "nonzero": 117,
+      "b": -2,
+      "lr": 4.6,
+      "test": {
+        "n": 36,
+        "b": -2,
+        "brierBase": 0.215,
+        "brierWith": 0.205,
+        "gain": 0.0098
+      },
+      "verdict": "ADOPT"
+    },
+    "comfortDelta": {
+      "n": 3473,
+      "nonzero": 3473,
+      "b": -0.16,
+      "lr": 3.8,
+      "test": {
+        "n": 1042,
+        "b": -0.14,
+        "brierBase": 0.21,
+        "brierWith": 0.21,
+        "gain": 0.0004
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "comfortPicks": {
+      "n": 3473,
+      "nonzero": 1082,
+      "b": 0.03,
+      "lr": 0.2,
+      "test": {
+        "n": 1042,
+        "b": 0.04,
+        "brierBase": 0.21,
+        "brierWith": 0.21,
+        "gain": 0
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "expBigStage": {
+      "n": 3544,
+      "nonzero": 1289,
+      "b": 0.1,
+      "lr": 1.3,
+      "test": {
+        "n": 1064,
+        "b": 0.16,
+        "brierBase": 0.208,
+        "brierWith": 0.209,
+        "gain": -0.0003
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "careerWRuncertain": {
+      "n": 3544,
+      "nonzero": 1376,
+      "b": 1.27,
+      "lr": 4.5,
+      "test": {
+        "n": 1064,
+        "b": 1.11,
+        "brierBase": 0.208,
+        "brierWith": 0.208,
+        "gain": 0.0003
+      },
+      "verdict": "ADOPT"
+    },
+    "archMix": {
+      "n": 324,
+      "nonzero": 320,
+      "b": 0.96,
+      "lr": 2.7,
+      "test": {
+        "n": 98,
+        "b": 2,
+        "brierBase": 0.25,
+        "brierWith": 0.267,
+        "gain": -0.0175
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "seriesForm5": {
+      "n": 3730,
+      "nonzero": 3730,
+      "b": 0.04,
+      "lr": 2.1,
+      "test": {
+        "n": 1119,
+        "b": 0.03,
+        "brierBase": 0.206,
+        "brierWith": 0.206,
+        "gain": 0.0002
+      },
+      "verdict": "reject: no clear effect"
+    },
+    "contextScore": {
+      "n": 3544,
+      "b": 0.28,
+      "lr": 7.8,
+      "test": {
+        "n": 1064,
+        "b": 0.35,
+        "brierBase": 0.209,
+        "brierWith": 0.209,
+        "gain": -0.0001
+      },
+      "verdict": "lead: clear in-sample, no held-out gain"
+    },
+    "nudges": {
+      "comfortPicks": {
+        "weight": 0.04,
+        "cap": 0.12,
+        "n": 1042,
+        "gain": -0.00004
+      },
+      "expBigStage": {
+        "weight": 0.05,
+        "cap": 0.06,
+        "n": 1064,
+        "gain": -0.00003
+      },
+      "archMix": {
+        "weight": 0.3,
+        "cap": 0.06,
+        "n": 98,
+        "gain": -0.00146
+      },
+      "archLane": {
+        "weight": 0.3,
+        "cap": 0.06,
+        "n": 97,
+        "gain": -0.00124
+      }
+    },
+    "combos": [
+      {
+        "exp": false,
+        "arch": false,
+        "comfort": false,
+        "all": {
+          "n": 3544,
+          "winner": 0.645,
+          "brier": 0.21557
+        },
+        "archGames": {
+          "n": 322,
+          "winner": 0.627,
+          "brier": 0.22882
+        }
+      },
+      {
+        "exp": false,
+        "arch": false,
+        "comfort": true,
+        "all": {
+          "n": 3544,
+          "winner": 0.644,
+          "brier": 0.21556
+        },
+        "archGames": {
+          "n": 322,
+          "winner": 0.624,
+          "brier": 0.22875
+        }
+      },
+      {
+        "exp": false,
+        "arch": true,
+        "comfort": false,
+        "all": {
+          "n": 3544,
+          "winner": 0.646,
+          "brier": 0.21553
+        },
+        "archGames": {
+          "n": 322,
+          "winner": 0.637,
+          "brier": 0.22842
+        }
+      },
+      {
+        "exp": false,
+        "arch": true,
+        "comfort": true,
+        "all": {
+          "n": 3544,
+          "winner": 0.644,
+          "brier": 0.21552
+        },
+        "archGames": {
+          "n": 322,
+          "winner": 0.627,
+          "brier": 0.22832
+        }
+      },
+      {
+        "exp": true,
+        "arch": false,
+        "comfort": false,
+        "all": {
+          "n": 3544,
+          "winner": 0.646,
+          "brier": 0.21549
+        },
+        "archGames": {
+          "n": 322,
+          "winner": 0.624,
+          "brier": 0.22885
+        }
+      },
+      {
+        "exp": true,
+        "arch": false,
+        "comfort": true,
+        "all": {
+          "n": 3544,
+          "winner": 0.645,
+          "brier": 0.21548
+        },
+        "archGames": {
+          "n": 322,
+          "winner": 0.621,
+          "brier": 0.22878
+        }
+      },
+      {
+        "exp": true,
+        "arch": true,
+        "comfort": false,
+        "all": {
+          "n": 3544,
+          "winner": 0.646,
+          "brier": 0.21545
+        },
+        "archGames": {
+          "n": 322,
+          "winner": 0.63,
+          "brier": 0.22843
+        }
+      },
+      {
+        "exp": true,
+        "arch": true,
+        "comfort": true,
+        "all": {
+          "n": 3544,
+          "winner": 0.646,
+          "brier": 0.21544
+        },
+        "archGames": {
+          "n": 322,
+          "winner": 0.627,
+          "brier": 0.22834
+        }
+      }
+    ],
+    "_joins": {
+      "s18Games": 557,
+      "s18Joined": 464,
+      "menaJoined": 38
+    }
   }
- },
- "nudgesNote": "The user asked for comfort, experience and archetypes to count. They are applied as small capped nudges, labelled on the site as not proven: comfort picks 0.04 logit each (cap 0.12) in the draft board, big-stage experience 0.05 (cap 0.06) and archetype lane matchups 0.3 x shrunk cell edge (cap 0.06) in match predictions. Cost on held-out games is in results.nudges (Brier change, negative = worse).",
- "notes": {
-  "archetypesV2": "Re-run after the research session fixed PH match ids (PH games had collapsed) and rebuilt archetypes (v2: hero-adjusted, lane-relative, with resample confidence). Research games joined to ours: 464 of 557 Season 18 games. Our test still rebuilds archetypes from earlier games only, so it never sees later results"
- }
 }
