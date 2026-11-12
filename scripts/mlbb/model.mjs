@@ -803,7 +803,7 @@ function whyHit(x) {
   const [s1, s2] = x.m.score; if (x.m.bo > 1 && Math.min(s1, s2) === 0) out.push(`a clean sweep: ${dog} did not take a game`); else if (x.m.bo > 1 && Math.abs(s1 - s2) === 1 && s1 + s2 === x.m.bo) out.push("won the deciding game");
   return out.join("; ");
 }
-const results = R.log.map((x) => { const right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]); return { id: safe(x.m.id), date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(capS(x.pS)), graded: x.warm, close: Math.max(x.pS, 1 - x.pS) < 0.6, right, mvp: x.m.mvp, ...(right ? { whyHit: whyHit(x) } : { why: whyMissed(x) }) }; }).reverse();
+const results = R.log.map((x) => { const right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]); return { id: safe(x.m.id), date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(capS(x.pS)), pGame: r3(x.pg), graded: x.warm, close: Math.max(x.pS, 1 - x.pS) < 0.6, right, mvp: x.m.mvp, ...(right ? { whyHit: whyHit(x) } : { why: whyMissed(x) }) }; }).reverse();
 // HISTORY: every finished series, with every game (drafts, sides, length, winner) and our predictions before the series and
 // before each game. history.json is the index; series/<id>.json holds one series.
 { fs.rmSync(path.join(OUT, "series"), { recursive: true, force: true }); fs.mkdirSync(path.join(OUT, "series"), { recursive: true });
