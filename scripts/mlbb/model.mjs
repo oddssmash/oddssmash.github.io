@@ -43,6 +43,8 @@ const disp = Object.fromEntries(Object.entries(cnt).map(([k, v]) => [k, Object.e
 { const TN2 = readJSON(path.join(MD, "team-names.json"), {}); for (const [k, v] of Object.entries(disp)) if (!/[A-Z]/.test(v)) disp[k] = TN2[k] && TN2[k].toLowerCase() === k ? TN2[k] : v.split(" ").map((w) => (w.length <= 3 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1))).join(" "); }
 const canon = (n) => { const x = ALIAS[String(n).toLowerCase()] || n; return disp[String(x).toLowerCase()] || x; };
 for (const m of all) { m.a = canon(m.a); m.b = canon(m.b); }
+// MVP lists from match pages ("SryImFelix,SAA, Sivz, Sivz,Haruki"): one name each, no repeats
+for (const m of all) if (m.mvp) m.mvp = [...new Set(String(m.mvp).split(",").map((x) => x.trim()).filter(Boolean))].join(", ");
 // one name per hero: match every spelling ("gatot", "popol and kupa") to Liquipedia's hero names
 { const LPH = Object.keys(readJSON(path.join(MD, "heroes-lp.json"), { heroes: {} }).heroes), strip = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, ""), byStrip = new Map(LPH.map((h) => [strip(h), h])), memo = new Map();
   // short forms used on some Liquipedia match pages
