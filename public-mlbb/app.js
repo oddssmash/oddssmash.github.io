@@ -78,7 +78,7 @@ async function vMatches() {
     <div class="tools">${tools.map(([h, t, d]) => `<a class="tool" href="${h}"><span class="tool-ic">${icon(d)}</span>${t}</a>`).join("")}</div>
     <a class="m8b" href="#/m8"><span class="m8b-ic">${icon(tools[1][2])}</span><span style="flex:1"><b>ROAD TO M8</b><span class="small">Wildcard in Bangkok from Dec 17, 2026. Main stage in Türkiye, January 2027.</span></span><span aria-hidden="true">›</span></a>
     ${up.length ? `<div class="filters" role="group" aria-label="League" style="margin-top:16px">${["All", ...lgs, ...(up.some(intl) ? ["International"] : [])].map((x) => `<button class="fbtn" type="button" data-mf="${esc(x)}" aria-pressed="${S.mf === x}">${esc(x)}</button>`).join("")}</div>` : ""}
-    <h2 class="sec-h">Upcoming · ${shown.length} ${shown.length === 1 ? "match" : "matches"}</h2>
+    <h2 class="sec-h">Upcoming and in progress · ${shown.length} ${shown.length === 1 ? "match" : "matches"}</h2>${shown.some((m) => Date.parse(m.date) < Date.now()) ? `<p class="small muted">A started match keeps its pre-match chance until the result is in; results are checked every 30 minutes.</p>` : ""}
     ${shown.length ? shown.map((m) => matchCard(m, det)).join("") : `<div class="card"><h2>No match with both teams set yet</h2><p class="small">Matches appear here with projections as soon as both teams are known, and refresh every few hours. Meanwhile, try <a href="#/versus">Versus</a> or the <a href="#/sim">Draft lab</a>.</p></div>`}
     <h2 class="sec-h">Previous matches · tap for game by game</h2>${res.slice(0, 20).map(resultRow).join("")}<p><a class="go" href="#/history">All previous matches ›</a></p>
     <p class="small muted" style="margin-top:14px">Statistical projections for analysis and entertainment. Not betting advice. No sportsbook data is used for MLBB.</p>`;
@@ -88,7 +88,8 @@ async function vMatches() {
 function matchCard(m, det = {}) {
   const pa = m.pSeries, need = Math.ceil(m.bo / 2), ban = (n) => (det[n]?.profile?.firstBan || []).slice(0, 3);
   const bans = (n, side) => { const b = ban(n); return b.length ? `<div class="${side}"><b>${esc(sn(n))} usually ban</b><span class="hs">${b.map((x) => `<span><span class="hi">${heroImg(x.h, 40) || `<span class="hph" style="width:40px;height:40px;display:grid;place-items:center;background:var(--surface-2)">${esc(cap(x.h).slice(0, 2))}</span>`}</span>${esc(cap(x.h))}</span>`).join("")}</span></div>` : `<div class="${side}"></div>`; };
-  return `<a class="mc" href="#/match/${esc(m.id)}"><div class="mc-h"><span>${esc(m.league)} · ${esc(m.stage)}</span><span class="mc-bo">BO${m.bo}</span></div>
+  const started = m.date && Date.parse(m.date) < Date.now();
+  return `<a class="mc" href="#/match/${esc(m.id)}"><div class="mc-h"><span>${esc(m.league)} · ${esc(m.stage)}</span>${started ? `<span class="pk-live">STARTED · WAITING FOR RESULT</span>` : ""}<span class="mc-bo">BO${m.bo}</span></div>
     <div class="mc-t"><div class="mc-s a">${tb(m.a, 60)}<span class="nm">${esc(sn(m.a))}</span><span class="num">${pct(pa)}</span></div><div class="mc-vs">VS</div><div class="mc-s b">${tb(m.b, 60)}<span class="nm">${esc(sn(m.b))}</span><span class="num">${pct(1 - pa)}</span></div></div>
     <div class="mc-bar"><span style="width:${(pa * 100).toFixed(1)}%"></span><span style="width:${((1 - pa) * 100).toFixed(1)}%"></span></div>
     <div class="mc-b"><div class="mc-row"><span>${esc(when(m.date))}</span><span>First to ${need} <span class="pips" aria-hidden="true">${Array.from({ length: m.bo }, () => "<i></i>").join("")}</span></span></div>
