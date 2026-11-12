@@ -20,7 +20,7 @@ for (const d of ["", "matches", "teams", "players"]) fs.mkdirSync(path.join(OUT,
 const DAY = 86400000, now = Date.now(), r1 = (x) => Math.round(x * 10) / 10, r3 = (x) => Math.round(x * 1000) / 1000;
 const safe = (t) => String(t).replace(/[^A-Za-z0-9]+/g, "_");
 const lg = (p) => 1 / (1 + Math.exp(-p)), logit = (p) => Math.log(p / (1 - p));
-const cap1 = (x) => String(x || "").replace(/\b\w/g, (c) => c.toUpperCase());
+const cap1 = (x) => String(x || "").replace(/\b\w/g, (c) => c.toUpperCase()).replace(/ And /g, " and ");
 // one player under two names (confirmed by the user): old handle -> current name
 const PALIAS = { domengkite: "Domeng", flaptzy: "Flap", kyletzy: "Kyle" }, palias = (n) => PALIAS[String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "")] || null;
 
@@ -39,6 +39,8 @@ const ALIAS = { "srg.og": "Selangor Red Giants", srg: "Selangor Red Giants" };
 const cnt = {}; for (const m of all) for (const n of [m.a, m.b]) { const k = n.toLowerCase(); (cnt[k] ||= {})[n] = (cnt[k][n] || 0) + 1; }
 for (const v of Object.values(ALIAS)) { const k = v.toLowerCase(); (cnt[k] ||= {})[v] = (cnt[k][v] || 0) + 1; }
 const disp = Object.fromEntries(Object.entries(cnt).map(([k, v]) => [k, Object.entries(v).sort((a, b) => (/[A-Z]/.test(b[0]) - /[A-Z]/.test(a[0])) || b[1] - a[1])[0][0]])); // most common spelling that has capitals
+// a name only ever written in lowercase ("vigor apex") takes Liquipedia's own spelling ("Vigor Apex") when it is the same name
+{ const TN2 = readJSON(path.join(MD, "team-names.json"), {}); for (const [k, v] of Object.entries(disp)) if (!/[A-Z]/.test(v)) disp[k] = TN2[k] && TN2[k].toLowerCase() === k ? TN2[k] : v.split(" ").map((w) => (w.length <= 3 ? w.toUpperCase() : w[0].toUpperCase() + w.slice(1))).join(" "); }
 const canon = (n) => { const x = ALIAS[String(n).toLowerCase()] || n; return disp[String(x).toLowerCase()] || x; };
 for (const m of all) { m.a = canon(m.a); m.b = canon(m.b); }
 // one name per hero: match every spelling ("gatot", "popol and kupa") to Liquipedia's hero names
@@ -772,14 +774,14 @@ const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > n
   // heroes: popular is not strong
   const rec = HERO.filter((h) => h.recent.picks >= 40 && h.recent.wr != null).map((h) => { const w = Math.round(h.recent.wr * h.recent.picks); return { h: h.id, pres: h.recent.presence, ...ev(w, h.recent.picks) }; });
   const popular = [...rec].sort((a, b) => b.pres - a.pres).slice(0, 15).sort((a, b) => a.rate - b.rate).slice(0, 3), /* the most contested heroes that win the least */ weak = [...rec].sort((a, b) => a.rate - b.rate).slice(0, 3), strong = [...rec].sort((a, b) => b.rate - a.rate).slice(0, 3);
-  rules.push({ id: "popular", group: "Heroes", title: "Popular is not the same as strong", stats: popular.map((x) => ({ v: x.rate, l: `${x.h}: ${Math.round(x.pres * 100)}% picked or banned, ${x.n} picks`, hero: x.h, ...x })), tag: popular.some((x) => x.tag === "solid") ? "solid" : "lead",
+  rules.push({ id: "popular", group: "Heroes", title: "Popular is not the same as strong", stats: popular.map((x) => ({ v: x.rate, l: `${cap1(x.h)}: ${Math.round(x.pres * 100)}% picked or banned, ${x.n} picks`, hero: x.h, ...x })), tag: popular.some((x) => x.tag === "solid") ? "solid" : "lead",
     use: "do not rate a draft higher just because it has the most contested heroes.", detail: { weak, strong } });
   // bans
   const top2 = [...HERO].sort((a, b) => b.recent.presence - a.recent.presence).slice(0, 2);
   rules.push({ id: "bans", group: "Heroes", title: `${cap1(top2[0]?.id)} and ${cap1(top2[1]?.id)} decide the ban phase`, stats: top2.map((h) => ({ v: h.recent.presence, l: `${h.id} picked or banned (${h.recent.picks} picks, ${h.recent.bans} bans)`, hero: h.id, tag: "solid" })), tag: "solid", use: "if either gets through the bans, expect the draft chance to move." });
   // lanes
   const lanes = HERO.filter((h) => h.bestLane && h.bestLane.length > 1 && h.bestLane[0].n >= 20 && h.bestLane[1].n >= 20 && h.bestLane[0].wr - h.bestLane[1].wr >= 0.05).map((h) => { const [a, b] = h.bestLane; const sep = wil(a.w, a.n)[0] > wil(b.w, b.n)[1]; return { h: h.id, a, b, tag: sep ? "solid" : "lead" }; }).sort((x, y) => (y.a.wr - y.b.wr) - (x.a.wr - x.b.wr)).slice(0, 4);
-  if (lanes.length) rules.push({ id: "lanes", group: "Lanes", title: "Some flex heroes win more in one lane", stats: lanes.slice(0, 3).map((x) => ({ v: x.a.wr, l: `${x.h} ${x.a.r} (${x.b.r} ${Math.round(x.b.wr * 100)}%)`, hero: x.h, tag: x.tag })), tag: lanes.some((x) => x.tag === "solid") ? "solid" : "lead", use: "score a flex hero by the lane it is actually played in.", detail: { lanes } });
+  if (lanes.length) rules.push({ id: "lanes", group: "Lanes", title: "Some flex heroes win more in one lane", stats: lanes.slice(0, 3).map((x) => ({ v: x.a.wr, l: `${cap1(x.h)} ${x.a.r} (${x.b.r} ${Math.round(x.b.wr * 100)}%)`, hero: x.h, tag: x.tag })), tag: lanes.some((x) => x.tag === "solid") ? "solid" : "lead", use: "score a flex hero by the lane it is actually played in.", detail: { lanes } });
   // timing
   const tim = HERO.filter((h) => h.timing), early = tim.filter((h) => h.timing.tempo >= 0.08).sort((a, b) => b.timing.tempo - a.timing.tempo).slice(0, 5), late = tim.filter((h) => h.timing.tempo <= -0.08).sort((a, b) => a.timing.tempo - b.timing.tempo).slice(0, 5);
   const lens = yr.flatMap((m) => m.games.map((g) => secs(g.len)).filter(Boolean)).sort((a, b) => a - b), median = lens.length ? Math.round(lens[Math.floor(lens.length / 2)] / 6) / 10 : null;
