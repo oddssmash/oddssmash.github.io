@@ -1881,14 +1881,24 @@ function projZones(offRows, defTeams, kOff) {
 }
 async function teamVersus(t) {
   const box = document.getElementById("tv-out"), ctl = document.getElementById("tv-ctl"); if (!box || !ctl) return;
-  const st = { vs: "team", opp: (S.upList || []).map((g) => (g.home === t.id ? g.away : g.away === t.id ? g.home : null)).find(Boolean) || (S.teams || []).find((x) => x.id !== t.id)?.id, pl: null };
+  const st = { vs: "team", opp: (S.upList || []).map((g) => (g.home === t.id ? g.away : g.away === t.id ? g.home : null)).find(Boolean) || (S.teams || []).find((x) => x.id !== t.id)?.id, pl: null, outT: new Set(), outO: new Set() };
+  // WITHOUT PLAYERS: each team's rotation from the player index (this season, or last season early on); a removed player's
+  // minutes go to teammates (more to his position), replacements score less efficiently, blended with what really happened
+  // in games he missed when there are enough of them (same method as "Who's playing tonight?" on game pages)
+  const rosterOf = (tid) => Object.values(S.P || {}).filter((q) => String(q.team) === String(tid)).map((q) => { const v = q.cur && q.cur[0] >= 3 ? q.cur : q.prev; return v ? { id: q.id, n: q.n, pos: q.pos, min: v[1] || 0, pts: v[2] || 0 } : null; }).filter((x) => x && x.min >= 10).sort((a, b) => b.min - a.min).slice(0, 10);
+  const impactOf = async (tid, outs, pace) => { if (!outs.size) return { own: 0, opp: 0, list: [] }; const ros = rosterOf(tid), rest = ros.filter((p) => !outs.has(String(p.id))); let own = 0, opp = 0; const list = [];
+    for (const x of ros.filter((p) => outs.has(String(p.id)))) { const w = rest.map((p) => ({ p, w: Math.max(p.min, 1) * (posG(p.pos) === posG(x.pos) ? 1.6 : 1) })), W = w.reduce((a2, q) => a2 + q.w, 0) || 1;
+      const gained = w.reduce((a2, { p, w: wi }) => a2 + (p.min > 0 ? (p.pts / p.min) * Math.min(42 - p.min, (x.min * wi) / W) : 0), 0), formula = -x.pts + gained * 0.85;
+      let measured = null; try { const ab = (await load(`players/${x.id}.json`)).absence; if (ab && ab.with >= 8 && ab.without >= 3 && ab.offSwing != null) measured = { own: (-ab.offSwing * pace) / 100, opp: ((ab.defSwing || 0) * pace) / 100, n: ab.without }; } catch { /* no profile */ }
+      const o1 = measured ? (formula + measured.own) / 2 : formula, o2 = measured ? measured.opp * 0.5 : 0; own += o1; opp += o2; list.push({ n: x.n, own: o1, opp: o2, measured }); }
+    return { own, opp, list }; };
   const R = await load("results.json").catch(() => []);
   const plist = Object.values(S.P || {}).filter((q) => q.team !== t.id).sort((a, b) => a.n.localeCompare(b.n));
   const others = (S.teams || []).filter((x) => x.id !== t.id).sort((a, b) => a.name.localeCompare(b.name));
   const drawCtl = () => {
     ctl.innerHTML = st.vs === "team" ? `<select class="field" id="tv-team">${others.map((x) => `<option value="${esc(x.id)}"${x.id === st.opp ? " selected" : ""}>${esc(x.name)}</option>`).join("")}</select>`
       : `${pickerHTML("tv-pin")}${st.pl ? `<p class="small">Selected: <b>${esc(st.pl.n)}</b></p>` : ""}`;
-    ctl.querySelector("#tv-team")?.addEventListener("change", (e) => { st.opp = e.target.value; draw(); });
+    ctl.querySelector("#tv-team")?.addEventListener("change", (e) => { st.opp = e.target.value; st.outO = new Set(); draw(); });
     bindPicker(ctl.querySelector("#tv-pin"), plist, (q) => { st.pl = q; drawCtl(); draw(); });
   };
   const draw = async () => {
@@ -1900,9 +1910,14 @@ async function teamVersus(t) {
       const best = (rows) => [...rows].filter((x) => !x.low).sort((a, b) => b.diff - a.diff);
       S.learning ||= await load("learning.json").catch(() => null); const HA = S.learning?.params?.at?.(-1)?.homeAdv ?? 1.8; // same learned home court as the Why page and season simulation
       const lgOff = lgStyle("off"), pace = ((t.style?.pace || 100) + (o.style?.pace || 100)) / 2;
-      const ptsT = (t.style.off * o.style.def / lgOff) * pace / 100, ptsO = (o.style.off * t.style.def / lgOff) * pace / 100, mg = ptsT - ptsO, pW = 1 - pNorm(-mg / 13);
+      let ptsT = (t.style.off * o.style.def / lgOff) * pace / 100, ptsO = (o.style.off * t.style.def / lgOff) * pace / 100;
+      const iT = await impactOf(t.id, st.outT, pace), iO = await impactOf(o.id, st.outO, pace); ptsT += iT.own + iO.opp; ptsO += iO.own + iT.opp;
+      const mg = ptsT - ptsO, pW = 1 - pNorm(-mg / 13);
+      const chips = (tid, outs, side) => rosterOf(tid).map((p) => `<button class="fbtn who-b" type="button" data-wo="${side}|${esc(p.id)}" aria-pressed="${outs.has(String(p.id))}">${outs.has(String(p.id)) ? "✕ " : ""}${esc(shortName(p.n))} <span class="small muted">${f1(p.pts)}</span></button>`).join("");
+      const changes = [...iT.list.map((x) => [t.abbr, x]), ...iO.list.map((x) => [o.abbr, x])];
+      const withoutCard = `<div class="pv tv-wo"><h3>Without players</h3><p class="small muted">Tap a player to take him out of this matchup; tap again to bring him back.</p><div class="who-t"><b>${esc(t.abbr)}</b><div class="chips">${chips(t.id, st.outT, "t")}</div></div><div class="who-t"><b>${esc(o.abbr)}</b><div class="chips">${chips(o.id, st.outO, "o")}</div></div>${changes.length ? `<ul class="plain small">${changes.map(([ab, x]) => `<li>Without <b>${esc(x.n)}</b>: ${esc(ab)} ${x.own >= 0 ? "+" : ""}${f1(x.own)} pts${x.opp ? `, opponent ${x.opp >= 0 ? "+" : ""}${f1(x.opp)}` : ""}${x.measured ? ` (blended with ${x.measured.n} games he missed)` : ""}</li>`).join("")}</ul>` : ""}</div>`;
       const scoreCard = `<div class="pv"><h3>Projected on a neutral court</h3><div class="statgrid sg4"><div class="stat"><b>${f1(ptsT)}</b><span>${esc(t.abbr)} points</span></div><div class="stat"><b>${f1(ptsO)}</b><span>${esc(o.abbr)} points</span></div><div class="stat"><b>${pct(pW)}</b><span>${esc(t.abbr)} wins</span></div><div class="stat"><b>${f1(pace)}</b><span>pace</span></div></div><p class="small muted">From both teams' current-season (2026-27) offence and defence per 100 possessions and their pace; works even if they have not met. Home court adds about ${f1(HA)} points (learned from results, the same figure as the Why page and the season simulation). This is a simpler estimate than the game page, which uses the full model (injuries, rotations, matchups, rest), so the two can differ by a point or two, even after allowing for home court.</p></div>`;
-      box.innerHTML = scoreCard + `<div class="tv-cmp"><div><b>${esc(t.abbr)}</b><span>net ${sg(t.ratings?.adjNet)} · pace ${f1(t.style?.pace)}</span><span class="small muted">${esc((t.style?.tags || []).join(", ") || "-")}</span></div><div><b>${esc(o.abbr)}</b><span>net ${sg(o.ratings?.adjNet)} · pace ${f1(o.style?.pace)}</span><span class="small muted">${esc((o.style?.tags || []).join(", ") || "-")}</span></div></div>
+      box.innerHTML = withoutCard + scoreCard + `<div class="tv-cmp"><div><b>${esc(t.abbr)}</b><span>net ${sg(t.ratings?.adjNet)} · pace ${f1(t.style?.pace)}</span><span class="small muted">${esc((t.style?.tags || []).join(", ") || "-")}</span></div><div><b>${esc(o.abbr)}</b><span>net ${sg(o.ratings?.adjNet)} · pace ${f1(o.style?.pace)}</span><span class="small muted">${esc((o.style?.tags || []).join(", ") || "-")}</span></div></div>
         <p class="small vs-rec"><b>Head-to-head since October 2025:</b> ${h2h.length ? `${esc(t.abbr)} ${w}-${h2h.length - w}. ${h2h.slice(0, 4).map((g) => `${esc(new Date(g.date).toLocaleDateString("en-US", { timeZone: TZ, month: "short", day: "numeric", year: "2-digit" }))}: ${esc(T(g.away).abbr)} ${g.act.as}-${g.act.hs} ${esc(T(g.home).abbr)}`).join(" · ")}` : "no meetings yet."}</p>
         <div class="grid two"><div><h3>${esc(t.abbr)} offence vs ${esc(o.abbr)} defence</h3>${hz14Figure(mine, "off", `${t.name} offence projected vs ${o.name}`)}<p class="small">Best: ${best(mine).slice(0, 2).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}. Toughest: ${best(mine).slice(-2).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}.</p></div>
         <div><h3>${esc(o.abbr)} offence vs ${esc(t.abbr)} defence</h3>${hz14Figure(theirs, "off", `${o.name} offence projected vs ${t.name}`)}<p class="small">Best for them: ${best(theirs).slice(0, 2).map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}. Toughest: ${best(theirs).slice(-2).reverse().map((x) => `${esc(Z14_NAMES[x.id])} ${x.pct}%`).join(", ")}.</p></div></div>
@@ -1917,6 +1932,7 @@ async function teamVersus(t) {
         <p class="small muted">His zone FG% (shrunk with 25 attempts) plus this defence's gap to league in each zone. <a href="#/scout/${esc(q.id)}">His full scouting report ›</a></p>`;
     }
   };
+  box.addEventListener("click", (e) => { const b = e.target.closest("[data-wo]"); if (!b) return; const [side, pid] = b.dataset.wo.split("|"), set = side === "t" ? st.outT : st.outO; set.has(pid) ? set.delete(pid) : set.add(pid); draw(); });
   document.querySelectorAll("[data-tv]").forEach((b) => b.addEventListener("click", () => { st.vs = b.dataset.tv; document.querySelectorAll("[data-tv]").forEach((x) => x.setAttribute("aria-pressed", String(x === b))); drawCtl(); draw(); }));
   drawCtl(); draw();
 }
