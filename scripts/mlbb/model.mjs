@@ -575,9 +575,12 @@ let rec0ctx = null;
 // a team's last five series: our chance for it before each, the result, and how far it ran above or below our numbers
 const formOfTeam = (t) => { const rows = R.log.filter((x) => (x.A === t || x.B === t) && x.warm).slice(-5).map((x) => { const isA = x.A === t, p = isA ? x.pS : 1 - x.pS, won = (x.m.score[0] > x.m.score[1]) === isA; return { date: x.m.date, opp: isA ? x.B : x.A, p: r3(Math.min(0.9, Math.max(0.1, p))), won, score: isA ? x.m.score : [x.m.score[1], x.m.score[0]], raw: p }; });
   return { rows: rows.map(({ raw, ...r }) => r), wins: rows.filter((r) => r.won).length, expected: r3(rows.reduce((a, r) => a + r.raw, 0)), diff: r3(rows.reduce((a, r) => a + (r.won ? 1 : 0) - r.raw, 0)) }; };
+// each lineup player's most-played hero, with their record on it and without it (what a ban would take away)
+const PO = new Map(playersOut.map((q) => [String(q.name).toLowerCase(), q]));
+const sigOf = (n) => { const q = PO.get(n); const top = q?.pool?.[0]; if (!q || !top || top.n < 5 || !q.games) return null; const wAll = Math.round(q.wr * q.games), wTop = Math.round(top.wr * top.n), nOth = q.games - top.n; return { h: top.h, n: top.n, wr: r3(top.wr), other: nOth > 0 ? { n: nOth, wr: r3((wAll - wTop) / nOth) } : null }; };
 function contextFor(m) {
   const side = (t) => { const L = lineupOf(t, m.page); if (!L) return null; const ro = rosterFor(t, m.page);
-    const players = L.map((n, i) => { const e = PEXP.get(n) || { g: 0, intl: 0, big: 0 }, r = R.PLR.get(n) || { n: 0, w: 0 }, ar = ARCH.get(n); return { n: ro.find((x) => String(palias(x.player) || x.player).toLowerCase() === n)?.player || n, role: Object.keys(ROLEI)[i], g: e.g, intl: e.intl, big: e.big, wr: r.n ? r3((r.w + 10) / (r.n + 20)) : null, arch: ar?.arch || null }; });
+    const players = L.map((n, i) => { const e = PEXP.get(n) || { g: 0, intl: 0, big: 0 }, r = R.PLR.get(n) || { n: 0, w: 0 }, ar = ARCH.get(n); return { sig: sigOf(n), n: ro.find((x) => String(palias(x.player) || x.player).toLowerCase() === n)?.player || n, role: Object.keys(ROLEI)[i], g: e.g, intl: e.intl, big: e.big, wr: r.n ? r3((r.w + 10) / (r.n + 20)) : null, arch: ar?.arch || null }; });
     const mix = {}; for (const p of players) if (p.arch) mix[p.arch] = (mix[p.arch] || 0) + 1;
     return { players, g: players.reduce((x, p) => x + p.g, 0), intl: players.reduce((x, p) => x + p.intl, 0), big: players.reduce((x, p) => x + p.big, 0), wr: r3(careerWR(R.PLR, L) + 0.5), mix }; };
   const A = side(m.a), B = side(m.b); if (!A || !B) return null;
