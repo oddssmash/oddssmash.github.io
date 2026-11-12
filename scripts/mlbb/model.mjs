@@ -675,7 +675,7 @@ const SIG = new Map(teamsOut.filter((t) => t.signature).map((t) => [t.name, t.si
 const capS = (p) => Math.min(0.9, Math.max(0.1, p));
 function whyMissed(x) {
   const aFav = x.pS >= 0.5, fav = aFav ? x.A : x.B, dog = aFav ? x.B : x.A, fp = Math.max(capS(x.pS), 1 - capS(x.pS)), out = [];
-  out.push(fp < 0.6 ? `close to a coin flip: we gave ${fav} only ${Math.round(fp * 100)}%` : fp >= 0.75 ? `a real upset: ${fav} were ${Math.round(fp * 100)}% favourites` : `${dog} won as the underdog (${Math.round((1 - fp) * 100)}%)`);
+  out.push(fp <= 0.55 ? `close to a coin flip: we gave ${fav} only ${Math.round(fp * 100)}%` : fp < 0.6 ? `a narrow call: ${fav} were only ${Math.round(fp * 100)}% favourites` : fp >= 0.75 ? `a real upset: ${fav} were ${Math.round(fp * 100)}% favourites` : `${dog} won as the underdog (${Math.round((1 - fp) * 100)}%)`);
   const lost = x.m.games.filter((g) => (g.w === 1) !== aFav); let draftLost = 0, sigBanned = 0; const sig = SIG.get(fav);
   for (const g of lost) { const gx = GAMEX.get(g); if (gx && g.h1.every(Boolean) && g.h2.every(Boolean)) { const v = lg(gx.base) - lg(gx.pre); if ((aFav ? -v : v) >= 0.01) draftLost++; } /* the draft tables as they stood before that game */ if (sig && [...(aFav ? g.b2 : g.b1)].includes(sig)) sigBanned++; }
   if (draftLost) out.push(`our draft model favoured ${dog}'s picks in ${draftLost} of the ${lost.length} games ${fav} lost`);
