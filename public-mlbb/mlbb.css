@@ -534,3 +534,4 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 /* bans: name under each portrait */
 .sg-b > span:not(.lbl), .lb-b { display: inline-grid; justify-items: center; gap: 1px; width: 44px; } .sg-b em, .lb-b em { font-style: normal; font-size: 9.5px; color: var(--ink-2); max-width: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pk-live { color: #F2C94C; font-size: 12px; }
+.cx-lead { display: inline-block; margin-left: 6px; padding: 0 6px; border-radius: 999px; font-size: 10px; font-weight: 700; color: #F2C94C; box-shadow: inset 0 0 0 1px rgba(242,201,76,.45); vertical-align: middle; }
