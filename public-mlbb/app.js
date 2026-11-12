@@ -699,6 +699,7 @@ async function vPlayer(id) {
     ${careerHtml(p.career)}
     ${p.signature?.length ? `<h2 class="sec-h">Signature heroes</h2><div class="mp-picks">${p.signature.slice(0, 3).map((x) => `<a class="mp-pick" href="#/hero/${encodeURIComponent(x.h)}">${hpic(x.h, 48)}<b>${esc(cap(x.h))}</b><span>${x.n} games · <em style="color:var(--gold)">${pct(x.wr)}</em></span></a>`).join("")}</div>` : ""}
     ${p.teams?.length ? `<h2 class="sec-h">Teams</h2><div class="mo-list">${p.teams.map((t) => `<div class="mo-i">${tb(t.t, 32)}<span><b>${esc(t.t)}</b><span class="small muted">${t.n} games</span></span><span></span></div>`).join("")}</div>` : ""}
+    ${p.statsId ? `<p><a class="go" href="#/pstat/${esc(p.statsId)}">Season 18 stat profile: radar, trends and archetype ›</a></p>` : ""}
     <p class="small muted">Career heroes are credited from the player's lane pick in each game, using the lineup listed for that season.</p>`;
 }
 // ---------------------------------------------------------------- M8 World Championship: field and Wildcard
@@ -830,7 +831,7 @@ const hbars = (rows, val, fmt, color) => { const mx = Math.max(...rows.map(val))
 const chipBars = (rows, title) => { if (!rows?.length) return ""; const mx = Math.max(...rows.map((r) => r.c)); return `<div class="ps-cb"><span class="lbl">${title}</span>${rows.slice(0, 6).map((r) => `<div><span>${esc(r.n)}</span><span class="bar"><i style="width:${(r.c / mx) * 100}%"></i></span><b class="num">${r.c}</b></div>`).join("")}</div>`; };
 
 async function vStats(sub = "players") {
-  const D = await load("pstats/index.json"), P = D.players;
+  const D = await load("pstats/index.json"), LKS = await load("pstats-links.json").catch(() => ({})), P = D.players.map((x) => (LKS[x.id] ? { ...x, p: LKS[x.id].name, raw: x.p } : x));
   if (sub === "leaders") return psLeaders(D);
   if (sub === "archetypes") return psArch(D);
   if (sub === "compare") return vPcompare("");
@@ -886,13 +887,13 @@ function psArch(D) {
 
 async function vPstat(id) {
   const D = await load("pstats/index.json"), p = D.players.find((x) => x.id === id); if (!p) return vMissing();
-  const X = await load(`pstats/p/${id}.json`), mena = p.lg === "MENA", CAR = p.lg === "PH" ? (await load("career-ph.json").catch(() => ({ players: {} }))).players : {}, car = CAR[String(p.p).toLowerCase().replace(/[^a-z0-9]/g, "")];
+  const LK = (await load("pstats-links.json").catch(() => ({})))[id], X = await load(`pstats/p/${id}.json`), mena = p.lg === "MENA", CAR = p.lg === "PH" ? (await load("career-ph.json").catch(() => ({ players: {} }))).players : {}, car = CAR[String(p.p).toLowerCase().replace(/[^a-z0-9]/g, "")];
   const tile = (v, l) => `<div><b class="num">${v}</b><span>${l}</span></div>`;
   const sec = (t, body) => body ? `<h2 class="sec-h">${t}</h2>${body}` : "";
   const side = (X.splits || []).filter((r) => /side/i.test(r.label)), len = (X.splits || []).filter((r) => /min|short|long|length/i.test(r.label)), form = (X.splits || []).filter((r) => !side.includes(r) && !len.includes(r));
   const hmx = Math.max(1, ...(X.heroes || []).map((h) => h.n));
-  app.innerHTML = `${subHead("#/stats/players", `PLAYER STATS · ${esc(LGN[p.lg])}`, p.p)}
-    <section class="tm-hero ps-hero" style="--c:${acol(p.arch)}"><div class="tm-top">${tb(fullTeam(p.t), 64)}<span class="tm-r"><span class="lbl">${esc(p.t)}${p.lane ? ` · ${esc(p.lane)} (${p.laneShare}% of games)` : ""}</span><b class="num" style="font-size:28px">${esc(p.p)}</b><span>${abadge(p.arch, p.archConfLabel)}${p.arch2 ? ` <span class="small muted">then ${esc(abase(p.arch2))}</span>` : ""}</span></span></div>
+  app.innerHTML = `${subHead("#/stats/players", `PLAYER STATS · ${esc(LGN[p.lg])}`, LK?.name || p.p)}${LK ? `<p class="small muted">${LK.name.toLowerCase() !== p.p.toLowerCase() ? `Written "${esc(p.p)}" on the scoreboards. ` : ""}<a class="go" href="#/player/${esc(LK.id)}">Career and hero records ›</a></p>` : ""}
+    <section class="tm-hero ps-hero" style="--c:${acol(p.arch)}"><div class="tm-top">${tb(fullTeam(p.t), 64)}<span class="tm-r"><span class="lbl">${esc(p.t)}${p.lane ? ` · ${esc(p.lane)} (${p.laneShare}% of games)` : ""}</span><b class="num" style="font-size:28px">${esc(LK?.name || p.p)}</b><span>${abadge(p.arch, p.archConfLabel)}${p.arch2 ? ` <span class="small muted">then ${esc(abase(p.arch2))}</span>` : ""}</span></span></div>
       ${mixBar(p.blend, 10)}<div class="ps-blend">${(p.blend || []).map((b) => `<span><i style="background:${acol(b.n)}"></i>${esc(b.n)} <b>${b.pct}%</b></span>`).join("")}</div>
       <p class="small">${esc(p.archWhy || "")}${p.tags ? ` · <b>${esc(p.tags)}</b>` : ""}</p>${p.g < 5 ? `<p class="small" style="color:var(--gold, #F2C94C)">Only ${p.g} games: treat these numbers as a rough guide.</p>` : ""}</section>
     <div class="ps-kpi">${tile(p.g, "games")}${tile(`${Math.round(p.wp)}%`, "won")}${tile(f1(p.kda), "KDA")}${tile(`${f1(p.k)}/${f1(p.d)}/${f1(p.a)}`, "K / D / A")}${tile(`${Math.round(p.kp)}%`, "kill part.")}${tile(p.gpm || "-", "gold / min")}${mena ? "" : tile(n0(p.dpm), "damage / min")}${tile(p.gs ? `${f1(p.gs)}%` : "-", "team gold")}${mena ? "" : tile(p.ds ? `${f1(p.ds)}%` : "-", "team damage")}</div>${p.lg === "MY" ? `<p class="small muted">Gold and damage are not recorded for MPL MY in our scoreboard data.</p>` : ""}

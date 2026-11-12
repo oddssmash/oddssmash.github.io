@@ -515,6 +515,10 @@ writeJSON(path.join(OUT, "teams.json"), teamsOut.map(({ profile, matches, ...t }
 // players who have played for a Philippine team, so a shared name in another region is never given a PH career
 { const CAR = readJSON(path.join(ROOT, "derived", "mlbb", "career-ph.json"), { players: {} }).players, ck = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, ""); let n = 0;
   for (const p of playersOut) { const c = CAR[ck(p.name)]; if (c && p.teams.some((t) => R.T.get(t.t)?.region === "PH")) { p.career = c; n++; } } console.log(`career context attached to ${n} players`); writeJSON(path.join(OUT, "career-ph.json"), { players: CAR }); }
+// links between the Stats tab (scoreboard names) and the player pages (Liquipedia names), from the Season 18 name match
+{ const LG = { "MPL ID": "id", "MPL PH": "ph", "MPL MY": "my", "MPL MENA": "mena" }, links = {};
+  for (const p of playersOut) if (p.s18 && LG[p.s18.league]) { const sid2 = `${LG[p.s18.league]}-${String(p.s18.player).replace(/[^A-Za-z0-9]+/g, "_")}`.toLowerCase(); links[sid2] = { id: p.id, name: p.name }; p.statsId = sid2; }
+  writeJSON(path.join(OUT, "pstats-links.json"), links); }
 for (const p of playersOut) writeJSON(path.join(OUT, "players", `${p.id}.json`), p);
 writeJSON(path.join(OUT, "players.json"), playersOut.map(({ pool, ...p }) => ({ ...p, top: pool.slice(0, 3) })));
 // draft tables for the Draft lab (client-side): hero strength, combos and counters with 3+ games
