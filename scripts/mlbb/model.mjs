@@ -821,7 +821,9 @@ for (const u of upOut) if (Date.parse(u.date) > now) { const prev = PT.matches[u
 for (const [id, x] of Object.entries(PT.matches)) if (!x.score) { const m = done.find((d) => d.id === id); if (m) { x.score = m.score; x.right = (x.pSeries >= 0.5) === (m.score[0] > m.score[1]); if (x.first) x.rightFirst = (x.first.pSeries >= 0.5) === (m.score[0] > m.score[1]); } }
 writeJSON(PT_FILE, PT);
 const ptg = Object.values(PT.matches).filter((x) => x.score);
-writeJSON(path.join(OUT, "pretip.json"), { started: PT.started, graded: ptg.length, waiting: Object.values(PT.matches).filter((x) => !x.score).length, winner: ptg.length ? r3(ptg.filter((x) => x.right).length / ptg.length) : null, winnerFirst: ptg.filter((x) => x.first).length ? r3(ptg.filter((x) => x.rightFirst).length / ptg.filter((x) => x.first).length) : null, matches: ptg.slice(-100).reverse() });
+// only 60%+ calls count, as on Picks; too-close saved matches are listed but not counted
+const pt60 = ptg.filter((x) => Math.max(x.pSeries, 1 - x.pSeries) >= 0.6), ptClose = ptg.length - pt60.length;
+writeJSON(path.join(OUT, "pretip.json"), { calls: pt60.length, right: pt60.filter((x) => x.right).length, close: ptClose, started: PT.started, graded: ptg.length, waiting: Object.values(PT.matches).filter((x) => !x.score).length, winner: ptg.length ? r3(ptg.filter((x) => x.right).length / ptg.length) : null, winnerFirst: ptg.filter((x) => x.first).length ? r3(ptg.filter((x) => x.rightFirst).length / ptg.filter((x) => x.first).length) : null, matches: ptg.slice(-100).reverse() });
 const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > now).map((m) => m.league);
 // ---------------------------------------------------------------- PLAYBOOK and PATCH TRACKER
 // Plain rules from our own Liquipedia games, each with its evidence: the rate, the games behind it and a 95% range
