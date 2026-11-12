@@ -531,3 +531,5 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 .op-panel[open] .op-chev { transform: rotate(180deg); } .op-chev { transition: transform .15s; color: var(--ink-2); }
 .op-panel .op-row { margin: 0 10px 8px; background: var(--surface-2); }
 .op-panel > p { margin: 4px 14px 12px; }
+/* bans: name under each portrait */
+.sg-b > span:not(.lbl), .lb-b { display: inline-grid; justify-items: center; gap: 1px; width: 44px; } .sg-b em, .lb-b em { font-style: normal; font-size: 9.5px; color: var(--ink-2); max-width: 44px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
