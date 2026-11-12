@@ -767,7 +767,7 @@ const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > n
   // (no draft-order rule: pick order is not in our public data; the private R7 study stays private)
   // heroes: popular is not strong
   const rec = HERO.filter((h) => h.recent.picks >= 40 && h.recent.wr != null).map((h) => { const w = Math.round(h.recent.wr * h.recent.picks); return { h: h.id, pres: h.recent.presence, ...ev(w, h.recent.picks) }; });
-  const popular = [...rec].sort((a, b) => b.pres - a.pres).slice(0, 3), weak = [...rec].sort((a, b) => a.rate - b.rate).slice(0, 3), strong = [...rec].sort((a, b) => b.rate - a.rate).slice(0, 3);
+  const popular = [...rec].sort((a, b) => b.pres - a.pres).slice(0, 15).sort((a, b) => a.rate - b.rate).slice(0, 3), /* the most contested heroes that win the least */ weak = [...rec].sort((a, b) => a.rate - b.rate).slice(0, 3), strong = [...rec].sort((a, b) => b.rate - a.rate).slice(0, 3);
   rules.push({ id: "popular", group: "Heroes", title: "Popular is not the same as strong", stats: popular.map((x) => ({ v: x.rate, l: `${x.h}: ${Math.round(x.pres * 100)}% picked or banned, ${x.n} picks`, hero: x.h, ...x })), tag: popular.some((x) => x.tag === "solid") ? "solid" : "lead",
     use: "do not rate a draft higher just because it has the most contested heroes.", detail: { weak, strong } });
   // bans
