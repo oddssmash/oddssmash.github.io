@@ -130,7 +130,7 @@ function ctxHtml(m) {
 async function matchup(a, b, bo, pre = null) {
   const [ta, tb2] = await Promise.all([load(`teams/${sid(a)}.json`).catch(() => null), load(`teams/${sid(b)}.json`).catch(() => null)]);
   if (!ta || !tb2) return `<p class="empty">One of these teams has too few games in our data.</p>`;
-  const pg = pre?.pGame ?? lg(ta.rating - tb2.rating), s = series(pg, bo), fav = s.win >= 0.5 ? ta : tb2, need = Math.ceil(bo / 2);
+  const pg = pre?.pGame ?? lg(ta.rating - tb2.rating), s = pre?.pSeries != null && pre?.scores ? { win: pre.pSeries, scores: pre.scores } : series(pg, bo), fav = s.win >= 0.5 ? ta : tb2, need = Math.ceil(bo / 2); /* the published numbers, the same as Matches and Picks */
   const line = bo === 3 ? 2.5 : bo === 5 ? 4.5 : 5.5, over = bo >= 3 ? Object.entries(s.scores).filter(([k]) => k.split("-").reduce((x, y) => +x + +y, 0) > line).reduce((x, [, v]) => x + v, 0) : null;
   const scen = [];
   for (const [t, o, sgn] of [[ta, tb2, 1], [tb2, ta, -1]]) { const sg = t.signature; if (sg && sg.with[1] >= 3) { const adj = Math.max(-0.15, Math.min(0.15, -sg.delta * 0.5)), p2 = Math.min(0.97, Math.max(0.03, pg + sgn * adj)), oBan = o.profile.bansTheyMake.find((x) => x.h === sg.hero);
