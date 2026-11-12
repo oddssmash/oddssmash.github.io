@@ -27,8 +27,8 @@ function series(p, bo) { const need = Math.ceil(bo / 2), out = {}; let win = 0; 
   for (let l = 0; l < need; l++) { const pr = C(need - 1 + l, l) * p ** need * (1 - p) ** l; out[`${need}-${l}`] = pr; win += pr; } for (let w = 0; w < need; w++) out[`${w}-${need}`] = C(need - 1 + w, w) * (1 - p) ** need * p ** w; return { win, scores: out }; }
 
 // ---------------------------------------------------------------- chrome
-const NAV = [["matches", "Matches", "M5 19L19 5M14 5h5v5M5 5l14 14M5 10V5h5"], ["sim", "Draft", "M5 5h6v6H5zM13 13h6v6h-6zM13 5h6v6h-6zM5 13h6v6H5z"], ["heroes", "Meta", "M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z"], ["teams", "Teams", "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"], ["more", "More", "M4 7h16M4 12h16M4 17h16"]];
-const TAB = { matches: "matches", match: "matches", versus: "matches", draft: "sim", sim: "sim", picks: "matches", heroes: "heroes", hero: "heroes", teams: "teams", team: "teams", players: "teams", player: "teams", more: "more", m8: "matches", library: "more", matrix: "heroes", leagues: "heroes", playbook: "heroes", patch: "heroes", results: "more", how: "more", sources: "more" };
+const NAV = [["matches", "Matches", "M5 19L19 5M14 5h5v5M5 5l14 14M5 10V5h5"], ["sim", "Draft", "M5 5h6v6H5zM13 13h6v6h-6zM13 5h6v6h-6zM5 13h6v6H5z"], ["heroes", "Meta", "M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z"], ["teams", "Teams", "M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6z"], ["stats", "Stats", "M4 20V11M10 20V4M16 20v-6M21 20H3"], ["more", "More", "M4 7h16M4 12h16M4 17h16"]];
+const TAB = { matches: "matches", match: "matches", versus: "matches", draft: "sim", sim: "sim", picks: "matches", heroes: "heroes", hero: "heroes", teams: "teams", team: "teams", players: "teams", player: "teams", stats: "stats", pstat: "stats", pcompare: "stats", more: "more", m8: "matches", library: "more", matrix: "heroes", leagues: "heroes", playbook: "heroes", patch: "heroes", results: "more", how: "more", sources: "more" };
 function drawNav(active) { const nav = document.getElementById("nav"); if (!nav.childElementCount) nav.innerHTML = NAV.map(([k, l, d]) => `<a href="#/${k}" data-tab="${k}"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${d}"/></svg></span><span class="nav-l">${l}</span></a>`).join("");
   for (const a of nav.children) a.dataset.tab === active ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current"); }
 document.getElementById("theme").addEventListener("click", () => { const l = document.documentElement.dataset.theme !== "light"; document.documentElement.dataset.theme = l ? "light" : "dark"; document.getElementById("theme-color").setAttribute("content", l ? "#f4f5f6" : "#0A1512"); try { localStorage.setItem("theme", l ? "light" : "dark"); } catch {} });
@@ -654,6 +654,152 @@ function vHow() { app.innerHTML = `${subHead("#/more", "MORE", "How it works")}
 async function vSources() { const meta = await load("meta.json"); app.innerHTML = `${subHead("#/more", "MORE", "Data sources")}
   <div class="card doc-c"><h2>Read</h2><ul class="dots"><li><b>Liquipedia</b> (CC-BY-SA 3.0): matches, full drafts (picks, bans, sides, length, battlefield), MVPs and season lineups for ${esc(meta.leagues.join(", "))}. Read through its API at one request every 2 seconds, only pages that changed.</li><li><b>MPL PH</b> (ph-mpl.com, Data tab) and <b>MPL ID</b> (id-mpl.com, Statistics tab): official player KDA, kills, deaths, assists, kill participation and team kills, gold, damage, Lords, Turtles and towers.</li><li><b>MLBBHub</b> (mlbbhub.com): Season 18 scoreboards for MPL ID, PH and MY, one snapshot of 12 Nov 2026. Used for per-player season numbers and hero records on player pages and in the Draft tab suggestions. Checked first: 498 of 499 games match Liquipedia, and MPL PH matches the official site exactly. Raw scoreboards are not published.</li><li><b>mlbb.io</b>: ranked (all players) counters, past 7 days, current patch: each hero's strongest counters with their win-rate edge, shown on hero pages and as a small background signal in the simulator, never mixed into the pro numbers.</li></ul></div>
   <div class="card doc-c"><h2>Checked but not used</h2><ul class="dots"><li>MPL Malaysia site: schedule, teams and MVP pages but no statistics tab, and it does not answer automated requests.</li><li>MLBBHub: not read by the scheduled updates. A one-time snapshot (12 Nov 2026) of its MPL ID, PH and MY Season 18 scoreboards is used for per-player numbers only.</li><li>MLDB: blocked by bot protection. mlbb.rone.dev / arena.rone.dev: its API is closed to automated access (robots.txt). Official mobilelegends.com ranking: its data service is not open to other sites.</li><li>Facebook, Instagram, X, TikTok and Discord: need a login.</li><li>Coaching and draft tools (R7, NYRE, MLBBHub planners, Mobadraft): interactive tools, no data feed.</li><li>No sportsbook data is used for MLBB.</li></ul></div>`; }
+// ---------------------------------------------------------------- player stats tab
+// Every pro player we hold numbers for: list with filters, leaders and archetype charts, a player page, and a compare view.
+// Data: data/pstats (scripts/mlbb/derive-pstats.mjs). Archetypes describe how a player has played, they do not predict.
+const AC = { "Hyper-carry": "#F2C94C", Finisher: "#FF6B5E", Playmaker: "#2FC3FF", "Frontline anchor": "#3DDC97", "Split-pusher": "#FF9F43", "Safe efficiency": "#B18CFF", "High-risk aggressor": "#FF7AC6", "Low-resource enabler": "#2EE6D6", Balanced: "#8FA39A" };
+const abase = (n) => String(n || "Balanced").replace(/\s*\(.*\)$/, "");
+const acol = (n) => AC[abase(n)] || "#8FA39A";
+const LGN = { ID: "MPL ID S18", PH: "MPL PH S18", MY: "MPL MY S18", MENA: "MPL MENA S10" };
+const abadge = (n) => `<span class="ps-badge" style="--c:${acol(n)}">${esc(abase(n))}</span>`;
+const mixBar = (blend, h = 6) => `<span class="ps-mix" style="height:${h}px">${(blend || []).map((b) => `<i style="width:${b.pct}%;background:${acol(b.n)}" title="${esc(b.n)} ${b.pct}%"></i>`).join("")}</span>`;
+const fullTeam = (t) => { const inv = (S.shortInv ||= Object.fromEntries(Object.entries(S.short || {}).map(([k, v]) => [v, k]))); return inv[t] || t; };
+const dsign = (x) => (x == null ? "-" : (x > 0 ? "+" : x < 0 ? "−" : "") + Math.abs(Math.round(x * 10) / 10));
+const n0 = (x) => (x == null || isNaN(x) ? "-" : Math.round(x).toLocaleString("en-US"));
+const thin = (n) => (n < 5 ? " ps-thin" : "");
+const PS_TABS = [["players", "Players"], ["leaders", "Leaders"], ["archetypes", "Archetypes"], ["compare", "Compare"]];
+const psTabs = (on) => `<nav class="seg ps-seg" aria-label="Player stats">${PS_TABS.map(([k, l]) => `<a href="#/stats/${k}"${k === on ? ' aria-current="page"' : ""}>${l}</a>`).join("")}</nav>`;
+const psNote = () => `<p class="small muted ps-src">Season 18 (ID, PH, MY): MLBBHub scoreboards from the official stats feed, with winners and heroes from Liquipedia (CC-BY-SA). MENA Season 10: season averages from the MLBB Esports MENA scoreboard graphics. KH Season 11: the official MPL Cambodia leaderboards. Lanes are estimated per game from the five heroes and their usual pro lanes. Archetypes describe how a player has played so far; they are not predictions. Under 5 games is shown faded.</p>`;
+
+function radarSvg(sets) { // sets: [{ radar: [{k, v}], color }], values are percentiles 0-100
+  const keys = sets[0].radar.map((r) => r.k).filter((k) => sets.every((s) => s.radar.some((r) => r.k === k))), n = keys.length; if (n < 3) return "";
+  const S0 = 300, c = S0 / 2, R = 92, pt = (i, v) => { const a = -Math.PI / 2 + (i * 2 * Math.PI) / n; return [c + Math.cos(a) * R * v / 100, c + Math.sin(a) * R * v / 100]; };
+  let g = [25, 50, 75, 100].map((v) => `<polygon points="${keys.map((_, i) => pt(i, v).map((x) => x.toFixed(1)).join(",")).join(" ")}" fill="none" stroke="var(--line)" stroke-width="1"/>`).join("");
+  g += keys.map((k, i) => { const [x, y] = pt(i, 100), [lx, ly] = pt(i, 118); return `<line x1="${c}" y1="${c}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="var(--line)"/><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" text-anchor="${Math.abs(lx - c) < 10 ? "middle" : lx > c ? "start" : "end"}" dominant-baseline="middle" class="ps-ax">${esc(k.replace("survival (low deaths)", "survival").replace("kill participation", "kill part."))}</text>`; }).join("");
+  g += sets.map((s) => { const m = new Map(s.radar.map((r) => [r.k, r.v])); return `<polygon points="${keys.map((k, i) => pt(i, m.get(k) ?? 0).map((x) => x.toFixed(1)).join(",")).join(" ")}" fill="${s.color}" fill-opacity=".2" stroke="${s.color}" stroke-width="2" stroke-linejoin="round"/>`; }).join("");
+  return `<svg class="ps-radar" viewBox="-30 0 360 300" role="img" aria-label="Percentile radar against all pros">${g}</svg>`;
+}
+function trendSvg(series, key, color, label) {
+  const pts = series.map((s, i) => ({ i, v: s[key] == null ? null : Math.min(s[key], key === "kda" ? 20 : 1e9), w: s.w, h: s.h })).filter((p) => p.v != null); if (pts.length < 3) return "";
+  const W = 340, H = 96, P = 6, mx = Math.max(...pts.map((p) => p.v)) * 1.08 || 1, X = (i) => P + (i * (W - 2 * P)) / (series.length - 1), Y = (v) => H - P - (v / mx) * (H - 2 * P);
+  const ma = pts.map((p, j) => { const w = pts.slice(Math.max(0, j - 4), j + 1); return w.reduce((a, b) => a + b.v, 0) / w.length; });
+  const avg = pts.reduce((a, b) => a + b.v, 0) / pts.length;
+  return `<div class="ps-tr"><div class="ps-tr-h"><span class="lbl">${label}</span><span class="small muted">season ${key === "kda" ? f1(avg) : n0(avg)} · last 5 <b>${key === "kda" ? f1(ma[ma.length - 1]) : n0(ma[ma.length - 1])}</b></span></div>
+    <svg viewBox="0 0 ${W} ${H}" class="ps-trend" role="img" aria-label="${label} game by game"><line x1="${P}" x2="${W - P}" y1="${Y(avg).toFixed(1)}" y2="${Y(avg).toFixed(1)}" stroke="var(--line)" stroke-dasharray="3 3"/>
+    <polyline points="${pts.map((p) => `${X(p.i).toFixed(1)},${Y(p.v).toFixed(1)}`).join(" ")}" fill="none" stroke="${color}" stroke-opacity=".3" stroke-width="1.2"/>
+    <polyline points="${pts.map((p, j) => `${X(p.i).toFixed(1)},${Y(ma[j]).toFixed(1)}`).join(" ")}" fill="none" stroke="${color}" stroke-width="2.4" stroke-linejoin="round"/>
+    ${pts.map((p) => `<circle cx="${X(p.i).toFixed(1)}" cy="${Y(p.v).toFixed(1)}" r="2.6" fill="${p.w ? "#3DDC97" : "#FF6B5E"}"><title>Game ${p.i + 1}: ${esc(p.h)} · ${key === "kda" ? f1(p.v) : n0(p.v)} · ${p.w ? "won" : "lost"}</title></circle>`).join("")}</svg></div>`;
+}
+function divRows(rows, strip = /^vs /) {
+  if (!rows?.length) return `<p class="small muted">Not enough games.</p>`;
+  const mx = Math.max(15, ...rows.map((r) => Math.abs(r.dwp || 0)));
+  return `<div class="ps-div">${rows.map((r) => `<div class="ps-dr${r.small ? " ps-thin" : ""}"><span class="l"><b>${esc(r.label.replace(strip, "").replace(/^a team with /, "").replace(/ lane opponents$/, "").replace(/carrys/, "carries").replace(/(efficiency|Balanced|anchor|aggressor|enabler|pusher|Finisher|Playmaker)s/, "$1 players"))}</b><em>${r.n} games · ${Math.round(r.wp)}% won · KDA ${r.kda == null ? "-" : r.kda >= 20 ? "20+" : f1(r.kda)}</em></span><span class="bar"><i class="${r.dwp >= 0 ? "p" : "n"}" style="width:${(Math.abs(r.dwp || 0) / mx) * 50}%"></i></span><b class="num ${r.dwp >= 0 ? "up" : "dn"}">${dsign(r.dwp)}</b></div>`).join("")}</div>`;
+}
+const hbars = (rows, val, fmt, color) => { const mx = Math.max(...rows.map(val)) || 1; return `<div class="ps-hb">${rows.map((r) => `<a class="ps-hbr${thin(r.g)}" href="#/pstat/${esc(r.id)}"><span class="l">${tb(fullTeam(r.t), 22)}<b>${esc(r.p)}</b><em>${esc(r.t)} · ${esc(r.lg)}</em></span><span class="bar"><i style="width:${(val(r) / mx) * 100}%;background:${color || acol(r.arch)}"></i></span><b class="num">${fmt(val(r))}</b></a>`).join("")}</div>`; };
+const chipBars = (rows, title) => { if (!rows?.length) return ""; const mx = Math.max(...rows.map((r) => r.c)); return `<div class="ps-cb"><span class="lbl">${title}</span>${rows.slice(0, 6).map((r) => `<div><span>${esc(r.n)}</span><span class="bar"><i style="width:${(r.c / mx) * 100}%"></i></span><b class="num">${r.c}</b></div>`).join("")}</div>`; };
+
+async function vStats(sub = "players") {
+  const D = await load("pstats/index.json"), P = D.players;
+  if (sub === "leaders") return psLeaders(D);
+  if (sub === "archetypes") return psArch(D);
+  if (sub === "compare") return vPcompare("");
+  const f = (S.psf ||= { q: "", lg: "", t: "", lane: "", arch: "" });
+  const teams = [...new Set(P.filter((p) => !f.lg || p.lg === f.lg).map((p) => p.t))].sort();
+  const sel = (id, label, opts, v) => `<label class="ps-f"><span>${label}</span><select id="${id}"><option value="">All</option>${opts.map(([k, l]) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+  app.innerHTML = `<h1>Player stats</h1>${psTabs("players")}
+    <div class="ps-filters"><input id="ps-q" type="search" placeholder="Search a player or team" value="${esc(f.q)}" aria-label="Search a player or team">
+      ${sel("ps-lg", "League", Object.entries(LGN), f.lg)}${sel("ps-t", "Team", teams.map((t) => [t, t]), f.t)}${sel("ps-lane", "Lane", ["EXP", "Jungle", "Mid", "Gold", "Roam"].map((x) => [x, x]), f.lane)}${sel("ps-arch", "Archetype", Object.keys(AC).map((x) => [x, x]), f.arch)}</div>
+    <p class="small muted" id="ps-n"></p><div class="ps-grid" id="ps-list"></div>${psNote()}`;
+  const draw = () => {
+    const q = f.q.toLowerCase(), rows = P.filter((p) => (!f.lg || p.lg === f.lg) && (!f.t || p.t === f.t) && (!f.lane || p.lane === f.lane) && (!f.arch || abase(p.arch) === f.arch) && (!q || p.p.toLowerCase().includes(q) || p.t.toLowerCase().includes(q))).sort((a, b) => b.g - a.g);
+    document.getElementById("ps-n").textContent = `${rows.length} players${f.lane ? " · lanes are not recorded for MENA" : ""}`;
+    document.getElementById("ps-list").innerHTML = rows.map((p) => `<a class="ps-card${thin(p.g)}" href="#/pstat/${esc(p.id)}" style="--c:${acol(p.arch)}"><div class="ps-c-top">${tb(fullTeam(p.t), 34)}<span><b>${esc(p.p)}</b><em>${esc(p.t)} · ${esc(p.lane || p.lg)}${p.lane ? ` · ${esc(p.lg)}` : ""}</em></span></div>${abadge(p.arch)}${mixBar(p.blend)}<div class="ps-c-st"><span><b class="num">${p.g}</b>games</span><span><b class="num">${Math.round(p.wp)}%</b>won</span><span><b class="num">${f1(p.kda)}</b>KDA</span><span><b class="num">${p.gpm || "-"}</b>GPM</span></div></a>`).join("") || `<p class="muted">No player matches these filters.</p>`;
+  };
+  draw();
+  document.getElementById("ps-q").addEventListener("input", (e) => { f.q = e.target.value; draw(); });
+  for (const [id, k] of [["ps-lg", "lg"], ["ps-t", "t"], ["ps-lane", "lane"], ["ps-arch", "arch"]]) document.getElementById(id).addEventListener("change", (e) => { f[k] = e.target.value; if (k === "lg") { f.t = ""; vStats("players"); } else draw(); });
+}
+
+function psLeaders(D) {
+  const L = (S.psl ||= { m: "kda", lane: "", lg: "" });
+  const M = { kda: ["KDA", (p) => p.kda, f1], kp: ["Kill participation", (p) => p.kp, (x) => `${Math.round(x)}%`], gpm: ["Gold per minute", (p) => p.gpm, n0], dpm: ["Damage per minute", (p) => p.dpm, n0], ds: ["Team damage share", (p) => p.ds, (x) => `${f1(x)}%`], gs: ["Team gold share", (p) => p.gs, (x) => `${f1(x)}%`] };
+  const [ml, val, fmt] = M[L.m], rows = D.players.filter((p) => p.g >= 8 && val(p) != null && val(p) > 0 && (!L.lane || p.lane === L.lane) && (!L.lg || p.lg === L.lg)).sort((a, b) => val(b) - val(a)).slice(0, 12);
+  const chips = (k, list, cur) => list.map(([v, l]) => `<button type="button" class="ps-chip" data-k="${k}" data-v="${v}"${v === cur ? ' aria-pressed="true"' : ""}>${l}</button>`).join("");
+  const S18 = D.players.filter((p) => p.lg !== "MENA" && p.g >= 5 && p.gs && p.ds), gx = (v) => 30 + ((v - 8) / 22) * 300, gy = (v) => 230 - ((v - 4) / 30) * 210;
+  app.innerHTML = `<h1>Player stats</h1>${psTabs("leaders")}
+    <h2 class="sec-h">Leaders · ${esc(ml)}</h2><div class="ps-chips">${chips("m", Object.entries(M).map(([k, v]) => [k, v[0].replace(/^Team (w)(w+) share$/, (m, a, b) => a.toUpperCase() + b + " %").replace(" per minute", "/min")]), L.m)}</div>
+    <div class="ps-chips">${chips("lg", [["", "All leagues"], ...Object.entries(LGN).map(([k]) => [k, k])], L.lg)}</div><div class="ps-chips">${chips("lane", [["", "All lanes"], ...["EXP", "Jungle", "Mid", "Gold", "Roam"].map((x) => [x, x])], L.lane)}</div>
+    <div class="card">${rows.length ? hbars(rows, val, fmt) : `<p class="muted">No player with 8+ games here.</p>`}<p class="small muted">Players with 8 or more games; bar colour is the player's archetype.${["dpm", "ds"].includes(L.m) ? " Damage is not recorded for MENA." : ""}</p></div>
+    <h2 class="sec-h">Gold share vs damage share · Season 18</h2><div class="card"><svg viewBox="0 0 340 260" class="ps-scat" role="img" aria-label="Gold share against damage share, coloured by archetype">
+      ${[10, 15, 20, 25, 30].map((v) => `<line x1="${gx(v)}" x2="${gx(v)}" y1="20" y2="230" stroke="var(--line)"/><text x="${gx(v)}" y="246" class="ps-ax" text-anchor="middle">${v}%</text>`).join("")}${[10, 20, 30].map((v) => `<line x1="30" x2="330" y1="${gy(v)}" y2="${gy(v)}" stroke="var(--line)"/><text x="26" y="${gy(v)}" class="ps-ax" text-anchor="end" dominant-baseline="middle">${v}%</text>`).join("")}
+      <text x="180" y="258" class="ps-ax" text-anchor="middle">gold share →</text>
+      ${S18.map((p) => `<a href="#/pstat/${esc(p.id)}"><circle cx="${gx(Math.min(30, Math.max(8, p.gs))).toFixed(1)}" cy="${gy(Math.min(34, Math.max(4, p.ds))).toFixed(1)}" r="4.5" fill="${acol(p.arch)}" fill-opacity=".85" stroke="var(--bg, #0A1512)"><title>${esc(p.p)} (${esc(p.t)}): gold ${f1(p.gs)}%, damage ${f1(p.ds)}%, ${esc(abase(p.arch))}</title></circle></a>`).join("")}</svg>
+      <div class="ps-legend">${Object.keys(AC).filter((a) => a !== "Low-resource enabler").map((a) => `<span><i style="background:${AC[a]}"></i>${a}</span>`).join("")}</div><p class="small muted">Up and to the right: players who take the resources and turn them into damage. Tap a dot to open the player.</p></div>${psNote()}`;
+  app.querySelectorAll(".ps-chip").forEach((b) => b.addEventListener("click", () => { L[b.dataset.k] = b.dataset.v; psLeaders(D); }));
+}
+
+function psArch(D) {
+  const lgs = Object.keys(LGN), defs = [...(D.archDefs.season || []), ...(D.archDefs.mena || []).filter((x) => !(D.archDefs.season || []).some((y) => y.n === x.n))];
+  const dist = lgs.map((lg) => { const ps = D.players.filter((p) => p.lg === lg), c = {}; for (const p of ps) c[abase(p.arch)] = (c[abase(p.arch)] || 0) + 1; return { lg, n: ps.length, c }; });
+  const A = [...new Set(D.archMatrix.map((x) => x.a))], cell = (a, b) => D.archMatrix.find((x) => x.a === a && x.b === b);
+  const heat = (wp) => { const t = Math.max(-1, Math.min(1, (wp - 50) / 25)); return t >= 0 ? `rgba(47,195,255,${(0.12 + t * 0.7).toFixed(2)})` : `rgba(255,107,94,${(0.12 - t * 0.7).toFixed(2)})`; };
+  const ab = (a) => ({ "Frontline anchor": "Anchor", "Split-pusher": "Split", "Safe efficiency": "Safe", "High-risk aggressor": "Risk", "Hyper-carry": "Carry" })[a] || a;
+  app.innerHTML = `<h1>Player stats</h1>${psTabs("archetypes")}
+    <h2 class="sec-h">Archetype mix per league</h2><div class="card">${dist.map((d) => `<div class="ps-ad"><span class="lbl">${esc(LGN[d.lg])} · ${d.n}</span><span class="ps-mix" style="height:14px">${Object.entries(d.c).sort((a, b) => b[1] - a[1]).map(([a, n]) => `<i style="width:${(n / d.n) * 100}%;background:${acol(a)}" title="${esc(a)}: ${n}"></i>`).join("")}</span></div>`).join("")}
+      <div class="ps-legend">${Object.keys(AC).map((a) => `<span><i style="background:${AC[a]}"></i>${a}</span>`).join("")}</div></div>
+    <h2 class="sec-h">Lane matchups · win % of the row archetype</h2><div class="card ps-hm-w"><table class="ps-hm"><thead><tr><th>vs →</th>${A.map((a) => `<th>${esc(ab(a))}</th>`).join("")}</tr></thead><tbody>${A.map((a) => `<tr><th>${esc(ab(a))}</th>${A.map((b) => { const x = cell(a, b); return x ? `<td class="${x.n < 15 ? "ps-thin" : ""}" style="background:${heat(x.wp)}" title="${esc(a)} vs ${esc(b)}: ${x.w}-${x.n - x.w}"><b>${Math.round(x.wp)}</b><em>${x.n}</em></td>` : "<td>-</td>"; }).join("")}</tr>`).join("")}</tbody></table>
+      <p class="small muted">Season 18 lane opponents (ID, PH, MY). Big number: how often the row archetype's team won; small: games. Under 15 games is faded. Partly circular, because the stats behind an archetype (few deaths, high KDA) come easier on winning teams.</p></div>
+    <h2 class="sec-h">What each archetype means</h2><div class="mo-list">${defs.map((x) => `<div class="mo-i"><span class="ps-dot" style="background:${acol(x.n)}"></span><span><b>${esc(x.n)}</b><span class="small muted">${esc(x.d)} · ${esc(x.m.join(", "))}</span></span><span></span></div>`).join("")}<div class="mo-i"><span class="ps-dot" style="background:${AC.Balanced}"></span><span><b>Balanced</b><span class="small muted">No stat clearly above the average pro</span></span><span></span></div></div>
+    <h2 class="sec-h">MPL KH S11 · leaderboard archetypes</h2><div class="mo-list">${D.kh.players.slice(0, 12).map((p) => `<div class="mo-i">${tb(fullTeam(p.t), 30)}<span><b>${esc(p.p)}</b> ${abadge(p.arch)}<span class="small muted">${esc(p.t)} · on ${p.boards} top-10 boards: ${esc(p.ranks)}</span></span><span></span></div>`).join("")}</div>${psNote()}`;
+}
+
+async function vPstat(id) {
+  const D = await load("pstats/index.json"), p = D.players.find((x) => x.id === id); if (!p) return vMissing();
+  const X = await load(`pstats/p/${id}.json`), mena = p.lg === "MENA";
+  const tile = (v, l) => `<div><b class="num">${v}</b><span>${l}</span></div>`;
+  const sec = (t, body) => body ? `<h2 class="sec-h">${t}</h2>${body}` : "";
+  const side = (X.splits || []).filter((r) => /side/i.test(r.label)), len = (X.splits || []).filter((r) => /min|short|long|length/i.test(r.label)), form = (X.splits || []).filter((r) => !side.includes(r) && !len.includes(r));
+  const hmx = Math.max(1, ...(X.heroes || []).map((h) => h.n));
+  app.innerHTML = `${subHead("#/stats/players", `PLAYER STATS · ${esc(LGN[p.lg])}`, p.p)}
+    <section class="tm-hero ps-hero" style="--c:${acol(p.arch)}"><div class="tm-top">${tb(fullTeam(p.t), 64)}<span class="tm-r"><span class="lbl">${esc(p.t)}${p.lane ? ` · ${esc(p.lane)} (${p.laneShare}% of games)` : ""}</span><b class="num" style="font-size:28px">${esc(p.p)}</b><span>${abadge(p.arch)}${p.arch2 ? ` <span class="small muted">then ${esc(abase(p.arch2))}</span>` : ""}</span></span></div>
+      ${mixBar(p.blend, 10)}<div class="ps-blend">${(p.blend || []).map((b) => `<span><i style="background:${acol(b.n)}"></i>${esc(b.n)} <b>${b.pct}%</b></span>`).join("")}</div>
+      <p class="small">${esc(p.archWhy || "")}${p.tags ? ` · <b>${esc(p.tags)}</b>` : ""}</p>${p.g < 5 ? `<p class="small" style="color:var(--gold, #F2C94C)">Only ${p.g} games: treat these numbers as a rough guide.</p>` : ""}</section>
+    <div class="ps-kpi">${tile(p.g, "games")}${tile(`${Math.round(p.wp)}%`, "won")}${tile(f1(p.kda), "KDA")}${tile(`${f1(p.k)}/${f1(p.d)}/${f1(p.a)}`, "K / D / A")}${tile(`${Math.round(p.kp)}%`, "kill part.")}${tile(p.gpm || "-", "gold / min")}${mena ? "" : tile(n0(p.dpm), "damage / min")}${tile(p.gs ? `${f1(p.gs)}%` : "-", "team gold")}${mena ? "" : tile(p.ds ? `${f1(p.ds)}%` : "-", "team damage")}</div>${p.lg === "MY" ? `<p class="small muted">Gold and damage are not recorded for MPL MY in our scoreboard data.</p>` : ""}
+    ${sec("Percentile against all pros", `<div class="card ps-rc">${radarSvg([{ radar: p.radar, color: acol(p.arch) }])}<p class="small muted">0 = lowest, 100 = highest among ${mena ? "MENA S10" : "Season 18 ID, PH and MY"} players.</p></div>`)}
+    ${X.series?.length ? sec("Game by game", `<div class="card">${trendSvg(X.series, "kda", "#2FC3FF", "KDA")}${trendSvg(X.series, "gpm", "#F2C94C", "GOLD / MIN")}${trendSvg(X.series, "dpm", "#FF9F43", "DAMAGE / MIN")}<p class="small muted">Dots: green won, red lost. Thick line: 5-game average. Dashed: season average.</p></div>`) : ""}
+    ${X.heroes?.length ? sec("Hero pool", `<div class="card ps-hp">${X.heroes.slice(0, 12).map((h) => `<a class="ps-hpr${thin(h.n)}" href="#/hero/${encodeURIComponent(h.h.toLowerCase())}">${hpic(h.h.toLowerCase(), 34)}<span class="l"><b>${esc(h.h)}</b><em>KDA ${f1(h.kda)}</em></span><span class="bar"><i style="width:${(h.n / hmx) * 100}%"></i></span><b class="num">${h.n}g</b><b class="num ${h.wp >= 50 ? "up" : "dn"}">${Math.round(h.wp)}%</b></a>`).join("")}</div>`) : ""}
+    ${X.vsLaneArch?.length ? sec("Against lane-opponent archetypes", `<div class="card">${divRows(X.vsLaneArch)}<p class="small muted">Win % against the player's own average (${Math.round(p.wp)}%), by the archetype of the opponent in the same lane.</p></div>`) : ""}
+    ${sec("Against teams with…", `<div class="card">${divRows(X.vsTeamArch)}</div>`)}
+    ${X.vsLanePlayer?.length ? sec("Head to head · lane opponents", `<div class="card">${divRows(X.vsLanePlayer.slice(0, 8))}</div>`) : ""}
+    ${sec("Opponents", `<div class="card">${divRows((X.vsTeam || []).slice(0, 8))}</div>`)}
+    ${sec("Situations", `<div class="card">${[["Side", side], ["Game length", len], ["Form and season", form]].filter(([, r]) => r.length).map(([t, r]) => `<span class="lbl">${t}</span>${divRows(r, /^$/)}`).join("")}</div>`)}
+    ${X.items?.length ? sec("Most-used builds", `<div class="card ps-builds">${chipBars(X.emblems, "EMBLEMS")}${chipBars(X.items, "ITEMS")}${chipBars(X.talents, "TALENTS")}</div><p class="small muted">Times picked across the player's games.</p>`) : ""}
+    ${X.series?.length ? `<details class="card ps-log"><summary>Full game log · ${X.series.length} games</summary><table class="ft"><thead><tr><th>#</th><th>Hero</th><th class="n">KDA</th><th class="n">GPM</th><th class="n">DPM</th><th class="n">KP</th><th></th></tr></thead><tbody>${X.series.map((g, i) => `<tr><td>${i + 1}</td><td>${esc(g.h)}</td><td class="n">${f1(g.kda)}</td><td class="n">${n0(g.gpm)}</td><td class="n">${n0(g.dpm)}</td><td class="n">${g.kp ?? "-"}%</td><td class="${g.w ? "up" : "dn"}">${g.w ? "W" : "L"}</td></tr>`).join("")}</tbody></table></details>` : mena ? `<p class="small muted">Game-by-game rows are not shown for MENA; season averages and splits only.</p>` : ""}
+    <p><a class="go" href="#/pcompare/${esc(p.id)}~">Compare ${esc(p.p)} with another player ›</a></p>${psNote()}`;
+}
+
+async function vPcompare(arg) {
+  const D = await load("pstats/index.json"), [ia = "", ib = ""] = String(arg || "").split("~"), P = D.players;
+  const A = P.find((p) => p.id === ia), B = P.find((p) => p.id === ib);
+  const opts = (cur) => Object.entries(LGN).map(([lg, l]) => `<optgroup label="${esc(l)}">${P.filter((p) => p.lg === lg).sort((a, b) => a.p.localeCompare(b.p)).map((p) => `<option value="${esc(p.id)}"${p.id === cur ? " selected" : ""}>${esc(p.p)} · ${esc(p.t)}</option>`).join("")}</optgroup>`).join("");
+  let body = `<p class="muted">Choose two players.</p>`;
+  if (A && B) {
+    const [XA, XB] = await Promise.all([load(`pstats/p/${A.id}.json`), load(`pstats/p/${B.id}.json`)]);
+    const h2h = (X, o) => (X.vsLanePlayer || []).find((r) => r.label.replace(/^vs /, "").replace(/\s*\(.*$/, "").toLowerCase() === o.p.toLowerCase());
+    const ha = h2h(XA, B), tA = (XA.vsTeam || []).find((r) => r.label === `vs ${B.t}`), tB = (XB.vsTeam || []).find((r) => r.label === `vs ${A.t}`);
+    const rows = [["Games", (p) => p.g, n0], ["Won", (p) => p.wp, (x) => `${Math.round(x)}%`], ["KDA", (p) => p.kda, f1], ["Kill part.", (p) => p.kp, (x) => `${Math.round(x)}%`], ["Gold / min", (p) => p.gpm, n0], ["Damage / min", (p) => p.dpm, n0], ["Team gold", (p) => p.gs, (x) => `${f1(x)}%`], ["Team damage", (p) => p.ds, (x) => `${f1(x)}%`], ["Deaths / game", (p) => p.d, f1, true]];
+    const cA = "#2FC3FF", cB = "#FF6B5E";
+    body = `<div class="ps-vs"><a href="#/pstat/${esc(A.id)}" style="--c:${cA}">${tb(fullTeam(A.t), 40)}<b>${esc(A.p)}</b>${abadge(A.arch)}</a><span class="muted">VS</span><a href="#/pstat/${esc(B.id)}" style="--c:${cB}">${tb(fullTeam(B.t), 40)}<b>${esc(B.p)}</b>${abadge(B.arch)}</a></div>
+      <div class="card ps-rc">${radarSvg([{ radar: A.radar, color: cA }, { radar: B.radar, color: cB }]) || `<p class="small muted">These two leagues record different stats, so there is no shared radar.</p>`}<div class="ps-legend"><span><i style="background:${cA}"></i>${esc(A.p)}</span><span><i style="background:${cB}"></i>${esc(B.p)}</span></div><p class="small muted">Percentiles within each player's own league.</p></div>
+      <div class="card ps-cmp">${rows.map(([l, f, fmt, low]) => { const a = f(A), b = f(B); if (a == null && b == null) return ""; const wa = a != null && b != null && (low ? a < b : a > b), wb = a != null && b != null && (low ? b < a : b > a); return `<div><b class="num${wa ? " win" : ""}">${a == null ? "-" : fmt(a)}</b><span>${l}</span><b class="num${wb ? " win" : ""}">${b == null ? "-" : fmt(b)}</b></div>`; }).join("")}</div>
+      <h2 class="sec-h">Head to head</h2><div class="card">${ha ? `<p><b>${esc(A.p)}</b> against <b>${esc(B.p)}</b> in the same lane: <b>${Math.round(ha.wp * ha.n / 100)}-${ha.n - Math.round(ha.wp * ha.n / 100)}</b> in ${ha.n} games, KDA ${f1(ha.kda)} (${dsign(ha.dkda)} on ${esc(A.p)}'s average).</p>` : `<p class="small muted">They have not met as lane opponents in our games.</p>`}
+        ${tA ? `<p class="small">${esc(A.p)} against ${esc(B.t)}: ${tA.n} games, ${Math.round(tA.wp)}% won.</p>` : ""}${tB ? `<p class="small">${esc(B.p)} against ${esc(A.t)}: ${tB.n} games, ${Math.round(tB.wp)}% won.</p>` : ""}</div>`;
+  }
+  app.innerHTML = `<h1>Player stats</h1>${psTabs("compare")}<div class="ps-filters"><label class="ps-f"><span>Player A</span><select id="pc-a"><option value="">Choose</option>${opts(ia)}</select></label><label class="ps-f"><span>Player B</span><select id="pc-b"><option value="">Choose</option>${opts(ib)}</select></label></div>${body}${psNote()}`;
+  const go = () => { location.hash = `#/pcompare/${document.getElementById("pc-a").value}~${document.getElementById("pc-b").value}`; };
+  document.getElementById("pc-a").addEventListener("change", go); document.getElementById("pc-b").addEventListener("change", go);
+}
+
 function vMissing() { app.innerHTML = `<div class="card doc-c"><h2>This page does not exist in the MLBB section</h2><p><a class="go" href="#/matches">MLBB matches ›</a> <a class="go" href="#/more">More ›</a></p></div>`; }
 
 // ---------------------------------------------------------------- router
@@ -663,9 +809,9 @@ async function route() {
   const seq = (S.seq = (S.seq || 0) + 1), h = location.hash || "#/matches", st = (S.stack ||= []);
   if (st.length > 1 && st[st.length - 2] === h) st.pop(); else if (st[st.length - 1] !== h) st.push(h);
   const [, viewRaw = "matches", arg] = h.split("?")[0].split("/"), view = viewRaw || "matches";
-  drawNav(TAB[view] || "matches"); document.body.classList.toggle("mlbb-sub", !["matches", "sim", "draft", "heroes", "teams", "more"].includes(view));
+  drawNav(TAB[view] || "matches"); document.body.classList.toggle("mlbb-sub", !["matches", "sim", "draft", "heroes", "teams", "stats", "more"].includes(view));
   S.img ||= await load("images.json").catch(() => ({ heroes: {}, teams: {}, players: {} })); S.short ||= await load("short.json").catch(() => ({}));
-  try { await ({ matches: vMatches, match: vMatch, versus: vVersus, draft: vSim, sim: vSim, picks: vPicks, heroes: vHeroes, hero: vHero, teams: vTeams, team: vTeam, players: vPlayers, player: vPlayer, more: vMore, m8: vM8, library: vLibrary, matrix: vMatrix, leagues: vLeagues, playbook: vPlaybook, patch: vPatch, results: vResults, how: vHow, sources: vSources }[view] || vMissing)(decodeURIComponent(arg || "")); }
+  try { await ({ matches: vMatches, match: vMatch, versus: vVersus, draft: vSim, sim: vSim, picks: vPicks, heroes: vHeroes, hero: vHero, teams: vTeams, team: vTeam, players: vPlayers, player: vPlayer, stats: vStats, pstat: vPstat, pcompare: vPcompare, more: vMore, m8: vM8, library: vLibrary, matrix: vMatrix, leagues: vLeagues, playbook: vPlaybook, patch: vPatch, results: vResults, how: vHow, sources: vSources }[view] || vMissing)(decodeURIComponent(arg || "")); }
   catch (e) { if (seq === S.seq) app.innerHTML = `<div class="card"><h2>Could not load this page</h2><p class="muted">${esc(e.message)}</p><p><a class="go" href="#/matches">Back to matches</a></p></div>`; }
   if (st.length > 1) app.querySelectorAll("a.back").forEach((a) => (a.textContent = "‹ Back"));
   if (S.last !== h) window.scrollTo(0, 0); S.last = h;
