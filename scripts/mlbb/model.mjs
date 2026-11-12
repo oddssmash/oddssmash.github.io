@@ -162,6 +162,9 @@ function traitsOf(id) {
   for (const k of TRAITS) t[k] = Math.round(Math.min(1.5, t[k]) * 100) / 100;
   return { t, lp, sl: v ? { short: v.s, long: v.l } : null };
 }
+// patches not on Liquipedia yet (config/mlbb-patches.json); Liquipedia's own entry wins once it exists
+for (const p of readJSON(path.join(ROOT, "config", "mlbb-patches.json"), { patches: [] }).patches) if (!LP.patches.some((x) => x.patch === p.patch)) LP.patches.push({ patch: p.patch, release: p.release, changes: p.changes, manual: true });
+LP.patches.sort((a, b) => (a.release || "").localeCompare(b.release || ""));
 const lastPatch = [...LP.patches].reverse().find((p) => Date.parse(p.release) <= now) || null;
 const patchHist = (id) => LP.patches.flatMap((p) => p.changes.filter((c) => c.hero === id).map((c) => ({ patch: p.patch, release: p.release, type: c.type }))).slice(-4).reverse();
 for (const h of HERO) { const x = traitsOf(h.id); h.traits = x.t; h.lp = x.lp ? { role: x.lp.role, role2: x.lp.role2, lane: x.lp.lane, spec: x.lp.spec, cc: x.lp.cc } : null; h.shortLong = x.sl; h.patches = patchHist(h.id);
@@ -208,7 +211,7 @@ for (const m of done) if (m.mvp) { const s = [...PL.values()].find((x) => x.name
 const nk = (x) => String(x || "").toLowerCase().replace(/[^a-z0-9]/g, "");
 const OFF = fs.readdirSync(MD).filter((f) => f.startsWith("official-")).map((f) => readJSON(path.join(MD, f)));
 const offPlayer = new Map(), abbr = {};
-for (const o of OFF) for (const p of o.players) offPlayer.set(nk(p.player), { ...p, league: o.league, season: o.season });
+for (const o of OFF) { const pools = Object.fromEntries(Object.entries(o.pools || {}).map(([k, v]) => [nk(k), v])); for (const p of o.players) offPlayer.set(nk(p.player), { ...p, league: o.league, season: o.season, pool: pools[nk(p.player)]?.slice(0, 12) || null }); }
 // player archetype: his role plus what his heroes bring, his pool depth and (where published) his KDA profile
 function playerArch(s) {
   const tot = Object.values(s.heroes).reduce((a, v) => a + v.n, 0) || 1, p = Object.fromEntries(TRAITS.map((k) => [k, 0]));

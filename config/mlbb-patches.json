@@ -1,0 +1,11 @@
+{
+  "note": "Patches not yet on Liquipedia. Used only until Liquipedia lists the same patch, then Liquipedia's entry wins. Remove an entry once it is on Liquipedia.",
+  "patches": [
+    {
+      "patch": "2.2.16b",
+      "release": "2026-11-11",
+      "changes": [{ "hero": "popol and kupa", "type": "Revamp" }],
+      "source": "In-game patch notes for 2.2.16b (Popol and Kupa revamp), reported 2026-11-12; not yet on Liquipedia"
+    }
+  ]
+}

@@ -203,13 +203,17 @@ for (const [league, url] of [["MPL PH", "https://ph-mpl.com/data"], ["MPL ID", "
     const html = await r.text(), T = tables(html), num = (s) => +String(s || "").replace(/,(?=\d{3}\b)/g, "").replace(",", ".").replace(/[^0-9.\-]/g, "") || 0;
     const find = (re) => T.find((t) => re.test(t.head.join(" ")));
     const tp = find(/kda/i), th = find(/pick/i), tt = find(/gold/i);
-    const season = (html.match(/season\s*(\d{2})/i) || html.match(/season(\d{2})\//i) || [])[1] || null;
+    const seasons = [...html.matchAll(/season\s*(\d{2})/gi)].map((m) => +m[1]), season = seasons.length ? String(Math.max(...seasons)) : null;
+    // hero pools (MPL ID): each hero with every player's games and win rate on it -> per-player pools
+    const pools = {}; for (const row of html.match(/<tr[^>]*>(?:(?!<\/tr>)[\s\S])*?player-pool-info[\s\S]*?<\/tr>/g) || []) { const hero = (row.match(/class="hero-name[^"]*">\s*<b>\s*([^<]+?)\s*<\/b>/) || [])[1]; if (!hero) continue;
+      for (const c of row.matchAll(/player-pool-info">\s*([^<]+?)\s*<\/div>\s*<div class="player-pool-pick[^"]*">\s*(\d+)\s*<\/div>\s*<div class="player-pool-count">\s*(\d+)%/g)) { const name = c[1].split(" - ").slice(1).join(" - ").trim() || c[1].trim(); (pools[name] ||= []).push({ h: hero.toLowerCase(), n: +c[2], wr: +c[3] / 100 }); } }
+    for (const k of Object.keys(pools)) pools[k].sort((a, b) => b.n - a.n);
     const hi = (t, re) => t.head.findIndex((h) => re.test(h));
     const players = tp ? tp.rows.map((c) => ({ player: c[0], team: c[1], kills: num(c[hi(tp, /avg kills/i)]), deaths: num(c[hi(tp, /avg deaths/i)]), assists: num(c[hi(tp, /avg assists/i)]), kda: num(c[hi(tp, /kda/i)]), kp: num(c[hi(tp, /participation|kp/i)]) })).filter((p) => p.kda || p.kills) : [];
     const heroes = th ? th.rows.map((c) => ({ hero: c[0].toLowerCase(), pick: num(c[1]), ban: num(c[hi(th, /^ban$/i)] ?? c[3]), win: num(c[hi(th, /^win$/i)] ?? c[5]) })).filter((h) => h.pick || h.ban) : [];
     const teams = tt ? tt.rows.map((c) => ({ team: c[0], kills: num(c[1]), deaths: num(c[2]), assists: num(c[3]), gold: num(c[4]), damage: num(c[5]), lord: num(c[6]), turtle: num(c[7]), towers: num(c[8]) })) : [];
-    writeJSON(path.join(MD, `official-${league.replace(/\W+/g, "")}.json`), { league, url, season, fetched: new Date().toISOString(), teams, players, heroes });
-    console.log(`official ${league}: ${teams.length} teams, ${players.length} players, ${heroes.length} heroes`);
+    writeJSON(path.join(MD, `official-${league.replace(/\W+/g, "")}.json`), { league, url, season, fetched: new Date().toISOString(), teams, players, heroes, pools });
+    console.log(`official ${league} S${season}: ${teams.length} teams, ${players.length} players, ${heroes.length} heroes, ${Object.keys(pools).length} player pools`);
   } catch (e) { console.log(`official ${league} failed: ${e.message}`); }
 }
 // 5) ranked-game hero stats (meta reference; not pro play)
