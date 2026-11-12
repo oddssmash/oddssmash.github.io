@@ -98,16 +98,20 @@ function makeDraft() {
 }
 
 // ---------------------------------------------------------------- replay (team ratings + draft check)
-const MOM = [], GDD = []; // GDD: [team-rating logit before the game, result, picks A, picks B, date, league] // [team-rating logit before the game, result, +1 if side A won the previous game in the series else -1]
+const MOM = [], GDD = [], ALLG = []; // GDD: [team-rating logit before the game, result, picks A, picks B, date, league] // [team-rating logit before the game, result, +1 if side A won the previous game in the series else -1]
+// FORM (ideas test, Nov 2026): surprise over a team's last 10 games, FW logit per game of surprise. Fitted walk-forward it
+// helped single games slightly (Brier 0.2135 -> 0.2130) but made series slightly worse (0.1938 -> 0.1942) with the same
+// winner rate, so it is OFF (FW 0). Re-test with FW=0.05 when more seasons are in.
+const FW = process.env.FW != null ? +process.env.FW : 0, formOf = (t) => FW * (t.f || []).slice(-10).reduce((s, v) => s + v, 0);
 function replay(P, record = false) {
   const T = new Map(), REG = {}, D = makeDraft(); // region offsets, created as regions appear
-  const team = (n, region) => { if (!T.has(n)) T.set(n, { name: n, r: 0, n: 0, season: null, region, w: 0, l: 0, gw: 0, gl: 0 }); return T.get(n); };
+  const team = (n, region) => { if (!T.has(n)) T.set(n, { name: n, r: 0, n: 0, season: null, region, w: 0, l: 0, gw: 0, gl: 0, f: [] }); return T.get(n); };
   let sb = 0, sll = 0, sn = 0, sright = 0, gb = 0, gn = 0, gbD = 0, ib = 0, inn = 0; const log = [];
   for (const m of done) {
     const A = team(m.a, m.region), B = team(m.b, m.region), season = m.page.split("/").slice(0, -1).join("/");
     for (const t of [A, B]) { if (m.kind === "league" && t.season && t.season !== season) t.r *= P.carry; if (m.kind === "league") { t.season = season; t.region = m.region; } }
     const reg = (t) => (REG[t.region] || 0) * P.regW;
-    const cross = A.region !== B.region, d = (A.r + reg(A) - (B.r + reg(B))) * (cross ? P.cx : 1), pg = lg(d), s = series(pg, m.bo), won = m.score[0] > m.score[1] ? 1 : 0;
+    const cross = A.region !== B.region, d = (A.r + reg(A) + formOf(A) - (B.r + reg(B) + formOf(B))) * (cross ? P.cx : 1), pg = lg(d), s = series(pg, m.bo), won = m.score[0] > m.score[1] ? 1 : 0;
     const warm = A.n >= 4 && B.n >= 4;
     if (warm && m.kind === "intl" && A.region !== B.region) { ib += (s.win - won) ** 2; inn++; }
     if (warm) { sb += (s.win - won) ** 2; sll += -Math.log(Math.max(1e-6, won ? s.win : 1 - s.win)); sn++; if ((s.win >= 0.5) === !!won) sright++; }
@@ -115,12 +119,14 @@ function replay(P, record = false) {
     // games: grade single games (team-only and with the draft layer), then learn
     let prevW = 0;
     for (const g of m.games) {
-      const y = g.w === 1 ? 1 : 0, dd = (A.r + reg(A) - (B.r + reg(B))) * (cross ? P.cx : 1), p0 = lg(dd), e = D.edge(g.h1, g.h2), p1 = lg(dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04));
+      const y = g.w === 1 ? 1 : 0, raw = (A.r + reg(A) - (B.r + reg(B))) * (cross ? P.cx : 1), dd = (A.r + reg(A) + formOf(A) - (B.r + reg(B) + formOf(B))) * (cross ? P.cx : 1), p0 = lg(dd), e = D.edge(g.h1, g.h2), p1 = lg(dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04));
       if (warm && D.games > 200) { gb += (p0 - y) ** 2; gbD += (p1 - y) ** 2; gn++; }
       if (record && warm && prevW) MOM.push([dd, y, prevW]); prevW = y ? 1 : -1;
       if (record && warm) GDD.push([dd, y, g.h1, g.h2, m.date, m.league, m.score, g.n, m.bo]);
+      if (record) ALLG.push({ base: dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04), y, g, m, warm: warm && D.games > 200 }); // every game with the full pre-game logit, for the ideas test
       const k = P.k * (A.n < 6 || B.n < 6 ? 1.5 : 1), err = y - p0;
       A.r += k * err; B.r -= k * err; if (m.kind === "intl" && A.region !== B.region && A.region !== "INTL" && B.region !== "INTL") { REG[A.region] = (REG[A.region] || 0) + P.kr * err; REG[B.region] = (REG[B.region] || 0) - P.kr * err; }
+      { const sp = y - lg(raw); A.f.push(sp); B.f.push(-sp); } // surprise against the ratings alone (form excluded)
       if (y) { A.gw++; B.gl++; } else { B.gw++; A.gl++; }
       D.learn(g, m.date);
     }
@@ -137,6 +143,76 @@ const momFit = (() => { let best = { b: 0, ll: -Infinity }; for (let b = -0.6; b
   let ll0 = 0; for (const [d, y] of MOM) { const p = lg(d); ll0 += Math.log(y ? p : 1 - p); } const same = MOM.filter(([, y, s]) => (y ? 1 : -1) === s).length;
   return { b: best.b, n: MOM.length, sameRate: Math.round((same / MOM.length) * 1000) / 1000, lrStat: Math.round(2 * (best.ll - ll0) * 10) / 10 }; })();
 console.log("momentum", JSON.stringify(momFit));
+// IDEAS TEST (run with IDEAS_TEST=<path to the research review-all-players.json>): the research session's model ideas,
+// each built as a feature from games played BEFORE the one being predicted, added on top of the full pre-game logit
+// (team ratings + draft layer). Each is fitted on the first 70% of games by date and judged on the last 30%; an idea is
+// adopted only if it is clear in-sample (likelihood-ratio statistic > 3.84, about p < 0.05) AND lowers the held-out
+// Brier score. Results go to derived/mlbb/ideas-test.json.
+if (process.env.IDEAS_TEST) {
+  const RV = JSON.parse(fs.readFileSync(process.env.IDEAS_TEST, "utf8")), ROLE = { EXP: 0, Jungle: 1, Mid: 2, Gold: 3, Roam: 4 };
+  const lineup = (team, page) => { const out = []; for (const x of rosterFor(team, page)) if (ROLE[x.role] != null && out[ROLE[x.role]] == null) out[ROLE[x.role]] = String(x.player).toLowerCase(); return out.length === 5 && !out.includes(undefined) ? out : null; };
+  const SHORT = readJSON(path.join(MD, "team-short.json"), {}), shortOf = (t) => SHORT[t] || Object.entries(SHORT).find(([k]) => k.toLowerCase() === String(t).toLowerCase())?.[1] || t;
+  // per-game research rows: [league, match id, game, team, opp, player, hero, win, minutes, K, D, A, gold, damage, taken, tower, KP]
+  const LANE = new Map(RV.season.map((p) => [String(p.p).toLowerCase(), p.lane])); // each player's main lane
+  const RG = new Map(); for (const r of RV.log) { const k = `${r[0]}|${r[1]}|${r[2]}`; (RG.get(k) || RG.set(k, []).get(k)).push(r); }
+  // join research games to ours: same league, same pair of team tags, k-th meeting of the pair, same game number
+  const meet = new Map(); const rkeys = [...RG.keys()].sort((a, b) => { const [la, ma, ga] = a.split("|"), [lb, mb, gb] = b.split("|"); return la.localeCompare(lb) || +ma - +mb || +ga - +gb; });
+  const rOrder = new Map(); { const seen = new Map(); for (const k of rkeys) { const [l, mid] = k.split("|"), rows = RG.get(k), pair = [...new Set(rows.map((r) => r[3]))].sort().join("~"), pk = `${l}|${pair}`; if (!seen.has(pk)) seen.set(pk, []); const lst = seen.get(pk); if (!lst.includes(mid)) lst.push(mid); rOrder.set(k, `${pk}|${lst.indexOf(mid)}|${k.split("|")[2]}`); } }
+  const byOrder = new Map([...rOrder].map(([k, o]) => [o, k]));
+  const oSeen = new Map(); const ourKey = (x) => { if (!/Season 18$/.test(seasonOf(x.m.page)) || !["ID", "PH", "MY"].includes(x.m.region)) return null; const pair = [shortOf(x.m.a), shortOf(x.m.b)].sort().join("~"), pk = `${x.m.region} S18|${pair}`; if (!oSeen.has(pk)) oSeen.set(pk, []); const lst = oSeen.get(pk); if (!lst.includes(x.m.id)) lst.push(x.m.id); return `${pk}|${lst.indexOf(x.m.id)}|${x.g.n}`; };
+  // MENA S10 team-game rows (deaths come from the opponent's kills)
+  const MG = RV.menaGames || []; const mSeen = new Map(), mOrder = new Map(); for (const g of [...MG].sort((a, b) => a.id - b.id)) { const pair = [g.L, g.R].sort().join("~"); if (!mSeen.has(pair)) mSeen.set(pair, 0); mOrder.set(`${pair}|${g.n}|${mSeen.get(pair)}`, g); if (g.n === 1) mSeen.set(pair, mSeen.get(pair) + 1); }
+  // walk forward through every game, building features before learning from it
+  const PH = new Map(), PL = new Map(), TF = new Map(), ARC = new Map(), ARM = new Map(), PS = new Map(), MD2 = new Map(), FEAT = { comfort: [], comfort70: [], familiar: [], experience: [], intlExp: [], careerWR: [], form10: [], archLane: [], menaDeaths: [] };
+  const get = (M, k, d) => M.get(k) || (M.set(k, d()), M.get(k));
+  const prior = (M, k) => M.get(k) || { n: 0, w: 0 };
+  let joined = 0, s18 = 0, mJoin = 0;
+  const archOf = (pl) => { const s = PS.get(pl); if (!s || s.n < 5) return null; const m = (k) => s[k] / s.n, all = PS.get("*"), z = (k) => (m(k) - all[k] / all.n) / (all.sd?.[k] || 1);
+    const sc = { "Hyper-carry": z("gpm") + z("dpm"), Finisher: z("k") + z("dpm"), Playmaker: z("kp") + z("a"), "Frontline anchor": z("tpm") + z("a") - z("gpm"), "Split-pusher": z("tow"), "Safe efficiency": -z("d") + z("kda"), "High-risk aggressor": z("k") + z("d") + z("kp") };
+    const best = Object.entries(sc).sort((a, b) => b[1] - a[1])[0]; return best[1] > 0.5 ? best[0] : "Balanced"; };
+  for (const x of ALLG) {
+    const LA = lineup(x.m.a, x.m.page), LB = lineup(x.m.b, x.m.page), five = x.g.h1?.length === 5 && x.g.h2?.length === 5 && x.g.h1.every(Boolean) && x.g.h2.every(Boolean);
+    const side = (L, H) => { if (!L) return null; let c = 0, c70 = 0, fam = 0, ex = 0, ix = 0, wr = 0; for (let i = 0; i < 5; i++) { const ph = five ? prior(PH, `${L[i]}|${H[i]}`) : { n: 0, w: 0 }, pl = prior(PL, L[i]); c += (ph.w + 2.5) / (ph.n + 5) - 0.5; if (ph.n >= 15 && ph.w / ph.n >= 0.7) c70++; fam += Math.log1p(ph.n); ex += Math.log1p(pl.n); ix += Math.log1p(pl.intl || 0); wr += (pl.w + 10) / (pl.n + 20) - 0.5; } return { c, c70, fam, ex: ex / 5, ix: ix / 5, wr: wr / 5 }; };
+    const a = side(LA, x.g.h1), b = side(LB, x.g.h2);
+    const tf = (t) => { const h = TF.get(t) || []; return h.slice(-10).reduce((s, v) => s + v, 0); };
+    if (x.warm) {
+      const row = (k, v) => FEAT[k].push([x.base, x.y, v, x.m.date]);
+      if (a && b) { if (five) { row("comfort", a.c - b.c); row("comfort70", a.c70 - b.c70); row("familiar", a.fam - b.fam); } row("experience", a.ex - b.ex); row("intlExp", a.ix - b.ix); row("careerWR", a.wr - b.wr); }
+      row("form10", tf(x.m.a) - tf(x.m.b));
+    }
+    // archetype lane matchups (Season 18 ID/PH/MY): archetypes from each player's earlier S18 games only
+    const ok = ourKey(x), rk = ok && byOrder.get(ok);
+    if (ok) s18++;
+    if (rk) { joined++; const rows = RG.get(rk), tA = shortOf(x.m.a);
+      const byTeam = (t) => rows.filter((r) => r[3] === t);
+      const LI = (r) => ROLE[LANE.get(r[5].toLowerCase())] ?? 9, byLane = (rs) => { const o = [...rs].sort((p, q) => LI(p) - LI(q)); return new Set(o.map(LI)).size === 5 && LI(o[4]) < 9 ? o : []; };
+      const ra = byLane(byTeam(tA)), rb = byLane(rows.filter((r) => r[3] !== tA));
+      if (x.warm && ra.length === 5 && rb.length === 5) { let f = 0, used = 0; for (let i = 0; i < 5; i++) { const p1 = ra[i][5].toLowerCase(), p2 = rb[i][5].toLowerCase(), A1 = archOf(p1), B1 = archOf(p2); if (A1 && B1) { const c = prior(ARM, `${A1}|${B1}`); f += (c.w + 5) / (c.n + 10) - 0.5; used++; } } if (used >= 3) FEAT.archLane.push([x.base, x.y, f, x.m.date]); }
+      // learn: matchup table, then player stat sums
+      if (ra.length === 5 && rb.length === 5) for (let i = 0; i < 5; i++) { const A1 = archOf(ra[i][5].toLowerCase()), B1 = archOf(rb[i][5].toLowerCase()); if (A1 && B1) { const c1 = get(ARM, `${A1}|${B1}`, () => ({ n: 0, w: 0 })), c2 = get(ARM, `${B1}|${A1}`, () => ({ n: 0, w: 0 })); c1.n++; c2.n++; if (x.y) c1.w++; else c2.w++; } }
+      for (const r of rows) { const mins = r[8] || 1, v = { k: r[9], d: r[10], a: r[11], gpm: r[12] / mins, dpm: r[13] / mins, tpm: r[14] / mins, tow: r[15] / mins, kp: r[16], kda: Math.min(20, (r[9] + r[11]) / Math.max(1, r[10])) }; if (!isFinite(v.gpm) || !v.gpm) continue;
+        for (const key of [r[5].toLowerCase(), "*"]) { const s = get(PS, key, () => ({ n: 0 })); s.n++; for (const [kk, vv] of Object.entries(v)) s[kk] = (s[kk] || 0) + vv; if (key === "*") { s.sq ||= {}; for (const [kk, vv] of Object.entries(v)) s.sq[kk] = (s.sq[kk] || 0) + vv * vv; s.sd = Object.fromEntries(Object.keys(v).map((kk) => [kk, Math.sqrt(Math.max(1e-9, s.sq[kk] / s.n - (s[kk] / s.n) ** 2))])); } } } }
+    // MENA S10 deaths per game from earlier games
+    if (seasonOf(x.m.page) === "MPL/MENA/Season 10") { const sa = shortOf(x.m.a), sb = shortOf(x.m.b), pair = [sa, sb].sort().join("~");
+      const key = [...mOrder.keys()].find((k) => k.startsWith(pair + "|" + x.g.n + "|") && !mOrder.get(k).used);
+      const mg = key && mOrder.get(key);
+      if (x.warm) { const dA = MD2.get(sa), dB = MD2.get(sb); if (dA?.n >= 3 && dB?.n >= 3) FEAT.menaDeaths.push([x.base, x.y, dB.d / dB.n - dA.d / dA.n, x.m.date]); }
+      if (mg) { mg.used = true; mJoin++; const [kL, kR] = mg.kills, dL = kR, dR = kL; for (const [t, d] of [[mg.L, dL], [mg.R, dR]]) { const s = get(MD2, t, () => ({ n: 0, d: 0 })); s.n++; s.d += d; } } }
+    // learn from this game
+    const res = (t, won) => get(TF, t, () => []).push(won - lg(t === x.m.a ? x.base : -x.base));
+    res(x.m.a, x.y); res(x.m.b, 1 - x.y);
+    for (const [L, H, won] of [[LA, x.g.h1, x.y], [LB, x.g.h2, 1 - x.y]]) if (L) for (let i = 0; i < 5; i++) { const pl = get(PL, L[i], () => ({ n: 0, w: 0, intl: 0 })); pl.n++; pl.w += won; if (x.m.kind === "intl") pl.intl++; if (five && H[i]) { const ph = get(PH, `${L[i]}|${H[i]}`, () => ({ n: 0, w: 0 })); ph.n++; ph.w += won; } }
+  }
+  const fit = (rows) => { let best = { b: 0, ll: -Infinity }; for (let b = -2; b <= 2.0001; b += 0.01) { let ll = 0; for (const [d, y, f] of rows) { const p = lg(d + b * f); ll += Math.log(y ? p : 1 - p); } if (ll > best.ll) best = { b, ll }; } let ll0 = 0; for (const [d, y] of rows) { const p = lg(d); ll0 += Math.log(y ? p : 1 - p); } return { b: Math.round(best.b * 100) / 100, lr: Math.round(2 * (best.ll - ll0) * 10) / 10 }; };
+  const brier = (rows, b) => rows.reduce((s, [d, y, f]) => s + (lg(d + b * f) - y) ** 2, 0) / rows.length;
+  const out = {};
+  for (const [k, rows] of Object.entries(FEAT)) { const nz = rows.filter((r) => r[2] !== 0).length; if (rows.length < 40) { out[k] = { n: rows.length, verdict: "too few games to test" }; continue; }
+    const cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), te = rows.slice(cut), all = fit(rows), t = fit(tr), b0 = brier(te, 0), b1 = brier(te, t.b);
+    out[k] = { n: rows.length, nonzero: nz, b: all.b, lr: all.lr, test: { n: te.length, b: t.b, brierBase: r3(b0), brierWith: r3(b1), gain: Math.round((b0 - b1) * 10000) / 10000 }, verdict: all.lr > 3.84 && b1 < b0 ? "ADOPT" : all.lr > 3.84 ? "lead: clear in-sample, no held-out gain" : "reject: no clear effect" }; }
+  out._joins = { s18Games: s18, s18Joined: joined, menaJoined: mJoin };
+  console.log("IDEAS TEST", JSON.stringify(out, null, 1));
+  writeJSON(path.join(ROOT, "derived", "mlbb", "ideas-test.json"), { built: new Date().toISOString(), results: out }, true);
+}
 // COMBINED TEST (run with R7_JSON=<R7 pro drafts file>, private): join R7's pick order to our games by both drafts,
 // pool every source, and test the draft-order and series claims raw and after team ratings. Printed only.
 if (process.env.R7_JSON) {
@@ -186,7 +262,7 @@ if (process.env.DMG_CSV) {
   const cut = "2026-06-01", tr = G.filter((g) => g.date < cut), te = G.filter((g) => g.date >= cut), fb = fit(tr, sign);
   console.log("  out of sample: fit before", cut, JSON.stringify(fb), "n", tr.length, "| test n", te.length, "log loss ratings only", loss(te, 0, sign).toFixed(4), "with damage mix", loss(te, fb.b, sign).toFixed(4), "| test more-physical", JSON.stringify(more(te)), "expected", mix(te) + "%");
 }
-console.log("learned", JSON.stringify(P), `series Brier ${r3(R.brier)} (cross-region ${r3(R.ibrier)} on ${R.inn}) winner ${(R.acc * 100).toFixed(1)}% (${R.n}); games Brier team-only ${r3(R.gBrier)} with draft ${r3(R.gBrierDraft)} (${R.gn})`, "regions", JSON.stringify(Object.fromEntries(Object.entries(R.REG).map(([k, v]) => [k, r3(v)]))));
+console.log("learned", JSON.stringify(P), `series Brier ${R.brier.toFixed(4)} log-loss ${R.ll.toFixed(4)} (cross-region ${r3(R.ibrier)} on ${R.inn}) winner ${(R.acc * 100).toFixed(1)}% (${R.n}); games Brier team-only ${R.gBrier.toFixed(4)} with draft ${R.gBrierDraft.toFixed(4)} (${R.gn})`, "regions", JSON.stringify(Object.fromEntries(Object.entries(R.REG).map(([k, v]) => [k, r3(v)]))));
 
 // ---------------------------------------------------------------- heroes, players, teams (from all history)
 const D = R.D, HERO = [];
@@ -356,7 +432,7 @@ function sigEffect(name, prof) {
 for (const p of playersOut) if (p.official) { const k = `${p.official.league}|${p.official.team}`; (abbr[k] ||= {})[p.team] = (abbr[k][p.team] || 0) + 1; }
 const offTeam = new Map(); for (const o of OFF) for (const t of o.teams) { const cands = abbr[`${o.league}|${t.team}`]; const name = cands ? Object.entries(cands).sort((a, b) => b[1] - a[1])[0][0] : [...new Set(done.map((m) => m.a))].find((n) => nk(n) === nk(t.team)); if (name) offTeam.set(name, { ...t, league: o.league, season: o.season }); }
 const crossOf = (a, b) => { const ra = R.T.get(a)?.region, rb = R.T.get(b)?.region; return ra && rb && ra !== rb ? P.cx : 1; };
-const ratingOf = (name) => { const t = R.T.get(name); return t ? t.r + (R.REG[t.region] || 0) * P.regW : 0; };
+const ratingOf = (name) => { const t = R.T.get(name); return t ? t.r + (R.REG[t.region] || 0) * P.regW + formOf(t) : 0; };
 const teamsOut = [...R.T.values()].filter((t) => t.n >= 3).map((t) => { const prof = profile(t.name); const lastM = [...done].reverse().find((m) => m.a === t.name || m.b === t.name);
   return { id: safe(t.name), name: t.name, region: t.region, rating: r3(ratingOf(t.name)), elo: Math.round(1500 + ratingOf(t.name) * 173.7), series: [t.w, t.l], games: [t.gw, t.gl], last: lastM?.date || null, league: lastM?.league || null, staff: staffFor(t.name), official: offTeam.get(t.name) || null, roster: rosterFor(t.name, lastM?.page || "").map((x) => { const pl = PL.get(x.page || x.player); return { player: x.player, role: x.role, id: safe(x.page || x.player), pool: pl ? Object.entries(pl.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 6) : [] }; }), profile: prof, signature: sigEffect(t.name, prof) }; })
   .sort((a, b) => b.rating - a.rating);
@@ -379,6 +455,10 @@ writeJSON(path.join(OUT, "teams.json"), teamsOut.map(({ profile, matches, ...t }
     if (p.games >= 15 && arr.length >= 8) { const srt = [...arr].sort((a, b) => a - b), pc = (x) => srt[Math.floor(x * (srt.length - 1))], med = pc(0.5); if (n >= pc(0.85) && n > med) p.arch.labels.push("Deep hero pool"); else if (n <= pc(0.15) && n < med) p.arch.labels.push("Narrow pool / specialist"); }
     if (p.official) { if (p.official.kda >= 5) p.arch.labels.push("Safe, high-KDA"); else if (p.official.kills >= 3 && p.official.deaths >= 2.5) p.arch.labels.push("High-risk playmaker"); } }
 }
+// MPL PH career context (S16 line, all-time record, M-series, top heroes) from derived/mlbb/career-ph.json, attached only to
+// players who have played for a Philippine team, so a shared name in another region is never given a PH career
+{ const CAR = readJSON(path.join(ROOT, "derived", "mlbb", "career-ph.json"), { players: {} }).players, ck = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, ""); let n = 0;
+  for (const p of playersOut) { const c = CAR[ck(p.name)]; if (c && p.teams.some((t) => R.T.get(t.t)?.region === "PH")) { p.career = c; n++; } } console.log(`career context attached to ${n} players`); writeJSON(path.join(OUT, "career-ph.json"), { players: CAR }); }
 for (const p of playersOut) writeJSON(path.join(OUT, "players", `${p.id}.json`), p);
 writeJSON(path.join(OUT, "players.json"), playersOut.map(({ pool, ...p }) => ({ ...p, top: pool.slice(0, 3) })));
 // draft tables for the Draft lab (client-side): hero strength, combos and counters with 3+ games
