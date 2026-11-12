@@ -374,6 +374,8 @@ const TR = Object.fromEntries(HERO.map((h) => [h.id, h.traits]));
 for (const h of HERO) { const tot = h.roles.reduce((a, r) => a + r.n, 0) || 1; h.laneSplit = h.roles.map((r) => ({ r: r.r, share: r3(r.n / tot) })); h.flex = h.laneSplit.length > 1 && h.laneSplit[1].share >= 0.25;
   const t = h.traits, sc = (x) => x;
   h.ratings = { Teamfight: sc((t.cc + t.tank * 0.6 + t.dmg * 0.4) / 1.4), "Pick-off": sc((t.burst + t.engage) / 1.3), Objectives: sc((t.push + t.dmg * 0.5 + t.tank * 0.3) / 1.0), "Early-mid": sc(0.5 + t.early - t.late * 0.5), Late: sc(0.4 + t.late - t.early * 0.4 + (h.lp?.role === "Marksman" ? 0.2 : 0)), Damage: sc(t.dmg / 1.1), Survival: sc((t.tank + t.sustain * 0.6) / 1.1), Push: sc(t.push / 0.8), "Crowd control": sc(t.cc / 1.1) };
+  // timing scores from real pro results when there are enough games (40+ short and 40+ long); the kit description otherwise
+  if (h.timing && h.timing.ns >= 40 && h.timing.nl >= 40) h.ratingsTiming = "games";
   if (h.ranked) h.rankedTrend = rankedOf(h.id)?.winRateDelta ?? null; }
 // ranked (all players) counters from mlbb.io, a background layer kept apart from the pro numbers
 { const RC = readJSON(path.join(MD, "ranked-counters.json"), { heroes: {} }), key = (x) => String(x).toLowerCase().replace(/[^a-z]/g, "");
@@ -381,6 +383,8 @@ for (const h of HERO) { const tot = h.roles.reduce((a, r) => a + r.n, 0) || 1; h
   for (const h of HERO) { const v = byKey.get(key(h.id)); if (v) h.rankedCounters = { by: v.by.map((x) => ({ h: ids.get(key(x.h)) || x.h, adv: x.adv })), into: v.into.map((x) => ids.get(key(x)) || x), at: v.fetched?.slice(0, 10) }; } }
 // ratings as a rank among all heroes (0 = lowest, 10 = highest), so each scale spreads out
 for (const k of Object.keys(HERO[0]?.ratings || {})) { const xs = HERO.map((h) => h.ratings[k]).sort((x, y) => x - y), n = xs.length - 1 || 1; for (const h of HERO) { const lo = xs.indexOf(h.ratings[k]), hi = xs.lastIndexOf(h.ratings[k]); h.ratings[k] = Math.round(((lo + hi) / 2 / n) * 100) / 10; } }
+// Early-mid and Late for heroes with enough games: their rank among those heroes by real short-game and long-game win rate
+{ const TH = HERO.filter((h) => h.ratingsTiming === "games"); for (const [k, f2] of [["Early-mid", "short"], ["Late", "long"]]) { const xs = TH.map((h) => h.timing[f2]).sort((x, y) => x - y), n = xs.length - 1 || 1; for (const h of TH) { const lo = xs.indexOf(h.timing[f2]), hi = xs.lastIndexOf(h.timing[f2]); h.ratings[k] = Math.round(((lo + hi) / 2 / n) * 100) / 10; } } }
 // a lineup's profile: sum of its heroes' traits (5 heroes); the pro average lineup is the reference
 const profileOf = (hs) => { const p = Object.fromEntries(TRAITS.map((k) => [k, 0])); for (const h of hs) for (const k of TRAITS) p[k] += TR[h]?.[k] || 0; return p; };
 const avgLineup = (() => { const acc = Object.fromEntries(TRAITS.map((k) => [k, 0])); let n = 0; for (const m of done.slice(-600)) for (const g of m.games) for (const hs of [g.h1, g.h2]) { const p = profileOf(hs); for (const k of TRAITS) acc[k] += p[k]; n++; } for (const k of TRAITS) acc[k] = Math.round((acc[k] / Math.max(1, n)) * 100) / 100; return acc; })();
