@@ -44,7 +44,7 @@ for (const m of all) { m.a = canon(m.a); m.b = canon(m.b); }
 // one name per hero: match every spelling ("gatot", "popol and kupa") to Liquipedia's hero names
 { const LPH = Object.keys(readJSON(path.join(MD, "heroes-lp.json"), { heroes: {} }).heroes), strip = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, ""), byStrip = new Map(LPH.map((h) => [strip(h), h])), memo = new Map();
   // short forms used on some Liquipedia match pages
-  const SHORT = { paq: "paquito", yss: "yi sun-shin", yi: "yi sun-shin", yz: "yu zhong", yu: "yu zhong", dyr: "dyrroth", kag: "kagura", khu: "khufra", xb: "x.borg", zx: "zhuxin", bea: "beatrix", leo: "leomord", luo: "luo yi", wan: "wanwan", pove: "phoveus", tig: "tigreal", hel: "helcurt", jaw: "jawhead", bal: "balmond", sil: "silvanna", vale: "valentina", "wu zetian": "zetian" };
+  const SHORT = { matilda: "mathilda", paq: "paquito", yss: "yi sun-shin", yi: "yi sun-shin", yz: "yu zhong", yu: "yu zhong", dyr: "dyrroth", kag: "kagura", khu: "khufra", xb: "x.borg", zx: "zhuxin", bea: "beatrix", leo: "leomord", luo: "luo yi", wan: "wanwan", pove: "phoveus", tig: "tigreal", hel: "helcurt", jaw: "jawhead", bal: "balmond", sil: "silvanna", vale: "valentina", "wu zetian": "zetian" };
   const HN = (h) => { if (!h) return h; if (memo.has(h)) return memo.get(h); if (SHORT[String(h).toLowerCase()]) h = SHORT[String(h).toLowerCase()]; const k = strip(h).replace(/and/g, ""); let r = byStrip.get(strip(h)) || [...byStrip].find(([s2]) => s2.replace(/and/g, "") === k)?.[1] || (k.length >= 4 ? [...byStrip].find(([s2]) => s2.startsWith(k))?.[1] : null) || h; memo.set(h, r); return r; };
   for (const m of all) for (const g of m.games) { g.h1 = g.h1.map(HN); g.h2 = g.h2.map(HN); g.b1 = g.b1.map(HN); g.b2 = g.b2.map(HN); if (g.map) g.map = g.map.trim(); } }
 const order = Object.fromEntries(EVENTS.map((e, i) => [e.page, i]));
@@ -311,6 +311,8 @@ console.log("learned", JSON.stringify(P), `series Brier ${R.brier.toFixed(4)} lo
 
 // ---------------------------------------------------------------- heroes, players, teams (from all history)
 const D = R.D, HERO = [];
+// only real heroes: names not on Liquipedia's hero list ("default", "unknown", team tags typed into ban slots) are left out
+const LPSET = new Set(Object.keys(readJSON(path.join(MD, "heroes-lp.json"), { heroes: {} }).heroes));
 const totalGames = done.reduce((a, m) => a + m.games.length, 0);
 const raw = new Map(); // undecayed counts for display
 for (const m of done) for (const g of m.games) { for (const [hs, bs, w] of [[g.h1, g.b1, g.w === 1], [g.h2, g.b2, g.w === 2]]) { hs.forEach((x, i) => { const v = raw.get(x) || { n: 0, w: 0, b: 0, roles: {} }; v.n++; if (w) v.w++; v.roles[ROLES[i]] = (v.roles[ROLES[i]] || 0) + 1; if (w) (v.rw ||= {})[ROLES[i]] = (v.rw?.[ROLES[i]] || 0) + 1; raw.set(x, v); }); bs.forEach((x) => { const v = raw.get(x) || { n: 0, w: 0, b: 0, roles: {} }; v.b++; raw.set(x, v); }); } }
@@ -318,6 +320,7 @@ const recent = new Map(); for (const m of done.filter((m) => Date.parse(m.date) 
 const recentGames = done.filter((m) => Date.parse(m.date) > now - 150 * DAY).reduce((a, m) => a + m.games.length, 0) || 1;
 for (const [name, v] of raw) {
   if (!name || /^(none|-|tbd)$/i.test(name)) continue; // blank pick slots on a few match pages
+  if (LPSET.size && !LPSET.has(name) && (v.n < 3 || !recent.get(name)?.n)) continue; // not a real hero (typo, placeholder or an unclear short form like "gs")
   const d = D.H.get(name) || { n: 0, w: 0, b: 0 }, rc = recent.get(name) || { n: 0, w: 0, b: 0 }, str = logit((d.w + 4) / (d.n + 8));
   const solo = (h) => { const s = D.H.get(h) || { n: 0, w: 0 }; return (s.w + 4) / (s.n + 8); };
   const syn = [...D.PAIR].filter(([k, x]) => k.split("|").includes(name) && x.n >= 3).map(([k, x]) => { const o = k.split("|").find((y) => y !== name), wr = (x.w + 3) / (x.n + 6); return { with: o, n: r1(x.n), wr: r3(wr), lift: r3(wr - (solo(name) + solo(o)) / 2) }; }).sort((a, b) => b.lift - a.lift);
