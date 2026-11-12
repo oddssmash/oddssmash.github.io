@@ -554,9 +554,11 @@ const upOut = [], picks = [];
 for (const m of upcoming) {
   rec0ctx = contextFor(m); const ndg = nudgeOf(m, rec0ctx); if (rec0ctx) rec0ctx.nudge = ndg;
   const pr = project(m.a, m.b, m.bo, m.page, ndg.total), n = Math.min(nA(m.a), nA(m.b));
-  const rec = { context: rec0ctx, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
+  // the same prediction without the archetype nudge, for the site's archetype on/off switch
+  const prN = ndg.arch ? project(m.a, m.b, m.bo, m.page, ndg.total - ndg.arch) : pr, noArch = { pGame: prN.pGame, pSeries: prN.pSeries, scores: prN.scores, expMaps: prN.expMaps };
+  const rec = { context: rec0ctx, noArch, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
   writeJSON(path.join(OUT, "matches", `${m.id}.json`), rec);
-  upOut.push({ id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, pSeries: pr.pSeries, pGame: pr.pGame, expMaps: pr.expMaps, confidence: rec.confidence });
+  upOut.push({ noArch: { pSeries: noArch.pSeries, pGame: noArch.pGame, expMaps: noArch.expMaps }, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, pSeries: pr.pSeries, pGame: pr.pGame, expMaps: pr.expMaps, confidence: rec.confidence });
   if (n >= 6) { const fav = pr.pSeries >= 0.5 ? m.a : m.b, pf = Math.min(0.9, Math.max(pr.pSeries, 1 - pr.pSeries)); picks.push({ id: m.id, date: m.date, league: m.league, kind: "series", pick: `${fav} to win the series`, p: r3(pf), game: `${m.a} vs ${m.b}` });
     if (pr.over != null) picks.push({ id: m.id, date: m.date, league: m.league, kind: "maps", pick: `${pr.over >= 0.5 ? "Over" : "Under"} ${pr.mapsLine} maps`, p: r3(Math.min(0.85, Math.max(pr.over, 1 - pr.over))), game: `${m.a} vs ${m.b}` }); }
 }
