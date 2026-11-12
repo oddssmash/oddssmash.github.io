@@ -157,7 +157,14 @@ function replay(P, record = false) {
   return { lateBrier, lateN: late.length, T, REG, D, PLR, SGc, ibrier: inn ? ib / inn : 0, inn, brier: sb / sn, ll: sll / sn, acc: sright / sn, n: sn, gBrier: gb / gn, gBrierDraft: gbD / gn, gn, log };
 }
 const grid = []; for (const k of [0.1, 0.16, 0.24, 0.32]) for (const carry of [0.5, 0.7, 0.85, 1]) for (const kr of [0.04]) for (const cx of (process.env.CX ? [+process.env.CX] : [0.1, 0.2, 0.3, 0.5])) for (const regW of [1]) for (const wd of [0, 0.5, 1, 1.5]) grid.push({ k, carry, kr, regW, wd, cx });
-let best = null; for (const P of grid) { const r = replay(P); const score = r.brier + 0.5 * r.gBrierDraft + 0.5 * r.ibrier; if (!best || score < best.score) best = { P, r, score }; }
+// SETTINGS FREEZE: the grid search runs once a week (or with RETUNE=1). In between, the saved settings are reused, so a
+// published chance only moves when a game is played, and games after the freeze are graded on settings that never saw them.
+const FROZEN_FILE = path.join(MD, "frozen-params.json"), FZ = readJSON(FROZEN_FILE, null);
+const fzOk = !!FZ && !process.env.RETUNE && now - Date.parse(FZ.date) < 7 * DAY && grid.some((g) => JSON.stringify(g) === JSON.stringify(FZ.P));
+let best = null;
+if (fzOk) best = { P: FZ.P }; else { for (const P of grid) { const r = replay(P); const score = r.brier + 0.5 * r.gBrierDraft + 0.5 * r.ibrier; if (!best || score < best.score) best = { P, r, score }; } writeJSON(FROZEN_FILE, { date: new Date(now).toISOString(), P: best.P, previous: FZ || null }); }
+const FROZEN_AT = fzOk ? FZ.date : new Date(now).toISOString();
+console.log(fzOk ? `settings frozen since ${FZ.date} (reused)` : "settings re-tuned and frozen for 7 days");
 const P = best.P, R = replay(P, true);
 // MOMENTUM: does the winner of the previous game in a series win the next one more often than the ratings (already
 // updated after that game) expect? Fitted as one logit shift by maximum likelihood over every later game in a series.
@@ -791,15 +798,16 @@ writeJSON(path.join(OUT, "results.json"), results.slice(0, 400));
 const cal = Array.from({ length: 5 }, (_, i) => ({ lo: 50 + i * 10, hi: 60 + i * 10, n: 0, won: 0 }));
 for (const x of R.log.filter((x) => x.warm)) { const p = Math.max(x.pS, 1 - x.pS), won = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]), b = cal[Math.min(4, Math.floor((p - 0.5) * 10))]; b.n++; if (won) b.won++; }
 const byL = {}; for (const x of R.log.filter((x) => x.warm)) { const c = (byL[x.m.league] ||= { league: x.m.league, n: 0, right: 0 }); c.n++; if ((x.pS >= 0.5) === (x.m.score[0] > x.m.score[1])) c.right++; }
-writeJSON(path.join(OUT, "accuracy.json"), { graded: R.n, brier: r3(R.brier), logloss: r3(R.ll), winner: r3(R.acc), games: { n: R.gn, brierTeam: r3(R.gBrier), brierDraft: r3(R.gBrierDraft) }, calibration: cal.map((b) => ({ ...b, rate: b.n ? r3(b.won / b.n) : null })),
+const SF = (() => { const rows = R.log.filter((x) => x.warm && x.m.date >= FROZEN_AT && Math.max(x.pS, 1 - x.pS) >= 0.6); const right = rows.filter((x) => (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1])).length; return { since: FROZEN_AT, n: rows.length, right, brier: rows.length ? r3(rows.reduce((a, x) => a + (x.pS - (x.m.score[0] > x.m.score[1] ? 1 : 0)) ** 2, 0) / rows.length) : null }; })();
+writeJSON(path.join(OUT, "accuracy.json"), { backtest: true, sinceFreeze: SF, graded: R.n, brier: r3(R.brier), logloss: r3(R.ll), winner: r3(R.acc), games: { n: R.gn, brierTeam: r3(R.gBrier), brierDraft: r3(R.gBrierDraft) }, calibration: cal.map((b) => ({ ...b, rate: b.n ? r3(b.won / b.n) : null })),
   byLeague: Object.values(byL).map((c) => ({ ...c, winner: r3(c.right / c.n), low: c.n < 20 })), learned: { ...P, regions: Object.fromEntries(Object.entries(R.REG).map(([k, v]) => [k, r3(v)])), note: "k = how fast team ratings react to each game; carry = share of a team's rating kept into a new season; kr = how fast international results move the region offsets; wd = weight of the draft layer (hero strength, combos, counters) once drafts are known." }, grid: grid.length,
   rule: "Each series is projected only from games before it, then graded. A series counts once both teams have 4+ series in our data." });
 const PT_FILE = path.join(MD, "pretip.json"), PT = readJSON(PT_FILE, { started: new Date().toISOString(), matches: {} });
-for (const u of upOut) if (Date.parse(u.date) > now) PT.matches[u.id] = { ...u, saved: new Date().toISOString() };
-for (const [id, x] of Object.entries(PT.matches)) if (!x.score) { const m = done.find((d) => d.id === id); if (m) { x.score = m.score; x.right = (x.pSeries >= 0.5) === (m.score[0] > m.score[1]); } }
+for (const u of upOut) if (Date.parse(u.date) > now) { const prev = PT.matches[u.id]; PT.matches[u.id] = { ...u, saved: new Date().toISOString(), first: prev?.first || { pSeries: u.pSeries, pGame: u.pGame, saved: new Date().toISOString() } }; } // first = the number we first published
+for (const [id, x] of Object.entries(PT.matches)) if (!x.score) { const m = done.find((d) => d.id === id); if (m) { x.score = m.score; x.right = (x.pSeries >= 0.5) === (m.score[0] > m.score[1]); if (x.first) x.rightFirst = (x.first.pSeries >= 0.5) === (m.score[0] > m.score[1]); } }
 writeJSON(PT_FILE, PT);
 const ptg = Object.values(PT.matches).filter((x) => x.score);
-writeJSON(path.join(OUT, "pretip.json"), { started: PT.started, graded: ptg.length, waiting: Object.values(PT.matches).filter((x) => !x.score).length, winner: ptg.length ? r3(ptg.filter((x) => x.right).length / ptg.length) : null, matches: ptg.slice(-100).reverse() });
+writeJSON(path.join(OUT, "pretip.json"), { started: PT.started, graded: ptg.length, waiting: Object.values(PT.matches).filter((x) => !x.score).length, winner: ptg.length ? r3(ptg.filter((x) => x.right).length / ptg.length) : null, winnerFirst: ptg.filter((x) => x.first).length ? r3(ptg.filter((x) => x.rightFirst).length / ptg.filter((x) => x.first).length) : null, matches: ptg.slice(-100).reverse() });
 const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > now).map((m) => m.league);
 // ---------------------------------------------------------------- PLAYBOOK and PATCH TRACKER
 // Plain rules from our own Liquipedia games, each with its evidence: the rate, the games behind it and a 95% range
