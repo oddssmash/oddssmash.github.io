@@ -10,9 +10,29 @@ const dec = (p) => (p > 0 ? (1 / p).toFixed(2) : "-");
 const cap = (h) => String(h || "").replace(/\b\w/g, (c) => c.toUpperCase());
 const sid = (t) => String(t).replace(/[^A-Za-z0-9]+/g, "_");
 // archetype switch: when it is off, match predictions are read without the archetype nudge (the model publishes both)
-const archOn = () => { try { return localStorage.getItem("mlbb-arch") !== "off"; } catch { return true; } };
-const noArchOf = (m) => (m && m.noArch && !archOn() ? { ...m, ...m.noArch, archOff: true } : m);
-function setArch(on) { try { localStorage.setItem("mlbb-arch", on ? "on" : "off"); } catch {} S.cache.clear(); route(); }
+// ANALYSIS SWITCHES: which parts go into the predictions. Saved on this device. The model publishes each part of a match's
+// single-game chance, so switching rebuilds the odds here with the same best-of math.
+const OPTS = [
+  ["career", "Career win rate", "Proven in our tests. Used only while a team's rating is still settling."],
+  ["exp", "Big-stage experience", "Not proven. Playoffs, finals and international matches only, about 1.5 points at most."],
+  ["arch", "Archetype matchups", "Not proven. Lane style matchups, ID/PH/MY only, about 1.5 points at most."],
+  ["comfort", "Comfort picks (Draft lab)", "Not proven. About 1 point per comfort pick, 3 at most."],
+];
+const optOn = (k) => { try { return localStorage.getItem(k === "arch" ? "mlbb-arch" : `mlbb-opt-${k}`) !== "off"; } catch { return true; } };
+const archOn = () => optOn("arch");
+function setOpt(k, on) { try { localStorage.setItem(k === "arch" ? "mlbb-arch" : `mlbb-opt-${k}`, on ? "on" : "off"); } catch {} S.cache.clear(); route(); }
+function setArch(on) { setOpt("arch", on); }
+const seriesOf = (p, bo) => { const need = Math.ceil(bo / 2), C = (n, k) => { let r = 1; for (let i = 1; i <= k; i++) r = (r * (n - k + i)) / i; return r; }, sc = {}; let win = 0;
+  for (let l = 0; l < need; l++) { const v = C(need - 1 + l, l) * p ** need * (1 - p) ** l; sc[`${need}-${l}`] = v; win += v; } for (let w = 0; w < need; w++) sc[`${w}-${need}`] = C(need - 1 + w, w) * (1 - p) ** need * p ** w;
+  const exp = Object.entries(sc).reduce((a, [k, v]) => a + v * k.split("-").reduce((x, y) => +x + +y, 0), 0); return { win, sc, exp }; };
+const noArchOf = (m) => { if (!m) return m; if (!m.parts) return m.noArch && !archOn() ? { ...m, ...m.noArch, archOff: true } : m;
+  const P0 = m.parts, on = { career: optOn("career"), exp: optOn("exp"), arch: optOn("arch") }; if (on.career && on.exp && on.arch) return m;
+  const L = P0.base + (on.career ? P0.cw : 0) + (on.exp ? P0.exp : 0) + (on.arch ? P0.arch : 0), pg = 1 / (1 + Math.exp(-L)), s = seriesOf(pg, m.bo || 1), r3x = (x) => Math.round(x * 1000) / 1000;
+  return { ...m, pGame: r3x(pg), pSeries: r3x(s.win), scores: Object.fromEntries(Object.entries(s.sc).map(([k, v]) => [k, r3x(v)])), expMaps: Math.round(s.exp * 10) / 10, archOff: !on.arch, optsOff: Object.keys(on).filter((k) => !on[k]) }; };
+const optsPanel = () => { const offN = OPTS.filter(([k]) => !optOn(k)).length; return `<details class="op-panel"${S.opOpen ? " open" : ""}><summary><span><b>Analysis settings</b><em>${offN ? `${offN} of ${OPTS.length} switched off` : "All parts switched on"}</em></span><span class="op-chev" aria-hidden="true">▾</span></summary>
+    ${OPTS.map(([k, l, d]) => `<label class="ar-tg op-row"><input type="checkbox" data-opt="${k}"${optOn(k) ? " checked" : ""}><span class="ar-sw" aria-hidden="true"></span><span><b>${l}</b><em>${d}</em></span></label>`).join("")}
+    <p class="small muted">Ratings and drafts are always on. Past results stay as we predicted them at the time.</p></details>`; };
+document.addEventListener("change", (e) => { const k = e.target.dataset?.opt; if (k) { S.opOpen = true; setOpt(k, e.target.checked); } });
 const archToggle = () => `<label class="ar-tg"><input type="checkbox" data-arch-tg${archOn() ? " checked" : ""}><span class="ar-sw" aria-hidden="true"></span><span><b>Include archetypes in the analysis</b><em>${archOn() ? "On: lane style matchups add a small capped nudge (not proven)." : "Off: predictions use ratings, draft, career and experience only."}</em></span></label>`;
 document.addEventListener("change", (e) => { if (e.target.matches?.("[data-arch-tg]")) setArch(e.target.checked); });
 async function load(name) { if (!S.cache.has(name)) S.cache.set(name, fetch(`data/${name}`).then((r) => { if (!r.ok) throw new Error(`${name}: ${r.status}`); return r.json(); }).then((j) => (name === "upcoming.json" ? j.map(noArchOf) : name.startsWith("matches/") ? noArchOf(j) : j))); return S.cache.get(name); }
@@ -53,7 +73,7 @@ async function vMatches() {
   const det = Object.fromEntries(await Promise.all([...new Set(shown.flatMap((m) => [m.a, m.b]))].map(async (n) => [n, await load(`teams/${sid(n)}.json`).catch(() => null)])));
   const icon = (d) => `<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="${d}"/></svg>`;
   const tools = [["#/versus", "Versus", "M5 19L19 5M14 5h5v5M5 5l14 14M5 10V5h5"], ["#/m8", "M8 Worlds", "M7 4h10v5a5 5 0 01-10 0zM12 14v4M8 20h8M7 6H4v1a3 3 0 003 3M17 6h3v1a3 3 0 01-3 3"], ["#/results", "Our record", "M4 20V10M10 20V4M16 20v-7M22 20H2"], ["#/picks", "Picks", "M12 3l2.7 5.6 6.1.8-4.5 4.2 1.1 6-5.4-3-5.4 3 1.1-6L3.2 9.4l6.1-.8z"]];
-  app.innerHTML = `<h1>MLBB MATCHES</h1><p class="lead">Series win chance, likely scores, map count and the draft scenarios for every scheduled match. Times are PH time.</p>
+  app.innerHTML = `${optsPanel()}<h1>MLBB MATCHES</h1><p class="lead">Series win chance, likely scores, map count and the draft scenarios for every scheduled match. Times are PH time.</p>
     <div class="tools">${tools.map(([h, t, d]) => `<a class="tool" href="${h}"><span class="tool-ic">${icon(d)}</span>${t}</a>`).join("")}</div>
     <a class="m8b" href="#/m8"><span class="m8b-ic">${icon(tools[1][2])}</span><span style="flex:1"><b>ROAD TO M8</b><span class="small">Wildcard in Bangkok from Dec 17, 2026. Main stage in Türkiye, January 2027.</span></span><span aria-hidden="true">›</span></a>
     ${up.length ? `<div class="filters" role="group" aria-label="League" style="margin-top:16px">${["All", ...lgs, ...(up.some(intl) ? ["International"] : [])].map((x) => `<button class="fbtn" type="button" data-mf="${esc(x)}" aria-pressed="${S.mf === x}">${esc(x)}</button>`).join("")}</div>` : ""}
@@ -240,7 +260,7 @@ async function vSim() {
     const hero = h1.reduce((x, h) => x + sh(D.heroes[h], 4), 0) - h2.reduce((x, h) => x + sh(D.heroes[h], 4), 0);
     let syn = 0, cnt = 0; for (const [hs, sg] of [[h1, 1], [h2, -1]]) for (let i = 0; i < hs.length; i++) for (let j = i + 1; j < hs.length; j++) syn += sg * sh(D.pairs[pk(hs[i], hs[j])], 3);
     for (const a of h1) for (const b of h2) cnt += sh(D.vs[`${a}>${b}`], 3);
-    const cfN = (s) => ROLES.reduce((x, r, i) => x + (st[`h${s}`][i] && comfortBadge(s, i, st[`h${s}`][i]) ? 1 : 0), 0), cfD = cfN(1) - cfN(2), cf = Math.max(-0.12, Math.min(0.12, 0.04 * cfD)); // comfort picks: small capped nudge (not proven)
+    const cfN = (s) => ROLES.reduce((x, r, i) => x + (st[`h${s}`][i] && comfortBadge(s, i, st[`h${s}`][i]) ? 1 : 0), 0), cfD = cfN(1) - cfN(2), cf = optOn("comfort") ? Math.max(-0.12, Math.min(0.12, 0.04 * cfD)) : 0; // comfort picks: small capped nudge (not proven)
     const base = st.a && st.b ? st.a.rating - st.b.rating : 0, edge = D.wd * (hero * D.scale.hero + syn * D.scale.syn + cnt * D.scale.cnt), pSide = (st.fp === 1 ? 1 : -1) * logit(sideRate().rate), p = lg(base + edge + pSide + cf);
     const es = (h1.reduce((a, h) => a + lgShort(h), 0) - h2.reduce((a, h) => a + lgShort(h), 0)) * 0.25, el = (h1.reduce((a, h) => a + lgLong(h), 0) - h2.reduce((a, h) => a + lgLong(h), 0)) * 0.25;
     const at = (min) => { const w = Math.max(0, Math.min(1, (min - 12) / 8)); return lg(logit(p) + es * (1 - w) + el * w); };
