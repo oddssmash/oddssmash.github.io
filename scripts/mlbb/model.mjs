@@ -156,7 +156,7 @@ function replay(P, record = false) {
   const gl = log.filter((x) => x.warm), late = gl.slice(Math.floor(gl.length * 0.7)), lateBrier = late.reduce((a, x) => a + (x.pS - (x.m.score[0] > x.m.score[1] ? 1 : 0)) ** 2, 0) / Math.max(1, late.length);
   return { lateBrier, lateN: late.length, T, REG, D, PLR, SGc, ibrier: inn ? ib / inn : 0, inn, brier: sb / sn, ll: sll / sn, acc: sright / sn, n: sn, gBrier: gb / gn, gBrierDraft: gbD / gn, gn, log };
 }
-const grid = []; for (const k of [0.1, 0.16, 0.24, 0.32]) for (const carry of [0.5, 0.7, 0.85, 1]) for (const kr of [0.04]) for (const cx of (process.env.CX ? [+process.env.CX] : [0.1, 0.2, 0.3, 0.5])) for (const regW of [1]) for (const wd of [0, 0.5, 1, 1.5]) grid.push({ k, carry, kr, regW, wd, cx });
+const grid = []; for (const k of [0.1, 0.16, 0.24, 0.32]) for (const carry of [0.5, 0.7, 0.85, 0.9, 0.95, 1]) for (const kr of [0.04]) for (const cx of (process.env.CX ? [+process.env.CX] : [0.1, 0.2, 0.3, 0.5])) for (const regW of [1]) for (const wd of [0, 0.5, 1, 1.5]) grid.push({ k, carry, kr, regW, wd, cx });
 // SETTINGS FREEZE: the grid search runs once a week (or with RETUNE=1). In between, the saved settings are reused, so a
 // published chance only moves when a game is played, and games after the freeze are graded on settings that never saw them.
 const FROZEN_FILE = path.join(MD, "frozen-params.json"), FZ = readJSON(FROZEN_FILE, null);
