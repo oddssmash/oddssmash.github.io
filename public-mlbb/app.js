@@ -475,13 +475,13 @@ async function vResults() {
 
 async function vPicks() {
   const [{ picks, note }, up] = await Promise.all([load("picks.json"), load("upcoming.json").catch(() => [])]);
-  const now = Date.now(), byM = new Map(); for (const p of picks.filter((x) => Date.parse(x.date) > now - 3600000)) { (byM.get(p.id) || byM.set(p.id, []).get(p.id)).push(p); }
+  const now = Date.now(), byM = new Map(); for (const p of picks) { /* every match still waiting for its result (the same list as Matches), started ones included */ (byM.get(p.id) || byM.set(p.id, []).get(p.id)).push(p); }
   S.pkf ||= "all"; const groups = [...byM.entries()].map(([id, ps]) => ({ id, ps, m: up.find((u) => u.id === id), top: Math.max(...ps.map((p) => p.p)) }));
   const nPick = groups.filter((g) => g.ps.some((p) => !p.noPick)).length, nClose = groups.filter((g) => g.ps.every((p) => p.noPick)).length;
   const shown = groups.filter((g) => S.pkf === "all" || (S.pkf === "pick" ? g.ps.some((p) => !p.noPick) : g.ps.every((p) => p.noPick)));
   const meter = (p) => { const n = p >= 0.8 ? 5 : p >= 0.7 ? 4 : p >= 0.65 ? 3 : p >= 0.6 ? 2 : 1; return `<span class="pk-meter" role="img" aria-label="Strength ${n} of 5">${Array.from({ length: 5 }, (_, i) => `<i class="${i < n ? (p >= 0.7 ? "g" : p >= 0.6 ? "b" : "s") : ""}"></i>`).join("")}</span>`; };
   const card = (g) => { const m = g.m, best = g.ps.filter((p) => !p.noPick).sort((a, b) => b.p - a.p)[0], lean = g.ps.sort((a, b) => b.p - a.p)[0];
-    return `<section class="pk-card"><div class="pk-h"><span>${esc(lean.league)}${m ? ` · ${esc(m.stage)} · BO${m.bo}` : ""}</span><span>${esc(when(lean.date))}</span></div>
+    return `<section class="pk-card"><div class="pk-h"><span>${esc(lean.league)}${m ? ` · ${esc(m.stage)} · BO${m.bo}` : ""}</span><span>${Date.parse(lean.date) < now ? `<b class="pk-live">Started · waiting for result</b>` : esc(when(lean.date))}</span></div>
       ${m ? `<div class="pk-t"><span>${tb(m.a, 40)}<b>${esc(sn(m.a))}</b></span><span class="muted">VS</span><span><b>${esc(sn(m.b))}</b>${tb(m.b, 40)}</span></div>` : `<div class="pk-t"><b>${esc(lean.game)}</b></div>`}
       <div class="pk-box">${best ? `<div class="spread"><span class="pk-tag ${best.p >= 0.7 ? "g" : "b"}">${best.p >= 0.7 ? "STRONG" : "LEAN"} · PICK</span>${meter(best.p)}</div><span>${esc(best.pick)} <b style="color:var(--accent-ink)">${pct(best.p)}</b>.</span>` : `<div class="spread"><span class="pk-tag s">TOO CLOSE · NO PICK</span>${meter(lean.p)}</div><span>We lean <b style="color:var(--accent-ink)">${esc(lean.pick.replace(/ to win the series$/, ""))} ${pct(lean.p)}</b>, which is close to a coin flip. We only call a pick at 60% or more.</span>`}</div>
       <div class="pk-lines"><span class="lbl">OUR LINES (FAIR ODDS)</span>${g.ps.map((p) => `<div><span>${esc(p.pick)}</span><b>${pct(p.p)}</b><b class="o">${dec(p.p)}</b></div>`).join("")}</div>
