@@ -894,13 +894,17 @@ async function vGames() {
   await liveScoreboard();
   startScoreTicker();
   const up = await load("upcoming.json");
+  [S.oddsPub, S.boardPub, S.resPub] = await Promise.all([load("odds.json").catch(() => null), load("board.json").catch(() => null), load("results.json").catch(() => [])]); await loadScore();
   if (!up.length) { app.innerHTML = `<h1>Upcoming games</h1><p class="empty">No games on the schedule in the next week. Check back after the next data refresh.</p>`; return; }
   // Days are Philippine calendar days. The switcher shows one day at a time; favourite teams' games come first within it.
   const groups = new Map();
   for (const g of up) { const k = dayKey(g.date); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(g); }
-  const keys = [...groups.keys()], today = dayKey(new Date().toISOString()), tmr = dayKey(new Date(Date.now() + 864e5).toISOString());
-  if (!groups.has(S.gday) && S.gday !== "all") S.gday = keys[0];
-  const label = (k) => (k === today ? "Today" : k === tmr ? "Tomorrow" : day(groups.get(k)[0].date));
+  const today = dayKey(new Date().toISOString()), tmr = dayKey(new Date(Date.now() + 864e5).toISOString()), yst = dayKey(new Date(Date.now() - 864e5).toISOString());
+  const past = new Map(); for (const r of S.resPub || []) { if (Date.parse(r.date) < Date.now() - 8 * 864e5) continue; const k = dayKey(r.date); if (k >= today) continue; (past.get(k) || past.set(k, []).get(k)).push(r); }
+  const pastKeys = [...past.keys()].sort().slice(-7), keys = [...pastKeys, ...[...groups.keys()].filter((k) => !past.has(k))];
+  for (const k of pastKeys) if (!groups.has(k)) groups.set(k, past.get(k).map((r) => ({ ...r, _past: true })));
+  if (!groups.has(S.gday) && S.gday !== "all") S.gday = keys.find((k) => k >= today) || keys[keys.length - 1];
+  const label = (k) => (k === today ? "Today" : k === tmr ? "Tomorrow" : k === yst ? "Yesterday" : day(groups.get(k)[0].date));
   const ft = favs().t.filter((id) => S.T[id]), fp = favs().p.filter((id) => S.P[id]);
   const favGames = (gs) => favFirst(gs, "t", (g) => (isFav("t", g.home) ? g.home : g.away));
   const draw = () => {
@@ -914,7 +918,7 @@ async function vGames() {
       <p class="small pitch">Built without bookmaker data, and usually within a few points of the market anyway. When we disagree, we show you why.</p>
       ${favRows.length ? `<section class="card favs" aria-labelledby="fav-h"><h2 id="fav-h">${STAR} Your favourites</h2><div class="fav-l2">${favRows.join("")}</div></section>` : ""}
       <div class="filters dayswitch" role="group" aria-label="Choose a day (${PHT})">${keys.map((k) => `<button class="fbtn" type="button" data-day="${esc(k)}" aria-pressed="${S.gday === k}">${esc(label(k))} <span class="cnt">${groups.get(k).length}</span></button>`).join("")}<button class="fbtn" type="button" data-day="all" aria-pressed="${S.gday === "all"}">All days <span class="cnt">${up.length}</span></button></div>
-      ${shown.map((k) => { const gs = favGames(groups.get(k)); return `<h2 class="day"><span>${esc(dayLong(gs[0].date))}</span><span class="cnt">${gs.length} ${gs.length === 1 ? "game" : "games"} · ${PHT}</span></h2>${gs.map((g) => gameCard(g) + labLinks(g)).join("")}`; }).join("")}
+      ${shown.map((k) => { const gs = favGames(groups.get(k)); return `<h2 class="day"><span>${esc(dayLong(gs[0].date))}</span><span class="cnt">${gs.length} ${gs.length === 1 ? "game" : "games"} · ${PHT}</span></h2>${gs.map((g) => (g._past ? pastGameCard(g) : gameCard(g) + labLinks(g))).join("")}`; }).join("")}
       ${!favRows.length ? `<p class="small muted">Tip: tap the star on a team or player page to see their next game here first. Favourites are kept on this device only.</p>` : ""}`;
     app.querySelectorAll("[data-day]").forEach((b) => b.addEventListener("click", () => { S.gday = b.dataset.day; draw(); app.querySelector(`[data-day="${CSS.escape(S.gday)}"]`)?.focus({ preventScroll: true }); }));
   };
@@ -4243,8 +4247,25 @@ function gameCardNew(g) {
     ${liveBadge(lv)}
     <div class="gc-x gc-ess">${confChip(g)}${g.pred.pHomeRaw != null ? `<span class="chip warn">Upset watch: ${esc(T(hFav ? g.home : g.away).abbr)} ${Math.round(Math.max(ph, 1 - ph) * 100)}% (${Math.round((hFav ? g.pred.pHomeRaw : 1 - g.pred.pHomeRaw) * 100)}% before)</span>` : ""}${out.length ? `<span class="gc-out">🚑 Out: ${esc(out.slice(0, 4).join(", "))}${out.length > 4 ? ` +${out.length - 4}` : ""}</span>` : `<span class="muted">No key absences listed</span>`}</div>
     ${top ? `<div class="gc-x">Top scorers: ${top}</div>` : ""}${flag}
+    ${linesBlock(g, L)}
   </a>`;
 }
+// our lines next to the sportsbook main line, our call at that line, and our top picks (lines are only for comparison and grading)
+function linesBlock(g, L) { const o = S.oddsPub?.games?.[g.id], ph = g.pred.pHome, A = T(g.away).abbr, H = T(g.home).abbr, ml = (v) => (v == null ? "-" : (v > 0 ? "+" : "") + v);
+  const pm = g.pred.hs - g.pred.as, pt = g.pred.hs + g.pred.as;
+  const call = o ? [ph >= 0.5 ? `${H} ML` : `${A} ML`, Number.isFinite(o.spreadHome) ? (pm + o.spreadHome > 0 ? `${H} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : `${A} ${-o.spreadHome > 0 ? "+" : ""}${-o.spreadHome}`) : null, Number.isFinite(o.total) ? `${pt > o.total ? "Over" : "Under"} ${o.total}` : null].filter(Boolean) : [];
+  const picks = (S.boardPub?.picks || []).filter((q) => String(q.game) === String(g.id)).sort((a, b) => b.p - a.p).slice(0, 3);
+  return `<div class="gl-t"><div class="gl-r gl-h"><span></span><span>Ours</span><span>Sportsbook</span></div>
+    <div class="gl-r"><span>Moneyline</span><span>${esc(A)} ${ml(fairML(1 - ph))} · ${esc(H)} ${ml(fairML(ph))}</span><span>${o ? `${esc(A)} ${ml(o.mlAway)} · ${esc(H)} ${ml(o.mlHome)}` : "-"}</span></div>
+    <div class="gl-r"><span>Spread</span><span>${esc(T(L.fav).abbr)} ${spreadTxt(L.spread)}</span><span>${o && Number.isFinite(o.spreadHome) ? `${esc(H)} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : "-"}</span></div>
+    <div class="gl-r"><span>Total</span><span>${L.total.toFixed(1)}</span><span>${o && Number.isFinite(o.total) ? o.total : "-"}</span></div></div>
+    ${call.length ? `<div class="gc-x gl-call"><b>Our call at the main line:</b> ${call.map((c) => `<span class="chip">${esc(c)}</span>`).join(" ")}</div>` : ""}
+    ${picks.length ? `<div class="gc-x gl-call"><b>Top picks:</b> ${picks.map((q) => `<span class="chip good">${esc(q.label)} ${pct(q.p)}</span>`).join(" ")}</div>` : ""}`; }
+// a finished game on a past day of the Games tab: final, projection, and what we hit against the main lines
+function pastGameCard(r) { const ph = r.pred.pHome, fav = ph >= 0.5 ? r.home : r.away;
+  return `<a class="card gc" href="#/result/${esc(r.id)}"><div class="gc-h">${teamLogo(r.away, { size: "lg" })}<div class="gc-m"><b>${esc(T(r.away).abbr)} ${r.act.as} @ ${esc(T(r.home).abbr)} ${r.act.hs}</b><span>FINAL${r.act.ot ? " (OT)" : ""}</span></div>${teamLogo(r.home, { size: "lg" })}</div>
+    <div class="gc-x">Projected ${f0(r.pred.as)}-${f0(r.pred.hs)} · ${esc(T(fav).abbr)} ${pct(Math.max(ph, 1 - ph))} <span class="chip ${r.correct ? "good" : "bad"}">${r.correct ? "✓ Winner" : "✗ Winner"}</span></div>
+    ${scoreChips(r.id) || `<div class="gc-x small muted">No sportsbook main line was saved for this game.</div>`}<div class="gc-x small">Tap for every line, prop and pick ›</div></a>`; }
 // What could change the prediction: every line comes from the model or the 10,000 simulations.
 async function flipCard(g, sim, raw) {
   const H = T(g.home).abbr, A = T(g.away).abbr, fav = g.pred.pHome >= 0.5 ? "h" : "a", favT = fav === "h" ? H : A, dogT = fav === "h" ? A : H;

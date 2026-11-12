@@ -1166,3 +1166,8 @@ a.gtab { color: var(--ink-2); }
 .sd-l { display: grid; gap: 6px; } .sd-r { display: grid; grid-template-columns: 74px 1fr; gap: 8px; align-items: baseline; padding: 6px 0; border-bottom: 1px solid var(--line); } .sd-r:last-child { border-bottom: 0; }
 .sd-r > b { font-size: 12px; } .sd-r.hit > b { color: var(--ok, #2e9e5b); } .sd-r.miss > b { color: var(--bad, #d64545); } .sd-r em { display: block; font-style: normal; font-size: 12.5px; color: var(--muted); }
 a.card .ml-cs { margin-top: 8px; }
+
+/* Games tab: our lines vs the sportsbook main line */
+.gl-t { display: grid; gap: 2px; margin: 8px 0 2px; font-size: 12.5px; } .gl-r { display: grid; grid-template-columns: 76px 1fr 1fr; gap: 6px; padding: 3px 0; border-top: 1px solid var(--line); }
+.gl-h { border-top: 0; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; } .gl-r > span:first-child { color: var(--muted); }
+.gl-call .chip { margin: 2px 2px 0 0; }
