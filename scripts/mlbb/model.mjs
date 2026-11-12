@@ -52,7 +52,9 @@ const upcoming = all.filter((m) => !m.done && m.date && Date.parse(m.date) > now
 const ROST = {}; const RD = path.join(MD, "rosters"); if (fs.existsSync(RD)) for (const f of fs.readdirSync(RD)) { const r = readJSON(path.join(RD, f)); ROST[r.page] = r.teams; }
 const seasonOf = (page) => page.split("/").slice(0, -1).join("/");
 const rosterFor = (team, page) => { const R0 = ROST[seasonOf(page)] || {}; const k = Object.keys(R0).find((x) => x.toLowerCase() === team.toLowerCase() || ALIAS[x.toLowerCase()] === team); return (k ? R0[k] : []).filter((x) => !x.sub && x.role); };
-const ranked = Object.fromEntries((readJSON(path.join(MD, "heroes-ranked.json"), { heroes: [] }).heroes || []).map((h) => [h.slug.replace(/-/g, " ").replace(/ and /g, " & "), h]));
+// ranked (all players) hero rates from mlbb.io, matched by name with punctuation and spaces removed
+const RKM = new Map(Object.values(readJSON(path.join(MD, "ranked-counters.json"), { heroes: {} }).heroes).filter((v) => v.wr != null).map((v) => [String(v.name).toLowerCase().replace(/[^a-z]/g, ""), { winRate: v.wr, banRate: v.ban, pickRate: null, tier: v.tier, winRateDelta: null }]));
+const rankedOf = (id) => RKM.get(String(id).toLowerCase().replace(/[^a-z]/g, "")) || null;
 console.log(`MLBB: ${done.length} finished series (${done.reduce((a, m) => a + m.games.length, 0)} games), ${upcoming.length} upcoming`);
 
 // series math: chance to win a best-of-n from a single-game chance
@@ -167,11 +169,12 @@ for (const m of done) for (const g of m.games) { for (const [hs, bs, w] of [[g.h
 const recent = new Map(); for (const m of done.filter((m) => Date.parse(m.date) > now - 150 * DAY)) for (const g of m.games) { for (const [hs, bs, w] of [[g.h1, g.b1, g.w === 1], [g.h2, g.b2, g.w === 2]]) { hs.forEach((x) => { const v = recent.get(x) || { n: 0, w: 0, b: 0 }; v.n++; if (w) v.w++; recent.set(x, v); }); bs.forEach((x) => { const v = recent.get(x) || { n: 0, w: 0, b: 0 }; v.b++; recent.set(x, v); }); } }
 const recentGames = done.filter((m) => Date.parse(m.date) > now - 150 * DAY).reduce((a, m) => a + m.games.length, 0) || 1;
 for (const [name, v] of raw) {
+  if (!name || /^(none|-|tbd)$/i.test(name)) continue; // blank pick slots on a few match pages
   const d = D.H.get(name) || { n: 0, w: 0, b: 0 }, rc = recent.get(name) || { n: 0, w: 0, b: 0 }, str = logit((d.w + 4) / (d.n + 8));
   const solo = (h) => { const s = D.H.get(h) || { n: 0, w: 0 }; return (s.w + 4) / (s.n + 8); };
   const syn = [...D.PAIR].filter(([k, x]) => k.split("|").includes(name) && x.n >= 3).map(([k, x]) => { const o = k.split("|").find((y) => y !== name), wr = (x.w + 3) / (x.n + 6); return { with: o, n: r1(x.n), wr: r3(wr), lift: r3(wr - (solo(name) + solo(o)) / 2) }; }).sort((a, b) => b.lift - a.lift);
   const cnt = [...D.VS].filter(([k, x]) => k.startsWith(name + ">") && x.n >= 3).map(([k, x]) => ({ vs: k.split(">")[1], n: r1(x.n), wr: r3((x.w + 3) / (x.n + 6)) })).sort((a, b) => b.wr - a.wr);
-  const rk = ranked[name];
+  const rk = rankedOf(name);
   HERO.push({ id: name, games: v.n, wins: v.w, wr: r3(v.w / Math.max(1, v.n)), bans: v.b, presence: r3((v.n + v.b) / totalGames), recent: { picks: rc.n, wr: rc.n ? r3(rc.w / rc.n) : null, bans: rc.b, presence: r3((rc.n + rc.b) / recentGames) }, strength: r3(str),
     roles: Object.entries(v.roles).sort((a, b) => b[1] - a[1]).map(([r, n]) => ({ r, n, w: v.rw?.[r] || 0 })), combos: syn.slice(0, 6), combosBad: syn.slice(-3).reverse(), counters: cnt.slice(0, 6), counteredBy: cnt.slice(-6).reverse(), ranked: rk ? { wr: rk.winRate, pick: rk.pickRate, ban: rk.banRate, tier: rk.tier } : null });
 }
@@ -216,11 +219,11 @@ for (const h of HERO) {
 }
 const TR = Object.fromEntries(HERO.map((h) => [h.id, h.traits]));
 // flex picks: share of pro games in each lane; ratings 0-10 (rank among heroes) from our traits (Teamfight, Pick-off, Objectives, Early-mid,
-// Late, Damage, Survival, Push, Crowd control); ranked trend from MLBBHub's week-on-week win-rate change.
+// Late, Damage, Survival, Push, Crowd control); ranked trend (none at present: mlbb.io gives no week-on-week change).
 for (const h of HERO) { const tot = h.roles.reduce((a, r) => a + r.n, 0) || 1; h.laneSplit = h.roles.map((r) => ({ r: r.r, share: r3(r.n / tot) })); h.flex = h.laneSplit.length > 1 && h.laneSplit[1].share >= 0.25;
   const t = h.traits, sc = (x) => x;
   h.ratings = { Teamfight: sc((t.cc + t.tank * 0.6 + t.dmg * 0.4) / 1.4), "Pick-off": sc((t.burst + t.engage) / 1.3), Objectives: sc((t.push + t.dmg * 0.5 + t.tank * 0.3) / 1.0), "Early-mid": sc(0.5 + t.early - t.late * 0.5), Late: sc(0.4 + t.late - t.early * 0.4 + (h.lp?.role === "Marksman" ? 0.2 : 0)), Damage: sc(t.dmg / 1.1), Survival: sc((t.tank + t.sustain * 0.6) / 1.1), Push: sc(t.push / 0.8), "Crowd control": sc(t.cc / 1.1) };
-  if (h.ranked) h.rankedTrend = ranked[h.id]?.winRateDelta ?? null; }
+  if (h.ranked) h.rankedTrend = rankedOf(h.id)?.winRateDelta ?? null; }
 // ranked (all players) counters from mlbb.io, a background layer kept apart from the pro numbers
 { const RC = readJSON(path.join(MD, "ranked-counters.json"), { heroes: {} }), key = (x) => String(x).toLowerCase().replace(/[^a-z]/g, "");
   const ids = new Map(HERO.map((h) => [key(h.id), h.id])), byKey = new Map(Object.values(RC.heroes).map((v) => [key(v.name), v]));
@@ -520,5 +523,5 @@ const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > n
     note: "Before = 90 days before the patch date; after = since. Heroes need 20+ pro games on each side." });
 }
 writeJSON(path.join(OUT, "meta.json"), { momentum: momFit, patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release, changes: lastPatch.changes } : null, patches: LP.patches.slice(-8).reverse().map((p) => ({ patch: p.patch, release: p.release, changes: p.changes.length })), built: new Date().toISOString(), series: done.length, games: totalGames, teams: teamsOut.length, players: playersOut.length, heroes: HERO.length, upcoming: upOut.length, leagues: [...new Set(EVENTS.map((e) => e.league))], ratingScale: "Elo-style: 1500 average, 100 points = about 64% in a single game",
-  roles: ROLES, source: "Liquipedia (CC-BY-SA) for matches, drafts and rosters; MLBBHub for ranked-game hero rates. No betting data." });
+  roles: ROLES, source: "Liquipedia (CC-BY-SA) for matches, drafts and rosters; mlbb.io for ranked-game hero rates and counters. No betting data." });
 console.log(`wrote ${upOut.length} upcoming, ${teamsOut.length} teams, ${playersOut.length} players, ${HERO.length} heroes, ${picks.length} picks`);

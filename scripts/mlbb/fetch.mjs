@@ -1,7 +1,7 @@
 // MLBB fetcher. Source: Liquipedia's MediaWiki API (wikitext of each tournament stage page and team page), used
 // within Liquipedia's API terms: a descriptive user agent, gzip, one request every 2 seconds, and only pages whose
 // revision changed are downloaded again. Content is CC-BY-SA; the site credits Liquipedia on every MLBB page.
-// Also reads MLBBHub's public hero stats (ranked-game win/pick/ban rates) for the meta view.
+// Ranked-game hero rates come from mlbb.io (scripts/mlbb/ranked.mjs), not from here.
 // Writes data/mlbb/pages/<page>.json (parsed matches), data/mlbb/teams/<team>.json (roster), data/mlbb/heroes-ranked.json.
 // No betting data.
 import path from "node:path";
@@ -217,4 +217,6 @@ for (const [league, url] of [["MPL PH", "https://ph-mpl.com/data"], ["MPL ID", "
   } catch (e) { console.log(`official ${league} failed: ${e.message}`); }
 }
 // 5) ranked-game hero stats (meta reference; not pro play)
-try { const r = await fetch("https://mlbbhub.com/api/stats", { headers: UA }); if (r.ok) { const j = await r.json(); writeJSON(path.join(MD, "heroes-ranked.json"), { fetched: new Date().toISOString(), source: "MLBBHub public stats (ranked games)", heroes: j.heroes || [] }); console.log(`ranked hero stats: ${(j.heroes || []).length}`); } } catch { /* optional */ }
+// MLBBHub is no longer read: its robots.txt disallows /api/ and its terms forbid automated extraction without written
+// permission. Ranked hero rates now come from mlbb.io (scripts/mlbb/ranked.mjs).
+if (false) try { const r = await fetch("https://mlbbhub.com/api/stats", { headers: UA }); if (r.ok) { const j = await r.json(); writeJSON(path.join(MD, "heroes-ranked.json"), { fetched: new Date().toISOString(), source: "MLBBHub public stats (ranked games)", heroes: j.heroes || [] }); console.log(`ranked hero stats: ${(j.heroes || []).length}`); } } catch { /* optional */ }
