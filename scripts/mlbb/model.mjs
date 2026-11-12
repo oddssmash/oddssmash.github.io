@@ -279,7 +279,7 @@ if (process.env.R7_JSON) {
     const ft = fit(joined, (j) => (j.p1role === role ? 1 : 0)); { const ft2 = fit(joined, (j) => (j.p1role === role ? 1 : 0)), ci = wil(k, rs.length).map(Number); ORD.roles[role] = { n: rs.length, k, rate: Math.round(k / rs.length * 1000) / 1000, lo: ci[0] / 100, hi: ci[1] / 100, expected: ex.length ? Math.round(ex.reduce((a, j) => a + lg(j.ddFP), 0) / ex.length * 1000) / 1000 : null, b: ft2.b, lr: ft2.lr }; }
     console.log(`  first pick (P1) ${role}: ${rs.length} games, first-pick side wins ${(k / rs.length * 100).toFixed(1)}% (range ${wil(k, rs.length).join("-")}); ratings expected ${expAvg}%; after ratings logit ${ft.b} LR ${ft.lr}`); }
   for (const role of ["Roam", "Mid", "Jungle", "Gold", "EXP"]) { const rs = joined.concat(r7only).filter((x) => x.p10role === role), k = rs.filter((x) => !(x.fpWonOurs ?? x.fpWon)).length; if (rs.length > 20) console.log(`  last pick (P10) ${role}: ${rs.length} games, second-pick side wins ${(k / rs.length * 100).toFixed(1)}% (range ${wil(k, rs.length).join("-")})`); }
-  writeJSON(path.join(MD, "draft-order.json"), ORD);
+  writeJSON(path.join(path.dirname(path.resolve(process.env.R7_JSON)), "draft-order-summary.json"), ORD); // private: kept next to the R7 file, never in the repo
   // series claims on our full data (every source agrees on results): deciding games and the game after a loss
   let dk = 0, dn = 0, ddSum = 0; for (const g of GDD) { const [dd, y, , , , , score, n, bo] = g; if (!bo || bo < 3) continue; const need = Math.ceil(bo / 2); if (n === 2 * need - 1) { dn++; if (y) dk++; ddSum += lg(dd); } }
   console.log(`  deciding games: ${dn}, side A wins ${(dk / dn * 100).toFixed(1)}%, ratings expected ${(ddSum / dn * 100).toFixed(1)}%`);
@@ -757,12 +757,7 @@ const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > n
   const ltE = ev(lt, ltn), sameE = ev(same, sn), momPts = Math.round((lg(momFit.b) - 0.5) * 1000) / 10;
   rules.push({ id: "series", group: "Series", title: "The last winner usually wins again, mostly because it is the better team", stats: [{ v: ltE.rate, l: `loser takes first pick next game (${ltE.n})`, ...ltE }, { v: sameE.rate, l: `last winner wins the next game (${sameE.n})`, ...sameE }, { v: null, text: `+${momPts} pts`, l: "extra edge after team strength", tag: momFit.lrStat >= 3.84 ? "solid" : "lead" }],
     tag: "solid", use: "in a live series, update on the score but do not add much extra for momentum: the ratings already explain most of it." });
-  // draft order (first-pick lane), from the saved summary
-  const ORDS = readJSON(path.join(MD, "draft-order.json"), null);
-  if (ORDS?.roles?.Roam && ORDS.roles.Mid) { const R = ORDS.roles.Roam, M = ORDS.roles.Mid, sig = (x) => x.lr >= 3.84;
-    rules.push({ id: "order", group: "Draft order", title: "Open the draft with a roam, not a mid laner", tag: sig(R) && sig(M) ? "lead" : "lead",
-      stats: [{ v: R.rate, l: `roam first (${R.n} games; ratings expected ${Math.round(R.expected * 100)}%)`, lo: R.lo, hi: R.hi, tag: sig(R) ? "solid" : "lead" }, { v: M.rate, l: `mid first (${M.n} games; ratings expected ${Math.round(M.expected * 100)}%)`, lo: M.lo, hi: M.hi, tag: sig(M) ? "solid" : "lead" }, ...(ORDS.roles.Jungle ? [{ v: ORDS.roles.Jungle.rate, l: `jungle first (${ORDS.roles.Jungle.n} games)`, lo: ORDS.roles.Jungle.lo, hi: ORDS.roles.Jungle.hi, tag: "lead" }] : [])],
-      use: "with the first pick, lock the roam (or a contested roam/EXP flex) and keep the mid hidden; both effects survive team ratings but only just, so treat it as a lead.", detail: { order: ORDS } }); }
+  // (no draft-order rule: pick order is not in our public data; the private R7 study stays private)
   // heroes: popular is not strong
   const rec = HERO.filter((h) => h.recent.picks >= 40 && h.recent.wr != null).map((h) => { const w = Math.round(h.recent.wr * h.recent.picks); return { h: h.id, pres: h.recent.presence, ...ev(w, h.recent.picks) }; });
   const popular = [...rec].sort((a, b) => b.pres - a.pres).slice(0, 3), weak = [...rec].sort((a, b) => a.rate - b.rate).slice(0, 3), strong = [...rec].sort((a, b) => b.rate - a.rate).slice(0, 3);

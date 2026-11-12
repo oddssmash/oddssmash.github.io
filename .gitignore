@@ -12,3 +12,4 @@ site/
 public-fiba/data/
 public-mlbb/data/
 live/
+data/mlbb/draft-order.json
