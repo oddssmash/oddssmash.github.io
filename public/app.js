@@ -4841,12 +4841,48 @@ function liveExtras(g, L, c) {
   });
   return { scenTrack, quarters, halves, totals: { projTot, preLine, pOverPre: overAt(preLine), liveLine, alts: totAlts, sdTot }, teamTot: { h: tH, a: tA }, spread: { preFav, preLineS, coverPre, liveFav, liveS, alts: spreadAlts }, pOT, bands, reads };
 }
+// Live Monte Carlo: 10,000 simulated finishes from the current score and clock. Scoring for the rest of the game uses the
+// live model's rates (pre-game projection blended with tonight's pace), a shared pace swing per run, normal noise per
+// quarter and overtime when a run ends level. Outputs this quarter, the half, the total, the handicap and the winner.
+function liveMC(g, L, M) {
+  if (!L || L.state !== "in") return "";
+  const per = Math.max(1, L.period || 1), clk = clockS(L.clock) / 60, len = (p) => (p <= 4 ? 12 : 5);
+  const remMin = Math.max(0.01, (per <= 4 ? (4 - per) * 12 : 0) + clk), rH = Math.max(0, (M.projH - L.hs) / remMin), rA = Math.max(0, (M.projA - L.as) / remMin);
+  const lsH = L.ls?.h || [], lsA = L.ls?.a || [], qH = lsH[per - 1] ?? null, qA = lsA[per - 1] ?? null;
+  const firstHalf = per <= 2, halfDone = (s, arr) => arr.slice(s === 1 ? 0 : 2, s === 1 ? Math.min(per - 1, 2) : per - 1).reduce((a, x) => a + (x || 0), 0);
+  let seed = (Number(g.id) || 7) ^ (L.hs * 131 + L.as * 17 + Math.round(clk * 60) + per * 7919); const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296);
+  const nrm = () => { let u = 0, v = 0; while (!u) u = rnd(); v = rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); };
+  const N = 10000, out = { qH: [], qA: [], hH: [], hA: [], tot: [], mar: [], homeWin: 0, ot: 0 };
+  for (let i = 0; i < N; i++) {
+    const pace = 1 + nrm() * 0.06 * Math.sqrt(remMin / 48); let h = L.hs, a = L.as, qh = 0, qa = 0, hh = 0, ha = 0;
+    const seg = (mins, p) => { const eh = rH * mins * pace, ea = rA * mins * pace, sdv = 1.75 * Math.sqrt(mins); const dh = Math.max(0, Math.round(eh + nrm() * sdv)), da = Math.max(0, Math.round(ea + nrm() * sdv)); return [dh, da]; };
+    // rest of the current period
+    let [dh, da] = seg(clk, per); h += dh; a += da; qh = dh; qa = da; if ((firstHalf && per <= 2) || (!firstHalf && per <= 4)) { hh += dh; ha += da; }
+    for (let p = per + 1; p <= 4; p++) { [dh, da] = seg(12, p); h += dh; a += da; if ((firstHalf && p <= 2) || (!firstHalf && p >= 3)) { hh += dh; ha += da; } }
+    let guard = 0; while (h === a && guard++ < 4) { out.ot++; [dh, da] = seg(5, 5); h += dh; a += da; if (h === a) h += rnd() < M.pHome ? 1 : 0, a += h === a ? 1 : 0; }
+    out.qH.push((qH ?? 0) + qh); out.qA.push((qA ?? 0) + qa); out.hH.push(halfDone(firstHalf ? 1 : 2, lsH) + hh); out.hA.push(halfDone(firstHalf ? 1 : 2, lsA) + ha);
+    out.tot.push(h + a); out.mar.push(h - a); if (h > a) out.homeWin++;
+  }
+  const med = (arr) => { const s = [...arr].sort((x, y) => x - y); return s[Math.floor(s.length / 2)]; }, q = (arr, f) => { const s = [...arr].sort((x, y) => x - y); return s[Math.floor(s.length * f)]; };
+  const pOver = (arr, line) => arr.filter((x) => x > line).length / arr.length, pWin = (A, B) => A.filter((x, i) => x > B[i]).length / A.length;
+  const H = T(g.home).abbr, A = T(g.away).abbr, ph = out.homeWin / N;
+  const totMed = med(out.tot), lines = [-6, -3, 0, 3, 6].map((d) => Math.round(totMed + d) + 0.5), marMed = med(out.mar), hcp = [-4, -2, 0, 2, 4].map((d) => Math.round(Math.abs(marMed) + d) - 0.5).filter((x) => x > 0), fav = marMed >= 0 ? "home" : "away";
+  const block = (title, aPts, hPts, extra = "") => `<div class="mc-blk"><span class="lbl">${title}</span><div class="mc-sc"><span>${esc(A)} <b>${f0(med(aPts))}</b></span><span class="muted">–</span><span><b>${f0(med(hPts))}</b> ${esc(H)}</span></div><div class="small">${esc(H)} wins it <b>${pct(pWin(hPts, aPts))}</b> · ${esc(A)} <b>${pct(pWin(aPts, hPts))}</b> · total ${f0(med(aPts.map((x, i) => x + hPts[i])))}</div>${extra}</div>`;
+  const qTitle = per <= 4 ? `Q${per} (rest of the quarter)` : `Overtime ${per - 4}`;
+  return `<section class="mc-neon" aria-label="Live Monte Carlo simulation"><div class="mc-head"><b>LIVE SIMULATION</b><span class="small">10,000 finishes from ${esc(A)} ${L.as} – ${L.hs} ${esc(H)}, ${esc(L.detail)}</span></div>
+    <div class="mc-win"><div><span class="lbl">WINNER</span><div class="spread"><b class="num">${esc(A)} ${pct(1 - ph)}</b><b class="num">${pct(ph)} ${esc(H)}</b></div><div class="mc-bar"><span style="width:${((1 - ph) * 100).toFixed(1)}%"></span><span style="width:${(ph * 100).toFixed(1)}%"></span></div>${out.ot ? `<span class="small muted">Overtime in ${pct(out.ot / N)} of runs</span>` : ""}</div></div>
+    <div class="mc-grid">${qH != null ? block(qTitle, out.qA, out.qH) : ""}${per <= 4 ? block(firstHalf ? "First half" : "Second half", out.hA, out.hH) : ""}
+      <div class="mc-blk"><span class="lbl">TOTAL POINTS</span><div class="mc-sc"><b class="num">${f0(totMed)}</b><span class="small muted">80% of runs: ${f0(q(out.tot, 0.1))}–${f0(q(out.tot, 0.9))}</span></div><table class="ft mc-t"><tbody>${lines.map((x) => `<tr><td>Over ${x}</td><td class="n"><b>${pct(pOver(out.tot, x))}</b></td><td>Under</td><td class="n">${pct(1 - pOver(out.tot, x))}</td></tr>`).join("")}</tbody></table></div>
+      <div class="mc-blk"><span class="lbl">HANDICAP</span><div class="mc-sc"><b class="num">${esc(fav === "home" ? H : A)} by ${f0(Math.abs(marMed))}</b><span class="small muted">median final margin</span></div><table class="ft mc-t"><tbody>${hcp.map((x) => { const p = fav === "home" ? pOver(out.mar, x) : pOver(out.mar.map((m) => -m), x); return `<tr><td>${esc(fav === "home" ? H : A)} -${x}</td><td class="n"><b>${pct(p)}</b></td><td>${esc(fav === "home" ? A : H)} +${x}</td><td class="n">${pct(1 - p)}</td></tr>`; }).join("")}</tbody></table></div></div>
+    <p class="small muted">Statistical simulation from the live score, the clock and our in-game scoring rates. Not betting advice; no sportsbook data is used.</p></section>`;
+}
 function liveEngineCard(g, L, M) {
   const home = g.home, away = g.away, ph = M.pHome;
   const spread = Math.round(Math.abs(M.margin) - 0.5) + 0.5, favLive = M.margin >= 0 ? home : away;
   const rows = M.players.filter((p) => p.restMin > 0 || p.cur.min > 0).sort((a, b) => b.live.pts - a.live.pts).slice(0, 10);
   const liveTag = L.src === "live" ? `<span class="lv-dot" aria-hidden="true"></span><b>LIVE</b>` : `<b>Snapshot</b>`;
   return `<div class="card live-card" data-tab-of="lv" id="live-engine">
+    ${liveMC(g, L, M)}
     <div class="lv-h">${liveTag}<h2 style="margin:0">In-game prediction</h2><span class="small muted">${esc(L.detail)} · ${L.src === "live" ? `live · updates every 5 s · ${esc(new Date(L.fetched).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit", second: "2-digit" }))}` : `from the last refresh, ${esc(ago2(L.fetched))} (live updates need the public site)`}</span></div>
     <div class="lv-score"><div><small>${esc(T(away).abbr)}</small><strong>${esc(L.as)}</strong></div><div class="lv-mid">${Math.round((1 - M.rem) * 48)} of 48 min</div><div class="r"><small>${esc(T(home).abbr)}</small><strong>${esc(L.hs)}</strong></div></div>
     ${M.chg ? `<div class="small lv-chg">${M.chg}</div>` : `<div class="small muted lv-chg">Watching for the next score change…</div>`}

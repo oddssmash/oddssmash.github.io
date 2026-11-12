@@ -1139,3 +1139,15 @@ a.gtab { color: var(--ink-2); }
 .pl-r.ok .pl-t b { background: rgba(12, 163, 12, .16); color: var(--good-ink); } .pl-r.no .pl-t b { background: rgba(208, 59, 59, .16); color: var(--crit-ink); } .pl-r.pace .pl-t b { background: var(--accent-wash); color: var(--accent-ink); } .pl-r.behind .pl-t b { background: rgba(250, 178, 25, .16); color: var(--warn); }
 .pl-m { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .pl-m .t1 { font-weight: 600; } .pl-m .t2 { font-size: 12px; color: var(--muted); }
 .big-n { font-size: 28px; font-weight: 700; margin: 4px 0 10px; } details.card > summary { cursor: pointer; min-height: 32px; }
+
+/* Live Monte Carlo: neon-highlighted panel */
+.mc-neon { margin: 0 0 12px; padding: 12px; border-radius: 16px; border: 1px solid #1fb6ff; background: rgba(31, 182, 255, .06); box-shadow: 0 0 0 1px rgba(31, 182, 255, .35), 0 0 18px rgba(31, 182, 255, .28), inset 0 0 14px rgba(31, 182, 255, .08); }
+.mc-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 10px; } .mc-head b { color: #1fb6ff; letter-spacing: .12em; text-shadow: 0 0 8px rgba(31, 182, 255, .7); }
+.mc-neon .lbl { font-size: 10px; font-weight: 700; letter-spacing: .1em; color: #7fd5ff; }
+.mc-neon .num { font-size: 22px; font-weight: 700; color: #e9f8ff; text-shadow: 0 0 6px rgba(31, 182, 255, .55); }
+.mc-win { margin-bottom: 10px; } .mc-neon .mc-bar { display: flex; height: 8px; gap: 2px; margin: 6px 0; } .mc-neon .mc-bar span:first-child { background: #ff6b5e; } .mc-neon .mc-bar span:last-child { background: #1fb6ff; box-shadow: 0 0 8px rgba(31, 182, 255, .6); }
+.mc-grid { display: grid; gap: 8px; } @media (min-width: 760px) { .mc-grid { grid-template-columns: 1fr 1fr; } }
+.mc-blk { padding: 10px; border-radius: 12px; background: rgba(0, 0, 0, .22); border: 1px solid rgba(31, 182, 255, .3); display: flex; flex-direction: column; gap: 6px; }
+.mc-sc { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; } .mc-sc b { font-size: 20px; color: #e9f8ff; }
+.mc-t td { padding: 4px; font-size: 12px; } .mc-t b { color: #7fd5ff; }
+:root[data-theme="light"] .mc-neon { background: #eef9ff; } :root[data-theme="light"] .mc-neon .num, :root[data-theme="light"] .mc-sc b { color: #04324a; text-shadow: none; } :root[data-theme="light"] .mc-blk { background: #fff; }

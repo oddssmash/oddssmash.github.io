@@ -110,9 +110,11 @@ function parseCards(html) {
 const seasonPages = [...new Set(EVENTS.map((e) => e.page.split("/").slice(0, -1).join("/")))];
 const srev = {}; { const j = await api({ action: "query", prop: "revisions", rvprop: "ids", titles: seasonPages.join("|") }); for (const pg of Object.values(j?.query?.pages || {})) if (pg.revisions) srev[pg.title] = pg.revisions[0].revid; }
 let lastParse = 0, rosterPages = 0;
+const MAX_ROSTER = +(process.env.MLBB_ROSTER_MAX || 8); // each page render waits 30 s (Liquipedia limit); spread a full refresh over runs
 for (const sp of seasonPages) {
   const f = path.join(RD, `${safe(sp)}.json`), old = readJSON(f);
   if (!srev[sp] || (old && old.staff && old.revid === srev[sp] && Date.now() - Date.parse(old.fetched) < 7 * 86400000)) continue;
+  if (rosterPages >= MAX_ROSTER) { console.log(`rosters: ${sp} left for a later run`); continue; }
   const wait = lastParse + 31000 - Date.now(); if (wait > 0) await sleep(wait); lastParse = Date.now();
   const j = await api({ action: "parse", page: sp, prop: "text" }); const html = j?.parse?.text?.["*"]; if (!html) continue;
   for (const k of Object.keys(staffOf)) delete staffOf[k]; const teamsR = parseCards(html); writeJSON(f, { page: sp, revid: srev[sp], fetched: new Date().toISOString(), teams: teamsR, staff: { ...staffOf } }); rosterPages++;
