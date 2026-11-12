@@ -18,6 +18,8 @@ export const EVENTS = [
   ...league("MLBB China Masters", "MLBB China Masters", "CN", S(2, 3)),
   ...[{ page: "MLBB Japan League/2024/Mainstage", league: "MLBB Japan League", season: "2024", stage: "Mainstage", region: "JP", kind: "league" }],
   ...league("MLBB Continental Championships", "MCC", "CIS", S(6, 7, 8)),
+  ...league("BetBoom Rise of Legends", "BetBoom RoL", "CIS", S(9, 10, 11)), // the other CIS league; shares MCC's region so their teams' ratings link
+  { page: "BetBoom Rise of Legends/Season 10/Regular Season/1st Division", league: "BetBoom RoL", season: "S10", stage: "Regular Season", region: "CIS", kind: "league" },
   ...league("MLBB Super League/Thailand", "MSL TH", "TH", S(1, 2)),
   ...["Group Stage", "Knockout Stage"].map((st) => ({ page: `MCT/2026/East Asia/Split 2/${st}`, league: "MCT EA 2026", season: "2026", stage: st, region: "EA", kind: "intl" })),
   ...["Swiss Stage", "Playoffs"].flatMap((st) => ["Split 1", "Split 2"].map((sp) => ({ page: `MCT/2026/Americas/${sp}/${st}`, league: "MCT AMER 2026", season: sp, stage: st, region: "AMER", kind: "intl" }))),

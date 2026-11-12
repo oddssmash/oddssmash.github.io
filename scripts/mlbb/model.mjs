@@ -95,6 +95,7 @@ function makeDraft() {
 }
 
 // ---------------------------------------------------------------- replay (team ratings + draft check)
+const MOM = []; // [team-rating logit before the game, result, +1 if side A won the previous game in the series else -1]
 function replay(P, record = false) {
   const T = new Map(), REG = {}, D = makeDraft(); // region offsets, created as regions appear
   const team = (n, region) => { if (!T.has(n)) T.set(n, { name: n, r: 0, n: 0, season: null, region, w: 0, l: 0, gw: 0, gl: 0 }); return T.get(n); };
@@ -109,9 +110,11 @@ function replay(P, record = false) {
     if (warm) { sb += (s.win - won) ** 2; sll += -Math.log(Math.max(1e-6, won ? s.win : 1 - s.win)); sn++; if ((s.win >= 0.5) === !!won) sright++; }
     if (record) log.push({ m, A: A.name, B: B.name, pg, pS: s.win, warm, nA: A.n, nB: B.n });
     // games: grade single games (team-only and with the draft layer), then learn
+    let prevW = 0;
     for (const g of m.games) {
       const y = g.w === 1 ? 1 : 0, dd = (A.r + reg(A) - (B.r + reg(B))) * (cross ? P.cx : 1), p0 = lg(dd), e = D.edge(g.h1, g.h2), p1 = lg(dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04));
       if (warm && D.games > 200) { gb += (p0 - y) ** 2; gbD += (p1 - y) ** 2; gn++; }
+      if (record && warm && prevW) MOM.push([dd, y, prevW]); prevW = y ? 1 : -1;
       const k = P.k * (A.n < 6 || B.n < 6 ? 1.5 : 1), err = y - p0;
       A.r += k * err; B.r -= k * err; if (m.kind === "intl" && A.region !== B.region && A.region !== "INTL" && B.region !== "INTL") { REG[A.region] = (REG[A.region] || 0) + P.kr * err; REG[B.region] = (REG[B.region] || 0) - P.kr * err; }
       if (y) { A.gw++; B.gl++; } else { B.gw++; A.gl++; }
@@ -124,6 +127,12 @@ function replay(P, record = false) {
 const grid = []; for (const k of [0.1, 0.16, 0.24, 0.32]) for (const carry of [0.5, 0.7, 0.85, 1]) for (const kr of [0.04]) for (const cx of (process.env.CX ? [+process.env.CX] : [0.1, 0.2, 0.3, 0.5])) for (const regW of [1]) for (const wd of [0, 0.5, 1, 1.5]) grid.push({ k, carry, kr, regW, wd, cx });
 let best = null; for (const P of grid) { const r = replay(P); const score = r.brier + 0.5 * r.gBrierDraft + 0.5 * r.ibrier; if (!best || score < best.score) best = { P, r, score }; }
 const P = best.P, R = replay(P, true);
+// MOMENTUM: does the winner of the previous game in a series win the next one more often than the ratings (already
+// updated after that game) expect? Fitted as one logit shift by maximum likelihood over every later game in a series.
+const momFit = (() => { let best = { b: 0, ll: -Infinity }; for (let b = -0.6; b <= 0.6001; b += 0.02) { let ll = 0; for (const [d, y, s] of MOM) { const p = lg(d + b * s); ll += Math.log(y ? p : 1 - p); } if (ll > best.ll) best = { b: Math.round(b * 100) / 100, ll }; }
+  let ll0 = 0; for (const [d, y] of MOM) { const p = lg(d); ll0 += Math.log(y ? p : 1 - p); } const same = MOM.filter(([, y, s]) => (y ? 1 : -1) === s).length;
+  return { b: best.b, n: MOM.length, sameRate: Math.round((same / MOM.length) * 1000) / 1000, lrStat: Math.round(2 * (best.ll - ll0) * 10) / 10 }; })();
+console.log("momentum", JSON.stringify(momFit));
 console.log("learned", JSON.stringify(P), `series Brier ${r3(R.brier)} (cross-region ${r3(R.ibrier)} on ${R.inn}) winner ${(R.acc * 100).toFixed(1)}% (${R.n}); games Brier team-only ${r3(R.gBrier)} with draft ${r3(R.gBrierDraft)} (${R.gn})`, "regions", JSON.stringify(Object.fromEntries(Object.entries(R.REG).map(([k, v]) => [k, r3(v)]))));
 
 // ---------------------------------------------------------------- heroes, players, teams (from all history)
@@ -188,6 +197,10 @@ for (const h of HERO) { const tot = h.roles.reduce((a, r) => a + r.n, 0) || 1; h
   const t = h.traits, sc = (x) => x;
   h.ratings = { Teamfight: sc((t.cc + t.tank * 0.6 + t.dmg * 0.4) / 1.4), "Pick-off": sc((t.burst + t.engage) / 1.3), Objectives: sc((t.push + t.dmg * 0.5 + t.tank * 0.3) / 1.0), "Early-mid": sc(0.5 + t.early - t.late * 0.5), Late: sc(0.4 + t.late - t.early * 0.4 + (h.lp?.role === "Marksman" ? 0.2 : 0)), Damage: sc(t.dmg / 1.1), Survival: sc((t.tank + t.sustain * 0.6) / 1.1), Push: sc(t.push / 0.8), "Crowd control": sc(t.cc / 1.1) };
   if (h.ranked) h.rankedTrend = ranked[h.id]?.winRateDelta ?? null; }
+// ranked (all players) counters from mlbb.io, a background layer kept apart from the pro numbers
+{ const RC = readJSON(path.join(MD, "ranked-counters.json"), { heroes: {} }), key = (x) => String(x).toLowerCase().replace(/[^a-z]/g, "");
+  const ids = new Map(HERO.map((h) => [key(h.id), h.id])), byKey = new Map(Object.values(RC.heroes).map((v) => [key(v.name), v]));
+  for (const h of HERO) { const v = byKey.get(key(h.id)); if (v) h.rankedCounters = { by: v.by.map((x) => ({ h: ids.get(key(x.h)) || x.h, adv: x.adv })), into: v.into.map((x) => ids.get(key(x)) || x), at: v.fetched?.slice(0, 10) }; } }
 // ratings as a rank among all heroes (0 = lowest, 10 = highest), so each scale spreads out
 for (const k of Object.keys(HERO[0]?.ratings || {})) { const xs = HERO.map((h) => h.ratings[k]).sort((x, y) => x - y), n = xs.length - 1 || 1; for (const h of HERO) { const lo = xs.indexOf(h.ratings[k]), hi = xs.lastIndexOf(h.ratings[k]); h.ratings[k] = Math.round(((lo + hi) / 2 / n) * 100) / 10; } }
 // a lineup's profile: sum of its heroes' traits (5 heroes); the pro average lineup is the reference
@@ -354,13 +367,14 @@ writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series m
   for (const h of HERO) { const v = BP[h.id]; h.firstPhaseBan = v && v[1] >= 5 ? r3(v[0] / v[1]) : null; }
   // LEAGUE META: each league has its own meta, so hero presence and win rate per league (last 150 days), how often
   // the first-pick (blue) side wins, and the opening bans: blue bans first, so blue's first ban is B1 and red's is B2.
-  const LG = {}, cut = now - 150 * DAY;
+  const LG = {}, cut = now - 150 * DAY, LEN = {};
   for (const m of done) { if (Date.parse(m.date) <= cut || m.kind === "intl") continue; const L = (LG[m.league] ||= { games: 0, blue: [0, 0], b1: {}, b2: {}, h: {} });
-    for (const g of m.games) { L.games++; if (g.side1 === "blue" || g.side1 === "red") { L.blue[1]++; if ((g.side1 === "blue") === (g.w === 1)) L.blue[0]++;
+    for (const g of m.games) { L.games++; { const sec = secs(g.len); if (sec) (LEN[m.league] ||= []).push(sec / 60); } if (g.side1 === "blue" || g.side1 === "red") { L.blue[1]++; if ((g.side1 === "blue") === (g.w === 1)) L.blue[0]++;
         const [bb, rb] = g.side1 === "blue" ? [g.b1, g.b2] : [g.b2, g.b1]; if (bb[0]) L.b1[bb[0]] = (L.b1[bb[0]] || 0) + 1; if (rb[0]) L.b2[rb[0]] = (L.b2[rb[0]] || 0) + 1; }
       for (const [hs, bs, w] of [[g.h1, g.b1, g.w === 1], [g.h2, g.b2, g.w === 2]]) { for (const h of hs) { const v = (L.h[h] ||= { p: 0, w: 0, b: 0 }); v.p++; if (w) v.w++; } for (const h of bs) { const v = (L.h[h] ||= { p: 0, w: 0, b: 0 }); v.b++; } } } }
   const top5 = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([h, n]) => ({ h, n }));
-  const leagues = Object.entries(LG).filter(([, L]) => L.games >= 20).map(([lg2, L]) => ({ league: lg2, games: L.games, blue: L.blue, b1: top5(L.b1), b2: top5(L.b2),
+  const med = (xs) => { if (!xs?.length) return null; const a = [...xs].sort((x, y) => x - y); return Math.round(a[Math.floor(a.length / 2)] * 10) / 10; };
+  const leagues = Object.entries(LG).filter(([, L]) => L.games >= 20).map(([lg2, L]) => ({ league: lg2, games: L.games, medianMin: med(LEN[lg2]), blue: L.blue, b1: top5(L.b1), b2: top5(L.b2),
     top: Object.entries(L.h).map(([h, v]) => ({ h, pres: r3((v.p + v.b) / L.games), p: v.p, b: v.b, wr: v.p ? r3(v.w / v.p) : null })).sort((a, b) => b.pres - a.pres).slice(0, 12) })).sort((a, b) => b.games - a.games);
   const allBlue = Object.values(LG).reduce((a, L) => [a[0] + L.blue[0], a[1] + L.blue[1]], [0, 0]);
   writeJSON(path.join(OUT, "leagues.json"), { note: "Last 150 days of league games (international events left out). Blue side picks first.", blueAll: allBlue, leagues });
@@ -426,6 +440,6 @@ writeJSON(PT_FILE, PT);
 const ptg = Object.values(PT.matches).filter((x) => x.score);
 writeJSON(path.join(OUT, "pretip.json"), { started: PT.started, graded: ptg.length, waiting: Object.values(PT.matches).filter((x) => !x.score).length, winner: ptg.length ? r3(ptg.filter((x) => x.right).length / ptg.length) : null, matches: ptg.slice(-100).reverse() });
 const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > now).map((m) => m.league);
-writeJSON(path.join(OUT, "meta.json"), { patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release, changes: lastPatch.changes } : null, patches: LP.patches.slice(-8).reverse().map((p) => ({ patch: p.patch, release: p.release, changes: p.changes.length })), built: new Date().toISOString(), series: done.length, games: totalGames, teams: teamsOut.length, players: playersOut.length, heroes: HERO.length, upcoming: upOut.length, leagues: [...new Set(EVENTS.map((e) => e.league))], ratingScale: "Elo-style: 1500 average, 100 points = about 64% in a single game",
+writeJSON(path.join(OUT, "meta.json"), { momentum: momFit, patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release, changes: lastPatch.changes } : null, patches: LP.patches.slice(-8).reverse().map((p) => ({ patch: p.patch, release: p.release, changes: p.changes.length })), built: new Date().toISOString(), series: done.length, games: totalGames, teams: teamsOut.length, players: playersOut.length, heroes: HERO.length, upcoming: upOut.length, leagues: [...new Set(EVENTS.map((e) => e.league))], ratingScale: "Elo-style: 1500 average, 100 points = about 64% in a single game",
   roles: ROLES, source: "Liquipedia (CC-BY-SA) for matches, drafts and rosters; MLBBHub for ranked-game hero rates. No betting data." });
 console.log(`wrote ${upOut.length} upcoming, ${teamsOut.length} teams, ${playersOut.length} players, ${HERO.length} heroes, ${picks.length} picks`);
