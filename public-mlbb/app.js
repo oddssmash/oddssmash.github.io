@@ -59,7 +59,7 @@ async function vMatches() {
     ${up.length ? `<div class="filters" role="group" aria-label="League" style="margin-top:16px">${["All", ...lgs, ...(up.some(intl) ? ["International"] : [])].map((x) => `<button class="fbtn" type="button" data-mf="${esc(x)}" aria-pressed="${S.mf === x}">${esc(x)}</button>`).join("")}</div>` : ""}
     <h2 class="sec-h">Upcoming · ${shown.length} ${shown.length === 1 ? "match" : "matches"}</h2>
     ${shown.length ? shown.map((m) => matchCard(m, det)).join("") : `<div class="card"><h2>No match with both teams set yet</h2><p class="small">Matches appear here with projections as soon as both teams are known, and refresh every few hours. Meanwhile, try <a href="#/versus">Versus</a> or the <a href="#/sim">Draft lab</a>.</p></div>`}
-    <h2 class="sec-h">Latest results</h2>${res.slice(0, 20).map(resultRow).join("")}
+    <h2 class="sec-h">Previous matches · tap for game by game</h2>${res.slice(0, 20).map(resultRow).join("")}<p><a class="go" href="#/history">All previous matches ›</a></p>
     <p class="small muted" style="margin-top:14px">Statistical projections for analysis and entertainment. Not betting advice. No sportsbook data is used for MLBB.</p>`;
   app.querySelectorAll("[data-mf]").forEach((b) => b.addEventListener("click", () => { S.mf = b.dataset.mf; vMatches(); }));
   stamp(meta);
