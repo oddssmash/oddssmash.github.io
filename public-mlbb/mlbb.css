@@ -500,3 +500,10 @@ body.mlbb-sub .top { display: none; }
 .ds-tip { margin: 4px 0 0; }
 .ds-tl:disabled { opacity: .4; cursor: default; }
 .ds-tl.warn { min-width: 132px; }
+
+/* ---- learning page rows ---- */
+.lr-list { display: grid; gap: 0; }
+.lr-i { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.lr-i:last-child { border-bottom: 0; }
+.lr-i > span { display: grid; gap: 2px; min-width: 0; }
+.lr-i > b { flex: none; text-align: right; }

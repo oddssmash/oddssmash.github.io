@@ -143,6 +143,7 @@ function replay(P, record = false) {
       D.learn(g, m.date);
     }
     A.n++; B.n++; if (won) { A.w++; B.l++; } else { B.w++; A.l++; }
+    if (record) for (const t of [A, B]) (t.hist ||= []).push([m.date, t.r + (REG[t.region] || 0) * P.regW]); // rating after each series, for the learning page
   }
   return { T, REG, D, PLR, SGc, ibrier: inn ? ib / inn : 0, inn, brier: sb / sn, ll: sll / sn, acc: sright / sn, n: sn, gBrier: gb / gn, gBrierDraft: gbD / gn, gn, log };
 }
@@ -663,6 +664,24 @@ function whyMissed(x) {
 }
 const results = R.log.map((x) => { const right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]); return { date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(x.pS), graded: x.warm, right, mvp: x.m.mvp, ...(right ? {} : { why: whyMissed(x) }) }; }).reverse();
 writeJSON(path.join(OUT, "results.json"), results.slice(0, 400));
+// LEARNING LEDGER (after every game and every refresh). Every finished game updates team ratings, the hero/combo/counter
+// tables and player career records before the next game is predicted; every refresh re-tunes the settings on all history.
+// The settings and accuracy are saved once a day in data/mlbb/learning-history.json (kept between runs), so the page can
+// show how the model has moved over time.
+{ const G = R.log.filter((x) => x.warm), wk = (d) => { const t = new Date(d); t.setUTCHours(0, 0, 0, 0); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return t.toISOString().slice(0, 10); };
+  const right = (x) => (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]), won = (x) => (x.m.score[0] > x.m.score[1] ? 1 : 0);
+  const weeks = new Map(); for (const x of G) { if (!x.m.date) continue; const k = wk(x.m.date), w = weeks.get(k) || weeks.set(k, { week: k, n: 0, right: 0, brier: 0 }).get(k); w.n++; w.right += right(x) ? 1 : 0; w.brier += (x.pS - won(x)) ** 2; }
+  let cn = 0, cr = 0; const timeline = [...weeks.values()].sort((a, b) => a.week.localeCompare(b.week)).map((w) => { cn += w.n; cr += w.right; return { week: w.week, n: w.n, acc: r3(w.right / w.n), brier: r3(w.brier / w.n), cumAcc: r3(cr / cn) }; }).slice(-60);
+  const cal = [[0.5, 0.6], [0.6, 0.7], [0.7, 0.8], [0.8, 0.9], [0.9, 1.01]].map(([lo, hi]) => { const rows = G.map((x) => (x.pS >= 0.5 ? { p: x.pS, y: won(x) } : { p: 1 - x.pS, y: 1 - won(x) })).filter((r) => r.p >= lo && r.p < hi); return { bucket: `${Math.round(lo * 100)}-${Math.min(100, Math.round(hi * 100))}%`, n: rows.length, said: rows.length ? r3(rows.reduce((a, r) => a + r.p, 0) / rows.length) : null, won: rows.length ? r3(rows.reduce((a, r) => a + r.y, 0) / rows.length) : null }; });
+  const byL = new Map(); for (const x of G) { const k = x.m.league, v = byL.get(k) || byL.set(k, { league: k, n: 0, right: 0, brier: 0, last: null }).get(k); v.n++; v.right += right(x) ? 1 : 0; v.brier += (x.pS - won(x)) ** 2; if (!v.last || x.m.date > v.last) v.last = x.m.date; }
+  const leagues = [...byL.values()].filter((v) => v.n >= 10).map((v) => ({ league: v.league, n: v.n, acc: r3(v.right / v.n), brier: r3(v.brier / v.n), last: v.last })).sort((a, b) => (b.last || "").localeCompare(a.last || "")).slice(0, 14);
+  const last = (days) => { const cut = new Date(now - days * DAY).toISOString(); const rows = G.filter((x) => x.m.date >= cut); return { n: rows.length, right: rows.filter(right).length }; };
+  const moverCut = new Date(now - 7 * DAY).toISOString(), movers = [...R.T.values()].filter((t) => t.hist?.length && t.hist.at(-1)[0] >= moverCut).map((t) => { const before = [...t.hist].reverse().find(([d]) => d < moverCut)?.[1] ?? 0, after = t.hist.at(-1)[1]; return { team: t.name, region: t.region, from: Math.round(1500 + before * 173.7), to: Math.round(1500 + after * 173.7), change: Math.round((after - before) * 173.7) }; }).filter((x) => x.change).sort((a, b) => Math.abs(b.change) - Math.abs(a.change)).slice(0, 10);
+  const lessons = results.filter((x) => x.graded && !x.right).slice(0, 10).map((x) => ({ date: x.date, league: x.league, a: x.a, b: x.b, score: x.score, pSeries: x.pSeries, why: x.why }));
+  const today = new Date(now).toISOString().slice(0, 10), HF = path.join(MD, "learning-history.json"), hist = readJSON(HF, []).filter((h) => h.date !== today);
+  hist.push({ date: today, k: P.k, carry: P.carry, cx: P.cx, wd: P.wd, cw: CW, series: R.n, games: R.gn, brier: r3(R.brier), acc: r3(R.acc), gBrier: r3(R.gBrierDraft), regions: Object.fromEntries(Object.entries(R.REG).map(([k, v]) => [k, r3(v)])) });
+  writeJSON(HF, hist.slice(-120));
+  writeJSON(path.join(OUT, "learning.json"), { built: new Date(now).toISOString(), series: R.n, games: R.gn, acc: r3(R.acc), brier: r3(R.brier), gBrier: r3(R.gBrierDraft), heroes: HERO.length, last7: last(7), last30: last(30), timeline, calibration: cal, leagues, movers, lessons, history: hist.slice(-30) }); }
 const cal = Array.from({ length: 5 }, (_, i) => ({ lo: 50 + i * 10, hi: 60 + i * 10, n: 0, won: 0 }));
 for (const x of R.log.filter((x) => x.warm)) { const p = Math.max(x.pS, 1 - x.pS), won = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]), b = cal[Math.min(4, Math.floor((p - 0.5) * 10))]; b.n++; if (won) b.won++; }
 const byL = {}; for (const x of R.log.filter((x) => x.warm)) { const c = (byL[x.m.league] ||= { league: x.m.league, n: 0, right: 0 }); c.n++; if ((x.pS >= 0.5) === (x.m.score[0] > x.m.score[1])) c.right++; }
