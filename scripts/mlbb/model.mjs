@@ -165,6 +165,15 @@ const momFit = (() => { let best = { b: 0, ll: -Infinity }; for (let b = -0.6; b
   let ll0 = 0; for (const [d, y] of MOM) { const p = lg(d); ll0 += Math.log(y ? p : 1 - p); } const same = MOM.filter(([, y, s]) => (y ? 1 : -1) === s).length;
   return { b: best.b, n: MOM.length, sameRate: Math.round((same / MOM.length) * 1000) / 1000, lrStat: Math.round(2 * (best.ll - ll0) * 10) / 10 }; })();
 console.log("momentum", JSON.stringify(momFit));
+// CALIBRATION TEST: pull single-game chances toward 50% (logit x T) overall, in playoffs, and in best-of-7, each fitted on
+// the first 70% of graded series by date and judged on the last 30% (series Brier). Printed and saved for the learning page.
+const CAL = (() => { const G = R.log.filter((x) => x.warm), cut = Math.floor(G.length * 0.7), won = (x) => (x.m.score[0] > x.m.score[1] ? 1 : 0);
+  const big = (x) => /playoff|final|knockout|bracket|upper|lower|elimination/i.test(x.m.stage || "") || x.m.kind === "intl";
+  const br = (rows, T) => rows.reduce((a2, x) => a2 + (series(lg(T * logit(Math.min(0.999, Math.max(0.001, x.pg)))), x.m.bo).win - won(x)) ** 2, 0) / Math.max(1, rows.length);
+  const fitT = (rows) => { let best = 1, bv = Infinity; for (let T = 0.5; T <= 1.3001; T += 0.02) { const v = br(rows, T); if (v < bv) { bv = v; best = Math.round(T * 100) / 100; } } return best; };
+  const test = (sel) => { const tr = G.slice(0, cut).filter(sel), te = G.slice(cut).filter(sel), T = fitT(tr); return { nTrain: tr.length, nTest: te.length, T, base: r3(br(te, 1) * 1000) / 1000, withT: r3(br(te, T) * 1000) / 1000, gain: Math.round((br(te, 1) - br(te, T)) * 10000) / 10000 }; };
+  return { all: test(() => true), playoffs: test(big), regular: test((x) => !big(x)), bo7: test((x) => x.m.bo === 7) }; })();
+console.log("calibration test", JSON.stringify(CAL));
 // IDEAS TEST (run with IDEAS_TEST=<path to the research review-all-players.json>): the research session's model ideas,
 // each built as a feature from games played BEFORE the one being predicted, added on top of the full pre-game logit
 // (team ratings + draft layer). Each is fitted on the first 70% of games by date and judged on the last 30%; an idea is
@@ -564,8 +573,11 @@ function contextFor(m) {
   const lanes = A.players.map((q, i) => { const o = B.players[i], c = q.arch && o.arch ? cellOf(q.arch, o.arch) : null; return { role: q.role, a: q.arch, aConf: ARCH.get(String(palias(q.n) || q.n).toLowerCase())?.conf || null, b: o.arch, bConf: ARCH.get(String(palias(o.n) || o.n).toLowerCase())?.conf || null, ...(c ? { wp: c.wp, lo: c.lo ?? null, hi: c.hi ?? null, n: c.n } : {}) }; });
   return { a: A, b: B, careerEdge: r3(edge), careerApplied: !!edge, cells: cells.slice(0, 4), lanes, form: { a: formOfTeam(m.a), b: formOfTeam(m.b) } };
 }
+// best-of-7 chances are pulled toward 50% (logit x 0.75): fitted 0.54 on the first 70% of best-of-7 series, which cut the
+// later series' Brier from 0.263 to 0.243; half of that pull is used because there are only 50 such series
+const BO7T = 0.75;
 function project(a, b, bo, page, nudge = 0) {
-  const TA = R.T.get(a), TB = R.T.get(b), pg = lg((ratingOf(a) - ratingOf(b)) * crossOf(a, b) + (TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(a, page), lineupOf(b, page), seasonOf(page)) : 0) + nudge), s = series(pg, bo), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
+  const TA = R.T.get(a), TB = R.T.get(b), pg = lg((bo === 7 ? BO7T : 1) * ((ratingOf(a) - ratingOf(b)) * crossOf(a, b) + (TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(a, page), lineupOf(b, page), seasonOf(page)) : 0) + nudge)), s = series(pg, bo), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
   // scenarios: signature hero banned, likely ban targets, side, early vs late games
   for (const [t, sig, other] of [[a, sa, b], [b, sb2, a]]) if (sig && sig.with[1] >= 3) { const pBan = (t === a ? pb : pa).bansTheyMake.find((x) => x.h === sig.hero); const adj = Math.max(-0.15, Math.min(0.15, -sig.delta * 0.5)); const p2 = Math.min(0.97, Math.max(0.03, pg + (t === a ? adj : -adj))); scen.push({ k: "sigban", team: t, hero: sig.hero, role: sig.role, text: `If ${other} bans ${t}'s ${sig.role} ${sig.hero} (${sig.with[0]}-${sig.with[1] - sig.with[0]} with it, ${sig.without[0]}-${sig.without[1] - sig.without[0]} without): ${a} wins a game ${Math.round(p2 * 100)}% (from ${Math.round(pg * 100)}%)`, pGame: r3(p2), pSeries: r3(series(p2, bo).win), banRate: pBan ? pBan.share : 0 }); }
   const sideTxt = (t, p) => p.side.blue && p.side.red ? `${t}: ${p.side.blue.w}-${p.side.blue.n - p.side.blue.w} on blue, ${p.side.red.w}-${p.side.red.n - p.side.red.w} on red` : null;
@@ -577,6 +589,13 @@ function project(a, b, bo, page, nudge = 0) {
     scenarios: scen, sides: [sideTxt(a, pa), sideTxt(b, pb)].filter(Boolean), tempo: [tempo(a, pa), tempo(b, pb)].filter(Boolean), comfort: [banTargets(a, pa), banTargets(b, pb)], profiles: [pa, pb] };
 }
 const nA = (name) => R.T.get(name)?.n || 0;
+// warnings: best-of-7, playoff favourites at 75%+, and leagues where our series Brier has been 0.245 or worse (30+ graded)
+const LGB = (() => { const out = {}; for (const x of R.log) if (x.warm) { const v = (out[x.m.league] ||= { n: 0, b: 0 }); v.n++; v.b += (x.pS - (x.m.score[0] > x.m.score[1] ? 1 : 0)) ** 2; } for (const v of Object.values(out)) v.b = r3(v.b / v.n); return out; })();
+const warningsFor = (m, pS) => { const w = [], big = /playoff|final|knockout|bracket|upper|lower|elimination/i.test(m.stage || ""), lb = LGB[m.league];
+  if (m.bo === 7) w.push("Best-of-7: our weakest format so far, so the chance is pulled toward 50%");
+  if (big && Math.max(pS, 1 - pS) >= 0.75) w.push("Playoff favourite at 75%+: these have won about 75%, less than we said");
+  if (lb && lb.n >= 30 && lb.b >= 0.245) w.push(`${m.league}: our numbers here have been near coin-flip quality (Brier ${lb.b.toFixed(3)} over ${lb.n} series)`);
+  return w; };
 const confOf0 = (p, n) => (n < 4 ? "low (thin record)" : Math.abs(p - 0.5) < 0.12 ? "low (near coin-flip)" : n < 10 ? "medium (fewer than 10 series for one side)" : Math.abs(p - 0.5) >= 0.25 ? "high" : "medium");
 // confidence also looks at form against our numbers: a favourite 1.5+ wins below expectation over its last five, or an
 // underdog 1+ above, lowers it one level
@@ -584,15 +603,16 @@ const confOf = (p, n, m) => { const c = confOf0(p, n); if (!m || /^low/.test(c))
 const upOut = [], picks = [];
 for (const m of upcoming) {
   rec0ctx = contextFor(m); const ndg = nudgeOf(m, rec0ctx); if (rec0ctx) rec0ctx.nudge = ndg;
-  const pr = project(m.a, m.b, m.bo, m.page, ndg.total), n = Math.min(nA(m.a), nA(m.b));
+  let warn0 = [];
+  const pr = project(m.a, m.b, m.bo, m.page, ndg.total), n = Math.min(nA(m.a), nA(m.b)); warn0 = warningsFor(m, pr.pSeries);
   // the same prediction without the archetype nudge, for the site's archetype on/off switch
   const prN = ndg.arch ? project(m.a, m.b, m.bo, m.page, ndg.total - ndg.arch) : pr, noArch = { pGame: prN.pGame, pSeries: prN.pSeries, scores: prN.scores, expMaps: prN.expMaps };
   // the parts of the single-game chance (logits), so the site's analysis switches can rebuild the odds: ratings, career win
   // rate while ratings settle, big-stage experience, archetype matchups
   const TA0 = R.T.get(m.a), TB0 = R.T.get(m.b), parts = { base: Math.round((ratingOf(m.a) - ratingOf(m.b)) * crossOf(m.a, m.b) * 10000) / 10000, cw: TA0 && TB0 ? Math.round(cwEdge(R.PLR, R.SGc, TA0, TB0, lineupOf(m.a, m.page), lineupOf(m.b, m.page), seasonOf(m.page)) * 10000) / 10000 : 0, exp: ndg.exp, arch: ndg.arch };
-  const rec = { context: rec0ctx, noArch, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n, m), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
+  const rec = { warn: warn0, context: rec0ctx, noArch, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n, m), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
   writeJSON(path.join(OUT, "matches", `${m.id}.json`), rec);
-  upOut.push({ noArch: { pSeries: noArch.pSeries, pGame: noArch.pGame, expMaps: noArch.expMaps }, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, pSeries: pr.pSeries, pGame: pr.pGame, expMaps: pr.expMaps, confidence: rec.confidence });
+  upOut.push({ warn: warn0, noArch: { pSeries: noArch.pSeries, pGame: noArch.pGame, expMaps: noArch.expMaps }, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, pSeries: pr.pSeries, pGame: pr.pGame, expMaps: pr.expMaps, confidence: rec.confidence });
   if (n >= 6) { const fav = pr.pSeries >= 0.5 ? m.a : m.b, pf = Math.min(0.9, Math.max(pr.pSeries, 1 - pr.pSeries)); picks.push({ id: m.id, date: m.date, league: m.league, kind: "series", pick: `${fav} to win the series`, p: r3(pf), game: `${m.a} vs ${m.b}` });
     if (pr.over != null) picks.push({ id: m.id, date: m.date, league: m.league, kind: "maps", pick: `${pr.over >= 0.5 ? "Over" : "Under"} ${pr.mapsLine} maps`, p: r3(Math.min(0.85, Math.max(pr.over, 1 - pr.over))), game: `${m.a} vs ${m.b}` }); }
   else { const fav = pr.pSeries >= 0.5 ? m.a : m.b; picks.push({ id: m.id, date: m.date, league: m.league, kind: "series", pick: `${fav} to win the series`, p: r3(Math.min(0.9, Math.max(pr.pSeries, 1 - pr.pSeries))), game: `${m.a} vs ${m.b}`, noPick: true, fewGames: true, why: `Not a pick: ${nA(m.a) < 6 ? m.a : m.b} has only ${Math.min(nA(m.a), nA(m.b))} series in our data (we need 6).` }); }

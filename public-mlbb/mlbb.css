@@ -550,3 +550,6 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 :root[data-theme="light"] .ps-chip[aria-pressed="true"], :root[data-theme="light"] .ar-tg input:checked + .ar-sw { background: #0b6a93; border-color: #0b6a93; color: #fff; }
 :root[data-theme="light"] .doc-c { border-left-color: #0b6a93 !important; }
 :root[data-theme="light"] .mc-neon, :root[data-theme="light"] .sg-pp b { color: inherit; }
+
+.mc-warn { display: grid; gap: 4px; margin: 6px 0; } .mc-warn span { font-size: 12px; color: #F2C94C; line-height: 1.35; }
+:root[data-theme="light"] .mc-warn span { color: #8a6100; }
