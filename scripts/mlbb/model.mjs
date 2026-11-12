@@ -163,7 +163,12 @@ if (process.env.IDEAS_TEST) {
   // MENA S10 team-game rows (deaths come from the opponent's kills)
   const MG = RV.menaGames || []; const mSeen = new Map(), mOrder = new Map(); for (const g of [...MG].sort((a, b) => a.id - b.id)) { const pair = [g.L, g.R].sort().join("~"); if (!mSeen.has(pair)) mSeen.set(pair, 0); mOrder.set(`${pair}|${g.n}|${mSeen.get(pair)}`, g); if (g.n === 1) mSeen.set(pair, mSeen.get(pair) + 1); }
   // walk forward through every game, building features before learning from it
-  const PH = new Map(), PL = new Map(), TF = new Map(), ARC = new Map(), ARM = new Map(), PS = new Map(), MD2 = new Map(), FEAT = { comfort: [], comfort70: [], familiar: [], experience: [], intlExp: [], careerWR: [], form10: [], archLane: [], menaDeaths: [] };
+  const PH = new Map(), PL = new Map(), TF = new Map(), ARC = new Map(), ARM = new Map(), PS = new Map(), MD2 = new Map(), FEAT = { comfort: [], comfort70: [], familiar: [], experience: [], intlExp: [], careerWR: [], form10: [], archLane: [], menaDeaths: [], s16Prior: [], s16WinPrior: [] };
+  // Season 16 lines (staff stat posts, derived/mlbb/career-ph.json): KDA percentile within the lane, and win rate shrunk to 50%
+  const C16 = readJSON(path.join(ROOT, "derived", "mlbb", "career-ph.json"), { players: {} }).players, ck16 = (n) => String(n || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  const byLane16 = {}; for (const p of Object.values(C16)) if (p.s16?.lane && p.s16.kda != null) (byLane16[p.s16.lane] ||= []).push(p.s16.kda);
+  const pct16 = (p) => { const L = byLane16[p.s16.lane]; return L.filter((v) => v < p.s16.kda).length / Math.max(1, L.length - 1) - 0.5; };
+  const s16Side = (L) => { if (!L) return null; const v = L.map((n) => C16[ck16(n)]).filter((p) => p?.s16?.lane && p.s16.g); return v.length >= 3 ? { k: v.reduce((a, p) => a + pct16(p), 0) / v.length, w: v.reduce((a, p) => a + (p.s16.w + 10) / (p.s16.g + 20) - 0.5, 0) / v.length } : null; };
   const get = (M, k, d) => M.get(k) || (M.set(k, d()), M.get(k));
   const prior = (M, k) => M.get(k) || { n: 0, w: 0 };
   let joined = 0, s18 = 0, mJoin = 0;
@@ -179,6 +184,7 @@ if (process.env.IDEAS_TEST) {
       const row = (k, v) => FEAT[k].push([x.base, x.y, v, x.m.date]);
       if (a && b) { if (five) { row("comfort", a.c - b.c); row("comfort70", a.c70 - b.c70); row("familiar", a.fam - b.fam); } row("experience", a.ex - b.ex); row("intlExp", a.ix - b.ix); row("careerWR", a.wr - b.wr); }
       row("form10", tf(x.m.a) - tf(x.m.b));
+      if (["MPL/Philippines/Season 17", "MPL/Philippines/Season 18"].includes(seasonOf(x.m.page))) { const sa = s16Side(LA), sb = s16Side(LB); if (sa && sb) { row("s16Prior", sa.k - sb.k); row("s16WinPrior", sa.w - sb.w); } }
     }
     // archetype lane matchups (Season 18 ID/PH/MY): archetypes from each player's earlier S18 games only
     const ok = ourKey(x), rk = ok && byOrder.get(ok);

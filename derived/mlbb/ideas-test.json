@@ -1,5 +1,5 @@
 {
- "built": "2026-11-12T07:50:35.382Z",
+ "built": "2026-11-12T08:09:28.533Z",
  "results": {
   "comfort": {
    "n": 3473,
@@ -117,6 +117,34 @@
    "n": 32,
    "verdict": "too few games to test"
   },
+  "s16Prior": {
+   "n": 62,
+   "nonzero": 62,
+   "b": -2,
+   "lr": 2.7,
+   "test": {
+    "n": 19,
+    "b": -2,
+    "brierBase": 0.168,
+    "brierWith": 0.172,
+    "gain": -0.0039
+   },
+   "verdict": "too few games: 62 PH S17-S18 games with 3+ players per side holding a Season 16 line; the fit hit its bound"
+  },
+  "s16WinPrior": {
+   "n": 62,
+   "nonzero": 62,
+   "b": -2,
+   "lr": 1.1,
+   "test": {
+    "n": 19,
+    "b": -2,
+    "brierBase": 0.168,
+    "brierWith": 0.167,
+    "gain": 0.0005
+   },
+   "verdict": "too few games: 62 PH S17-S18 games with 3+ players per side holding a Season 16 line; the fit hit its bound"
+  },
   "_joins": {
    "s18Games": 557,
    "s18Joined": 248,
@@ -127,12 +155,13 @@
   "method": "Each feature uses only games before the one predicted, added on top of the full pre-game logit (ratings + draft). Fitted on the first 70% of games by date, judged on the last 30%. Adopt only if LR > 3.84 and held-out Brier improves; form was also re-run inside the whole model.",
   "comfort": "player record on the picked hero (shrunk to 50%); comfort70 = picks with 15+ games at 70%+; familiar = games on the hero",
   "experience": "career games in our data; intlExp = international games; careerWR = career win rate shrunk toward 50% (20-game prior)",
-  "archLane": "archetypes rebuilt from each player's earlier Season 18 games only (5+ games), lane-opponent matchup rates from earlier games; only 179 games qualified",
-  "menaDeaths": "team deaths per game in earlier MENA S10 games; only 32 games qualified",
+  "archLane": "archetypes rebuilt from each player's earlier Season 18 games only (5+ games), lane-opponent matchup rates from earlier games",
+  "menaDeaths": "team deaths per game in earlier MENA S10 games",
+  "s16Prior": "Season 16 lines from the MPL PH staff stat posts: lineup KDA percentile within each lane, and S16 win rate shrunk toward 50%; used only for later (S17, S18) PH games, so nothing leaks",
   "notTested": {
    "gkLongGames": "game length is not known before a game, so a long-game edge cannot change a pre-game prediction",
    "turtles": "the model does not use turtle control",
-   "staffAllTime": "the staff all-time totals include later games, so they would leak the future; career games and win rate were rebuilt from our own data instead"
+   "staffAllTime": "the staff all-time and M-series totals include later games, so they would leak the future; career games and win rate were rebuilt from our own data instead"
   }
  }
 }
