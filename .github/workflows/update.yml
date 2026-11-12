@@ -69,6 +69,7 @@ jobs:
         continue-on-error: true
         run: |
           node scripts/mlbb/fetch.mjs
+          node scripts/mlbb/teamnames.mjs
           node scripts/mlbb/model.mjs
           node scripts/mlbb/images.mjs
 

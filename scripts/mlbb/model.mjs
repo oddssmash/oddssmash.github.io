@@ -27,9 +27,16 @@ for (const f of fs.readdirSync(path.join(MD, "pages"))) for (const m of readJSON
 // One name per team: Liquipedia's team templates are case-insensitive ("aurora gaming ph" = "Aurora Gaming PH"),
 // and a few teams use a different tag at international events.
 const ALIAS = { "srg.og": "Selangor Red Giants", srg: "Selangor Red Giants" };
+// Short template names ("bac", "kog", "Onic PH") expanded by Liquipedia (scripts/mlbb/teamnames.mjs). A short name is
+// merged only when its full name is already used in the same league, so a name reused by another team elsewhere
+// (for example "Alter Ego" in China and Indonesia) is never merged by mistake.
+{ const TN = readJSON(path.join(MD, "team-names.json"), {}), inLeague = {};
+  for (const m of all) for (const n of [m.a, m.b]) (inLeague[m.league] ||= new Set()).add(String(n).toLowerCase());
+  for (const m of all) for (const k of ["a", "b"]) { const raw = String(m[k]).toLowerCase(), full = TN[raw]; if (full && full.toLowerCase() !== raw && !ALIAS[raw] && (inLeague[m.league]?.has(full.toLowerCase()) || /(male team)$/.test(raw))) ALIAS[raw] = full; } }
 const cnt = {}; for (const m of all) for (const n of [m.a, m.b]) { const k = n.toLowerCase(); (cnt[k] ||= {})[n] = (cnt[k][n] || 0) + 1; }
+for (const v of Object.values(ALIAS)) { const k = v.toLowerCase(); (cnt[k] ||= {})[v] = (cnt[k][v] || 0) + 1; }
 const disp = Object.fromEntries(Object.entries(cnt).map(([k, v]) => [k, Object.entries(v).sort((a, b) => (/[A-Z]/.test(b[0]) - /[A-Z]/.test(a[0])) || b[1] - a[1])[0][0]])); // most common spelling that has capitals
-const canon = (n) => { const a = ALIAS[String(n).toLowerCase()]; return a || disp[String(n).toLowerCase()] || n; };
+const canon = (n) => { const x = ALIAS[String(n).toLowerCase()] || n; return disp[String(x).toLowerCase()] || x; };
 for (const m of all) { m.a = canon(m.a); m.b = canon(m.b); }
 // one name per hero: match every spelling ("gatot", "popol and kupa") to Liquipedia's hero names
 { const LPH = Object.keys(readJSON(path.join(MD, "heroes-lp.json"), { heroes: {} }).heroes), strip = (x) => String(x).toLowerCase().replace(/[^a-z0-9]/g, ""), byStrip = new Map(LPH.map((h) => [strip(h), h])), memo = new Map();
@@ -123,16 +130,17 @@ console.log("learned", JSON.stringify(P), `series Brier ${r3(R.brier)} (cross-re
 const D = R.D, HERO = [];
 const totalGames = done.reduce((a, m) => a + m.games.length, 0);
 const raw = new Map(); // undecayed counts for display
-for (const m of done) for (const g of m.games) { for (const [hs, bs, w] of [[g.h1, g.b1, g.w === 1], [g.h2, g.b2, g.w === 2]]) { hs.forEach((x, i) => { const v = raw.get(x) || { n: 0, w: 0, b: 0, roles: {} }; v.n++; if (w) v.w++; v.roles[ROLES[i]] = (v.roles[ROLES[i]] || 0) + 1; raw.set(x, v); }); bs.forEach((x) => { const v = raw.get(x) || { n: 0, w: 0, b: 0, roles: {} }; v.b++; raw.set(x, v); }); } }
+for (const m of done) for (const g of m.games) { for (const [hs, bs, w] of [[g.h1, g.b1, g.w === 1], [g.h2, g.b2, g.w === 2]]) { hs.forEach((x, i) => { const v = raw.get(x) || { n: 0, w: 0, b: 0, roles: {} }; v.n++; if (w) v.w++; v.roles[ROLES[i]] = (v.roles[ROLES[i]] || 0) + 1; if (w) (v.rw ||= {})[ROLES[i]] = (v.rw?.[ROLES[i]] || 0) + 1; raw.set(x, v); }); bs.forEach((x) => { const v = raw.get(x) || { n: 0, w: 0, b: 0, roles: {} }; v.b++; raw.set(x, v); }); } }
 const recent = new Map(); for (const m of done.filter((m) => Date.parse(m.date) > now - 150 * DAY)) for (const g of m.games) { for (const [hs, bs, w] of [[g.h1, g.b1, g.w === 1], [g.h2, g.b2, g.w === 2]]) { hs.forEach((x) => { const v = recent.get(x) || { n: 0, w: 0, b: 0 }; v.n++; if (w) v.w++; recent.set(x, v); }); bs.forEach((x) => { const v = recent.get(x) || { n: 0, w: 0, b: 0 }; v.b++; recent.set(x, v); }); } }
 const recentGames = done.filter((m) => Date.parse(m.date) > now - 150 * DAY).reduce((a, m) => a + m.games.length, 0) || 1;
 for (const [name, v] of raw) {
   const d = D.H.get(name) || { n: 0, w: 0, b: 0 }, rc = recent.get(name) || { n: 0, w: 0, b: 0 }, str = logit((d.w + 4) / (d.n + 8));
-  const syn = [...D.PAIR].filter(([k, x]) => k.split("|").includes(name) && x.n >= 3).map(([k, x]) => ({ with: k.split("|").find((y) => y !== name), n: r1(x.n), wr: r3((x.w + 3) / (x.n + 6)) })).sort((a, b) => b.wr - a.wr);
+  const solo = (h) => { const s = D.H.get(h) || { n: 0, w: 0 }; return (s.w + 4) / (s.n + 8); };
+  const syn = [...D.PAIR].filter(([k, x]) => k.split("|").includes(name) && x.n >= 3).map(([k, x]) => { const o = k.split("|").find((y) => y !== name), wr = (x.w + 3) / (x.n + 6); return { with: o, n: r1(x.n), wr: r3(wr), lift: r3(wr - (solo(name) + solo(o)) / 2) }; }).sort((a, b) => b.lift - a.lift);
   const cnt = [...D.VS].filter(([k, x]) => k.startsWith(name + ">") && x.n >= 3).map(([k, x]) => ({ vs: k.split(">")[1], n: r1(x.n), wr: r3((x.w + 3) / (x.n + 6)) })).sort((a, b) => b.wr - a.wr);
   const rk = ranked[name];
   HERO.push({ id: name, games: v.n, wins: v.w, wr: r3(v.w / Math.max(1, v.n)), bans: v.b, presence: r3((v.n + v.b) / totalGames), recent: { picks: rc.n, wr: rc.n ? r3(rc.w / rc.n) : null, bans: rc.b, presence: r3((rc.n + rc.b) / recentGames) }, strength: r3(str),
-    roles: Object.entries(v.roles).sort((a, b) => b[1] - a[1]).map(([r, n]) => ({ r, n })), combos: syn.slice(0, 6), combosBad: syn.slice(-3).reverse(), counters: cnt.slice(0, 6), counteredBy: cnt.slice(-6).reverse(), ranked: rk ? { wr: rk.winRate, pick: rk.pickRate, ban: rk.banRate, tier: rk.tier } : null });
+    roles: Object.entries(v.roles).sort((a, b) => b[1] - a[1]).map(([r, n]) => ({ r, n, w: v.rw?.[r] || 0 })), combos: syn.slice(0, 6), combosBad: syn.slice(-3).reverse(), counters: cnt.slice(0, 6), counteredBy: cnt.slice(-6).reverse(), ranked: rk ? { wr: rk.winRate, pick: rk.pickRate, ban: rk.banRate, tier: rk.tier } : null });
 }
 // ---------------------------------------------------------------- HERO TRAITS, early/late, patch
 // Traits from Liquipedia's hero pages (role, specialties, crowd control counted from the skill text, base toughness);
@@ -159,6 +167,17 @@ const patchHist = (id) => LP.patches.flatMap((p) => p.changes.filter((c) => c.he
 for (const h of HERO) { const x = traitsOf(h.id); h.traits = x.t; h.lp = x.lp ? { role: x.lp.role, role2: x.lp.role2, lane: x.lp.lane, spec: x.lp.spec, cc: x.lp.cc } : null; h.shortLong = x.sl; h.patches = patchHist(h.id);
   const since = lastPatch ? done.filter((m) => m.date >= lastPatch.release) : []; let pn = 0, pw = 0, pb = 0; for (const m of since) for (const g of m.games) { if (g.h1.includes(h.id)) { pn++; if (g.w === 1) pw++; } if (g.h2.includes(h.id)) { pn++; if (g.w === 2) pw++; } if (g.b1.includes(h.id) || g.b2.includes(h.id)) pb++; }
   h.thisPatch = lastPatch ? { patch: lastPatch.patch, picks: pn, wins: pw, bans: pb } : null; }
+// TIMING CURVE: each hero's pro record in games under 14 minutes vs 18+ minutes (pulled toward 50%); the gap is its
+// tempo (positive = early hero). Best lane for heroes played in more than one lane. Heroes changed in the newest
+// patch with no pro games on it yet are flagged, since their old record may not hold.
+const TC = new Map(); for (const m of done) { if (Date.parse(m.date) <= now - 365 * DAY) continue; for (const g of m.games) { const L = secs(g.len); if (!L) continue; const k = L < 13 * 60 ? "s" : L >= 18 * 60 ? "l" : null; if (!k) continue;
+  for (const [hs, w] of [[g.h1, g.w === 1], [g.h2, g.w === 2]]) for (const x of hs) { const v = TC.get(x) || { s: [0, 0], l: [0, 0] }; v[k][1]++; if (w) v[k][0]++; TC.set(x, v); } } }
+for (const h of HERO) {
+  const tc = TC.get(h.id); if (tc && tc.s[1] >= 10 && tc.l[1] >= 10) { const s = shr(tc.s[0], tc.s[1], 10), l = shr(tc.l[0], tc.l[1], 10); h.timing = { short: r3(s), long: r3(l), ns: tc.s[1], nl: tc.l[1], tempo: r3(s - l), label: s - l >= 0.08 ? "Early-game hero" : l - s >= 0.08 ? "Late-game hero" : "Even across game length" }; }
+  const lanes = h.roles.filter((r) => r.n >= 15).map((r) => ({ r: r.r, n: r.n, w: r.w, wr: r3((r.w + 5) / (r.n + 10)) }));
+  h.bestLane = lanes.length > 1 ? lanes.sort((a, b) => b.wr - a.wr) : null;
+  h.untested = !!(lastPatch && h.patches?.some((p) => p.patch === lastPatch.patch) && !(h.thisPatch?.picks));
+}
 const TR = Object.fromEntries(HERO.map((h) => [h.id, h.traits]));
 // flex picks: share of pro games in each lane; ratings 0-10 (rank among heroes) from our traits (Teamfight, Pick-off, Objectives, Early-mid,
 // Late, Damage, Survival, Push, Crowd control); ranked trend from MLBBHub's week-on-week win-rate change.
@@ -236,6 +255,12 @@ function profile(name) {
   season.forEach((m, i) => { const one = m.a === name, v = i < half ? halves.first : halves.second; for (const x of m.games) { v[1]++; if ((x.w === 1) === one) v[0]++; } });
   return { halves: season.length >= 4 ? halves : null, maps, stages: stage, firstBan: topN(firstBans), phase1Bans: topN(phase1), games: g, draft: dp, tempo, archetype: ARCH_T(dp, tempo), comfort: comfort.slice(0, 15), bansTheyMake: top(bansFor), bansAgainstThem: top(bansVs), side: { blue: blue[1] ? { w: blue[0], n: blue[1] } : null, red: red[1] ? { w: red[0], n: red[1] } : null }, early: { w: early[0], n: early[1] }, late: { w: late[0], n: late[1] } };
 }
+// coaching staff (head coach, coaches, analysts) from the Staff tab of the newest season page that lists the team
+const STAFF = {}; // page -> team (lower case) -> list
+for (const f of fs.readdirSync(path.join(MD, "rosters"))) { const r = readJSON(path.join(MD, "rosters", f)); if (!r?.staff) continue; const by = (STAFF[r.page] ||= {}); for (const [t, list] of Object.entries(r.staff)) if (list.length) by[canon(t).toLowerCase()] = list; }
+const staffFor = (name) => { const k = name.toLowerCase(), ms = [...done].reverse().filter((m) => m.a === name || m.b === name);
+  for (const m of ms) for (const [pg, by] of Object.entries(STAFF)) if (by[k] && String(m.page || "").replace(/_/g, " ").startsWith(pg)) return { page: pg, list: by[k].map((x) => ({ name: x.name, role: x.role })) };
+  return null; };
 // signature hero effect: team record with vs without its most-played hero (shrunk), for "if it is banned"
 function sigEffect(name, prof) {
   const top = prof.comfort[0]; if (!top) return null; const ms = teamGames(name); let wi = [0, 0], wo = [0, 0];
@@ -249,7 +274,7 @@ const offTeam = new Map(); for (const o of OFF) for (const t of o.teams) { const
 const crossOf = (a, b) => { const ra = R.T.get(a)?.region, rb = R.T.get(b)?.region; return ra && rb && ra !== rb ? P.cx : 1; };
 const ratingOf = (name) => { const t = R.T.get(name); return t ? t.r + (R.REG[t.region] || 0) * P.regW : 0; };
 const teamsOut = [...R.T.values()].filter((t) => t.n >= 3).map((t) => { const prof = profile(t.name); const lastM = [...done].reverse().find((m) => m.a === t.name || m.b === t.name);
-  return { id: safe(t.name), name: t.name, region: t.region, rating: r3(ratingOf(t.name)), elo: Math.round(1500 + ratingOf(t.name) * 173.7), series: [t.w, t.l], games: [t.gw, t.gl], last: lastM?.date || null, league: lastM?.league || null, official: offTeam.get(t.name) || null, roster: rosterFor(t.name, lastM?.page || "").map((x) => { const pl = PL.get(x.page || x.player); return { player: x.player, role: x.role, id: safe(x.page || x.player), pool: pl ? Object.entries(pl.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 6) : [] }; }), profile: prof, signature: sigEffect(t.name, prof) }; })
+  return { id: safe(t.name), name: t.name, region: t.region, rating: r3(ratingOf(t.name)), elo: Math.round(1500 + ratingOf(t.name) * 173.7), series: [t.w, t.l], games: [t.gw, t.gl], last: lastM?.date || null, league: lastM?.league || null, staff: staffFor(t.name), official: offTeam.get(t.name) || null, roster: rosterFor(t.name, lastM?.page || "").map((x) => { const pl = PL.get(x.page || x.player); return { player: x.player, role: x.role, id: safe(x.page || x.player), pool: pl ? Object.entries(pl.heroes).map(([h, v]) => ({ h, n: v.n, wr: r3(v.w / v.n) })).sort((a, b) => b.n - a.n).slice(0, 6) : [] }; }), profile: prof, signature: sigEffect(t.name, prof) }; })
   .sort((a, b) => b.rating - a.rating);
 // RELATIVE ARCHETYPES: a team's labels are the traits where it stands out from other teams (z-score 0.75+ among teams
 // with 10+ recent games); tempo uses its share of short and long games.

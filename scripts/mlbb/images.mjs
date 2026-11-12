@@ -33,6 +33,19 @@ async function infoboxImages(list, kind) {
   }
   return out;
 }
+// Team logos the infobox route misses (short or lowercase template names such as "bac" or "vigor apex"): Liquipedia's
+// {{TeamIcon|name}} template accepts any spelling the match pages use and names the light and dark logo files.
+async function templateIcons(list) {
+  const out = new Map(), todo = list.filter((x) => !fresh(`tpl:${x.key}`));
+  for (let i = 0; i < todo.length; i += 40) {
+    const part = todo.slice(i, i + 40), j = await api("mobilelegends", { action: "expandtemplates", prop: "wikitext", text: part.map((x) => `{{TeamIcon|${x.title}}}`).join(" @@ ") });
+    const bits = j?.expandtemplates?.wikitext?.split(" @@ ") || []; if (bits.length !== part.length) continue;
+    part.forEach((x, k) => { const b = bits[k], file = (re) => (b.match(re) || [])[1]?.trim() || null;
+      const all = file(/\[\[File:([^|\]]+)\|/), light = file(/team-template-lightmode">\[\[File:([^|\]]+)\|/) || all, dark = file(/team-template-darkmode">\[\[File:([^|\]]+)\|/) || all;
+      if (light && !/TBD|filler/i.test(light)) out.set(x.key, { light, dark }); MAP.checked[`tpl:${x.key}`] = new Date().toISOString(); });
+  }
+  return out;
+}
 async function thumbs(files, width) {
   const res = new Map(), list = [...new Set(files.filter(Boolean))];
   for (let i = 0; i < list.length; i += 50) { const j = await api("commons", { action: "query", prop: "imageinfo", iiprop: "url", iiurlwidth: String(width), titles: list.slice(i, i + 50).map((f) => `File:${f}`).join("|") });
@@ -47,7 +60,9 @@ async function download(url, rel) {
 const ext = (f) => (/\.jpe?g$/i.test(f) ? ".jpg" : /\.webp$/i.test(f) ? ".webp" : ".png");
 let got = 0;
 for (const [kind, list, width] of [["heroes", heroes, 96], ["teams", teams, 96], ["players", players, 120]]) {
-  const names = await infoboxImages(list, kind), urls = await thumbs([...names.values()].flatMap((v) => [v.light, v.dark]), width);
+  const names = await infoboxImages(list, kind);
+  if (kind === "teams") for (const [k, v] of await templateIcons(list.filter((x) => !MAP.teams[x.key] && !names.get(x.key)?.light && !names.get(x.key)?.dark))) names.set(k, v);
+  const urls = await thumbs([...names.values()].flatMap((v) => [v.light, v.dark]), width);
   for (const [key, v] of names) {
     const one = async (f, tag) => (f && urls.get(f) ? download(urls.get(f), `${kind[0]}/x_${safe(key)}${tag}${ext(f)}`) /* x_ prefix: Windows refuses names like AUX or CON */ : null);
     const light = await one(v.light, ""), dark = await one(v.dark, "-dark");

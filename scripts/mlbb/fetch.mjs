@@ -93,6 +93,7 @@ console.log(`MLBB: ${fetched} stage pages updated`);
 const RD = path.join(MD, "rosters"); fs.mkdirSync(RD, { recursive: true });
 const ROLE = { "EXP Lane": "EXP", Jungle: "Jungle", Jungler: "Jungle", "Mid Lane": "Mid", Mid: "Mid", Middle: "Mid", "Mid Laner": "Mid", "Gold Lane": "Gold", Roam: "Roam", Roamer: "Roam" };
 const dec = (s) => s.replace(/&#95;/g, "_").replace(/&amp;/g, "&").replace(/&#39;/g, "'").replace(/&quot;/g, '"');
+const staffOf = {}; // team -> [{ name, page, role }] from the Staff tab, filled by parseCards
 function parseCards(html) {
   const h = dec(html), out = {};
   for (const card of h.split('class="general-collapsible collapsed team-participant-card"').slice(1)) {
@@ -101,6 +102,8 @@ function parseCards(html) {
     const subs = (card.split('data-toggle-area-content="2"')[1] || "").split('data-toggle-area-content="3"')[0];
     const members = (part, sub) => part.split('class="team-participant-card__member"').slice(1).map((m) => ({ player: (m.match(/class="block-player"[\s\S]*?<a [^>]*title="([^"]+)"[^>]*>([^<]+)<\/a>/) || [])[2]?.trim() || null, page: (m.match(/class="block-player"[\s\S]*?<a [^>]*title="([^"]+)"/) || [])[1] || null, role: ROLE[(m.match(/member-role-left"><img alt="([^"]+)"/) || [])[1]] || null, sub })).filter((x) => x.player);
     out[team] = [...members(main, false), ...members(subs, true)];
+    const staffPart = (card.split('data-toggle-area-content="3"')[1] || "").split('data-toggle-area-content="4"')[0];
+    staffOf[team] = staffPart.split('class="team-participant-card__member"').slice(1).map((m) => ({ name: (m.match(/class="block-player"[\s\S]*?<a [^>]*title="([^"]+)"[^>]*>([^<]+)<\/a>/) || [])[2]?.trim() || null, page: (m.match(/class="block-player"[\s\S]*?<a [^>]*title="([^"]+)"/) || [])[1]?.replace(/ \(page does not exist\)$/, "") || null, role: (m.match(/member-role-right">([^<]+)</) || [])[1]?.trim() || "Staff" })).filter((x) => x.name);
   }
   return out;
 }
@@ -109,10 +112,10 @@ const srev = {}; { const j = await api({ action: "query", prop: "revisions", rvp
 let lastParse = 0, rosterPages = 0;
 for (const sp of seasonPages) {
   const f = path.join(RD, `${safe(sp)}.json`), old = readJSON(f);
-  if (!srev[sp] || (old && old.revid === srev[sp] && Date.now() - Date.parse(old.fetched) < 7 * 86400000)) continue;
+  if (!srev[sp] || (old && old.staff && old.revid === srev[sp] && Date.now() - Date.parse(old.fetched) < 7 * 86400000)) continue;
   const wait = lastParse + 31000 - Date.now(); if (wait > 0) await sleep(wait); lastParse = Date.now();
   const j = await api({ action: "parse", page: sp, prop: "text" }); const html = j?.parse?.text?.["*"]; if (!html) continue;
-  const teamsR = parseCards(html); writeJSON(f, { page: sp, revid: srev[sp], fetched: new Date().toISOString(), teams: teamsR }); rosterPages++;
+  for (const k of Object.keys(staffOf)) delete staffOf[k]; const teamsR = parseCards(html); writeJSON(f, { page: sp, revid: srev[sp], fetched: new Date().toISOString(), teams: teamsR, staff: { ...staffOf } }); rosterPages++;
   console.log(`rosters ${sp}: ${Object.keys(teamsR).length} teams`);
 }
 console.log(`MLBB: ${rosterPages} season roster pages updated`);
