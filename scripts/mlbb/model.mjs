@@ -133,7 +133,7 @@ function replay(P, record = false) {
       if (warm && D.games > 200) { gb += (p0 - y) ** 2; gbD += (p1 - y) ** 2; gn++; }
       if (record && warm && prevW) MOM.push([dd, y, prevW]); prevW = y ? 1 : -1;
       if (record && warm) GDD.push([dd, y, g.h1, g.h2, m.date, m.league, m.score, g.n, m.bo]);
-      if (record) ALLG.push({ base: dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04), y, g, m, warm: warm && D.games > 200, nA: A.n, nB: B.n }); // every game with the full pre-game logit, for the ideas test
+      if (record) ALLG.push({ base: dd + P.wd * (e.hero * 0.2 + e.syn * 0.1 + e.cnt * 0.04), y, g, m, warm: warm && D.games > 200, nA: A.n, nB: B.n, pre: dd, dr: [P.wd * e.hero * 0.2, P.wd * e.syn * 0.1, P.wd * e.cnt * 0.04] }); // every game with the full pre-game logit, for the ideas test
       const k = P.k * (A.n < 6 || B.n < 6 ? 1.5 : 1), err = y - p0;
       A.r += k * err; B.r -= k * err; if (m.kind === "intl" && A.region !== B.region && A.region !== "INTL" && B.region !== "INTL") { REG[A.region] = (REG[A.region] || 0) + P.kr * err; REG[B.region] = (REG[B.region] || 0) - P.kr * err; }
       { const sp = y - lg(raw); A.f.push(sp); B.f.push(-sp); }
@@ -662,7 +662,43 @@ function whyMissed(x) {
   if (x.m.kind === "intl" && R.T.get(x.A)?.region !== R.T.get(x.B)?.region) out.push("cross-region match: ratings between regions are less certain");
   return out.join("; ");
 }
-const results = R.log.map((x) => { const right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]); return { date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(x.pS), graded: x.warm, right, mvp: x.m.mvp, ...(right ? {} : { why: whyMissed(x) }) }; }).reverse();
+// each game's own pre-game win chance (ratings + draft, walk-forward: made before that game was played)
+const GAMEP = new Map(ALLG.map((x) => [x.g, lg(x.base)])), GAMEX = new Map(ALLG.map((x) => [x.g, x]));
+// one game, in plain words: ratings before the draft, what the drafts changed and why, the side, the length, and our call
+const mmss = (t) => { const [a, b] = String(t || "").split(":").map(Number); return isFinite(a) ? a + (b || 0) / 60 : null; };
+function gameNotes(x, g) { const gx = GAMEX.get(g); if (!gx) return null; const A = x.A, B = x.B, pre = lg(gx.pre), post = lg(gx.base), wA = g.w === 1, notes = [];
+  const drafted = g.h1?.every(Boolean) && g.h2?.every(Boolean);
+  if (drafted) { const [h, sy, c] = gx.dr, tot = h + sy + c, side = tot >= 0 ? A : B, parts = [[h, "hero strength in the current meta"], [sy, "combos on the same side"], [c, "counter match-ups"]].filter(([v]) => Math.sign(v) === Math.sign(tot) && Math.abs(v) > 0.01).sort((p2, q) => Math.abs(q[0]) - Math.abs(p2[0])).map(([, l]) => l);
+    const mv = Math.round((post - pre) * 1000) / 10;
+    notes.push(Math.abs(mv) < 1 ? "the drafts were about even" : `the drafts favoured ${side} (${mv > 0 ? "+" : ""}${mv} points for ${A})${parts.length ? `, mainly ${parts.join(" and ")}` : ""}`);
+    if ((pre >= 0.5) !== (post >= 0.5)) notes.push(`the draft swung our call: ratings favoured ${pre >= 0.5 ? A : B}, both drafts together favoured ${post >= 0.5 ? A : B}`);
+    const sigW = SIG.get(wA ? A : B), sigL = SIG.get(wA ? B : A);
+    if (sigW && (wA ? g.h1 : g.h2).includes(sigW)) notes.push(`${wA ? A : B} got their signature ${cap1(sigW)}`);
+    if (sigL && (wA ? g.b1 : g.b2).includes(sigL)) notes.push(`${wA ? B : A}'s signature ${cap1(sigL)} was banned`);
+  } else notes.push("no draft recorded for this game, so the call used ratings only");
+  const len = mmss(g.len); if (len != null) notes.push(len < 12 ? `a fast game (${g.len}): early pressure decided it` : len >= 18 ? `a long game (${g.len}): it went to the late game` : `a mid-length game (${g.len})`);
+  const hit = (post >= 0.5) === wA; notes.push(hit ? `our call held: ${post >= 0.5 ? A : B} at ${Math.round(Math.max(post, 1 - post) * 100)}%` : Math.max(post, 1 - post) < 0.56 ? `close to a coin flip (${Math.round(Math.max(post, 1 - post) * 100)}%), and it went the other way` : `an upset: ${post >= 0.5 ? A : B} were ${Math.round(Math.max(post, 1 - post) * 100)}% favourites for this game`);
+  return { pre: r3(pre), post: r3(post), notes }; }
+function whyHit(x) {
+  const aFav = x.pS >= 0.5, fav = aFav ? x.A : x.B, dog = aFav ? x.B : x.A, fp = Math.max(x.pS, 1 - x.pS), out = [];
+  out.push(fp >= 0.75 ? `a clear favourite delivered: we gave ${fav} ${Math.round(fp * 100)}%` : fp >= 0.6 ? `${fav} won as the favourite (${Math.round(fp * 100)}%)` : `a close call went our way: ${fav} at ${Math.round(fp * 100)}%`);
+  const won = x.m.games.filter((g) => (g.w === 1) === aFav); let draftWon = 0, sigPlayed = 0; const sig = SIG.get(fav);
+  for (const g of won) { const pg = GAMEP.get(g); if (pg != null && (aFav ? pg : 1 - pg) > 0.5) draftWon++; if (sig && (aFav ? g.h1 : g.h2).includes(sig)) sigPlayed++; }
+  if (draftWon) out.push(`our game-by-game picks (ratings plus both drafts) also favoured ${fav} in ${draftWon} of the ${won.length} games they won`);
+  if (sigPlayed) out.push(`${fav} got their signature ${cap1(sig)} in ${sigPlayed} of those wins`);
+  const [s1, s2] = x.m.score; if (x.m.bo > 1 && Math.min(s1, s2) === 0) out.push(`a clean sweep: ${dog} did not take a game`); else if (x.m.bo > 1 && Math.abs(s1 - s2) === 1 && s1 + s2 === x.m.bo) out.push("won the deciding game");
+  return out.join("; ");
+}
+const results = R.log.map((x) => { const right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]); return { id: safe(x.m.id), date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(x.pS), graded: x.warm, right, mvp: x.m.mvp, ...(right ? { whyHit: whyHit(x) } : { why: whyMissed(x) }) }; }).reverse();
+// HISTORY: every finished series, with every game (drafts, sides, length, winner) and our predictions before the series and
+// before each game. history.json is the index; series/<id>.json holds one series.
+{ fs.rmSync(path.join(OUT, "series"), { recursive: true, force: true }); fs.mkdirSync(path.join(OUT, "series"), { recursive: true });
+  const idx = [];
+  for (const x of R.log) { const id = safe(x.m.id), right = (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1]);
+    idx.push([id, x.m.date, x.m.league, x.m.stage, x.A, x.B, x.m.score[0], x.m.score[1], r3(x.pS), x.warm ? 1 : 0, right ? 1 : 0]);
+    writeJSON(path.join(OUT, "series", id + ".json"), { id, date: x.m.date, league: x.m.league, stage: x.m.stage, bo: x.m.bo, a: x.A, b: x.B, score: x.m.score, pSeries: r3(x.pS), graded: x.warm, right, mvp: x.m.mvp || null, why: right ? whyHit(x) : whyMissed(x),
+      games: x.m.games.map((g) => { const pg = GAMEP.get(g), an = gameNotes(x, g); return { n: g.n, w: g.w, len: g.len || null, map: g.map || null, side1: g.side1 || null, pA: pg == null ? null : r3(pg), pre: an?.pre ?? null, notes: an?.notes || [], h1: g.h1, h2: g.h2, b1: g.b1, b2: g.b2 }; }) }); }
+  writeJSON(path.join(OUT, "history.json"), idx.reverse()); }
 writeJSON(path.join(OUT, "results.json"), results.slice(0, 400));
 // LEARNING LEDGER (after every game and every refresh). Every finished game updates team ratings, the hero/combo/counter
 // tables and player career records before the next game is predicted; every refresh re-tunes the settings on all history.
