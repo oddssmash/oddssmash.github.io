@@ -181,6 +181,21 @@ const CAL = (() => { const G = R.log.filter((x) => x.warm), cut = Math.floor(G.l
   const test = (sel) => { const tr = G.slice(0, cut).filter(sel), te = G.slice(cut).filter(sel), T = fitT(tr); return { nTrain: tr.length, nTest: te.length, T, base: r3(br(te, 1) * 1000) / 1000, withT: r3(br(te, T) * 1000) / 1000, gain: Math.round((br(te, 1) - br(te, T)) * 10000) / 10000 }; };
   return { all: test(() => true), playoffs: test(big), regular: test((x) => !big(x)), bo7: test((x) => x.m.bo === 7) }; })();
 console.log("calibration test", JSON.stringify(CAL));
+// SWEEP TEST: a team's level on the day varies and holds for the whole series, so scores bunch into sweeps. Model it as a
+// series-wide offset on the single-game logit, normal with spread SIG (Gauss-Hermite), fitted per format on the first 70%
+// of graded series (likelihood of the exact score) and judged on the last 30%: exact-score log-loss and series Brier.
+const GH = [[-2.0201828705, 0.0199532421], [-0.9585724646, 0.3936193232], [0, 0.9453087205], [0.9585724646, 0.3936193232], [2.0201828705, 0.0199532421]].map(([x, w]) => [x * Math.SQRT2, w / Math.sqrt(Math.PI)]);
+function seriesShaped(pg, bo, sig) { const base = series(pg, bo); if (!sig) return base; const mix = seriesMix(pg, bo, sig), need = Math.ceil(bo / 2), fa = base.win / mix.win, fb = (1 - base.win) / (1 - mix.win), scores = {}; for (const [k, v] of Object.entries(mix.scores)) scores[k] = v * (+k.split("-")[0] === need ? fa : fb); return { win: base.win, scores }; }
+function seriesMix(pg, bo, sig) { if (!sig) return series(pg, bo); const L = logit(Math.min(0.999, Math.max(0.001, pg))), out = {}; let win = 0; for (const [z, w] of GH) { const r = series(lg(L + sig * z), bo); win += w * r.win; for (const [k, v] of Object.entries(r.scores)) out[k] = (out[k] || 0) + w * v; } return { win, scores: out }; }
+const SWEEP = (() => { const G = R.log.filter((x) => x.warm && [3, 5].includes(x.m.bo)), cut = Math.floor(G.length * 0.7), key = (x) => `${x.m.score[0]}-${x.m.score[1]}`, won = (x) => (x.m.score[0] > x.m.score[1] ? 1 : 0);
+  const ll = (rows, sig) => rows.reduce((t, x) => t - Math.log(Math.max(1e-6, seriesMix(x.pg, x.m.bo, sig).scores[key(x)] || 1e-6)), 0) / Math.max(1, rows.length);
+  const br = (rows, sig) => rows.reduce((t, x) => t + (seriesMix(x.pg, x.m.bo, sig).win - won(x)) ** 2, 0) / Math.max(1, rows.length);
+  const sweepShare = (rows, sig) => { let pred = 0, act = 0; for (const x of rows) { const sc = seriesMix(x.pg, x.m.bo, sig).scores, need = Math.ceil(x.m.bo / 2); pred += (sc[`${need}-0`] || 0) + (sc[`0-${need}`] || 0); act += Math.min(...x.m.score) === 0 ? 1 : 0; } return { pred: r3(pred / rows.length), act: r3(act / rows.length) }; };
+  const out = {}; for (const bo of [3, 5]) { const tr = G.slice(0, cut).filter((x) => x.m.bo === bo), te = G.slice(cut).filter((x) => x.m.bo === bo); let best = 0, bv = Infinity; for (let sg = 0; sg <= 2.0001; sg += 0.1) { const v = ll(tr, sg); if (v < bv) { bv = v; best = Math.round(sg * 10) / 10; } }
+    const llS = (rows, sig) => rows.reduce((t, x) => t - Math.log(Math.max(1e-6, seriesShaped(x.pg, x.m.bo, sig).scores[key(x)] || 1e-6)), 0) / Math.max(1, rows.length);
+    out["bo" + bo] = { nTrain: tr.length, nTest: te.length, sig: best, scoreLogLossShaped: r3(llS(te, best)), scoreLogLoss: { base: r3(ll(te, 0)), with: r3(ll(te, best)) }, seriesBrier: { base: r3(br(te, 0)), with: r3(br(te, best)) }, sweeps: { base: sweepShare(te, 0), with: sweepShare(te, best) } }; }
+  return out; })();
+console.log("sweep test", JSON.stringify(SWEEP));
 // IDEAS TEST (run with IDEAS_TEST=<path to the research review-all-players.json>): the research session's model ideas,
 // each built as a feature from games played BEFORE the one being predicted, added on top of the full pre-game logit
 // (team ratings + draft layer). Each is fitted on the first 70% of games by date and judged on the last 30%; an idea is
@@ -593,8 +608,11 @@ function contextFor(m) {
 // best-of-7 chances are pulled toward 50% (logit x 0.75): fitted 0.54 on the first 70% of best-of-7 series, which cut the
 // later series' Brier from 0.263 to 0.243; half of that pull is used because there are only 50 such series
 const BO7T = 0.75;
+// day-form spread per format (SWEEP TEST, adopted): the score split, expected maps and map lines come from the shaped series
+// math; the series winner chance is unchanged. Best-of-3 0.8, best-of-5 0.5 (best-of-7: too few series, left plain)
+const SWEEP_SIG = { 3: 0.8, 5: 0.5 };
 function project(a, b, bo, page, nudge = 0) {
-  const TA = R.T.get(a), TB = R.T.get(b), pg = lg((bo === 7 ? BO7T : 1) * ((ratingOf(a) - ratingOf(b)) * crossOf(a, b) + (TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(a, page), lineupOf(b, page), seasonOf(page)) : 0) + nudge)), s = series(pg, bo), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
+  const TA = R.T.get(a), TB = R.T.get(b), pg = lg((bo === 7 ? BO7T : 1) * ((ratingOf(a) - ratingOf(b)) * crossOf(a, b) + (TA && TB ? cwEdge(R.PLR, R.SGc, TA, TB, lineupOf(a, page), lineupOf(b, page), seasonOf(page)) : 0) + nudge)), s = seriesShaped(pg, bo, SWEEP_SIG[bo] || 0), pa = profile(a), pb = profile(b), sa = sigEffect(a, pa), sb2 = sigEffect(b, pb), scen = [];
   // scenarios: signature hero banned, likely ban targets, side, early vs late games
   for (const [t, sig, other] of [[a, sa, b], [b, sb2, a]]) if (sig && sig.with[1] >= 3) { const pBan = (t === a ? pb : pa).bansTheyMake.find((x) => x.h === sig.hero); const adj = Math.max(-0.15, Math.min(0.15, -sig.delta * 0.5)); const p2 = Math.min(0.97, Math.max(0.03, pg + (t === a ? adj : -adj))); scen.push({ k: "sigban", team: t, hero: sig.hero, role: sig.role, text: `If ${other} bans ${t}'s ${sig.role} ${sig.hero} (${sig.with[0]}-${sig.with[1] - sig.with[0]} with it, ${sig.without[0]}-${sig.without[1] - sig.without[0]} without): ${a} wins a game ${Math.round(p2 * 100)}% (from ${Math.round(pg * 100)}%)`, pGame: r3(p2), pSeries: r3(series(p2, bo).win), banRate: pBan ? pBan.share : 0 }); }
   const sideTxt = (t, p) => p.side.blue && p.side.red ? `${t}: ${p.side.blue.w}-${p.side.blue.n - p.side.blue.w} on blue, ${p.side.red.w}-${p.side.red.n - p.side.red.w} on red` : null;
