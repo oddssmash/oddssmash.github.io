@@ -579,7 +579,8 @@ writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series m
 {
   fs.mkdirSync(path.join(OUT, "library"), { recursive: true });
   const byL = {};
-  for (const m of done) for (const g of m.games) (byL[m.league] ||= []).push([m.date?.slice(0, 10), m.stage, m.a, m.b, m.bo, g.n, g.w, g.side1, g.map, g.len, g.h1, g.h2, g.b1, g.b2, m.score]);
+  const GX0 = new Map(ALLG.map((x) => [x.g, x])); // each game's own chances, saved before it was played (same as the series page)
+  for (const m of done) for (const g of m.games) { const gx = GX0.get(g); (byL[m.league] ||= []).push([m.date?.slice(0, 10), m.stage, m.a, m.b, m.bo, g.n, g.w, g.side1, g.map, g.len, g.h1, g.h2, g.b1, g.b2, m.score, gx ? r3(lg(gx.pre)) : null, gx ? r3(lg(gx.base)) : null]); }
   const index = [];
   for (const [lgName, rows] of Object.entries(byL)) { const id = safe(lgName); writeJSON(path.join(OUT, "library", `${id}.json`), rows.reverse()); index.push({ id, league: lgName, games: rows.length, last: rows[0]?.[0] }); }
   writeJSON(path.join(OUT, "library.json"), index.sort((a, b) => (b.last || "").localeCompare(a.last || "")));
