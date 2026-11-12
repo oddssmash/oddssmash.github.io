@@ -608,9 +608,12 @@ function project(a, b, bo, page, nudge = 0) {
 const nA = (name) => R.T.get(name)?.n || 0;
 // warnings: best-of-7, playoff favourites at 75%+, and leagues where our series Brier has been 0.245 or worse (30+ graded)
 const LGB = (() => { const out = {}; for (const x of R.log) if (x.warm) { const v = (out[x.m.league] ||= { n: 0, b: 0 }); v.n++; v.b += (x.pS - (x.m.score[0] > x.m.score[1] ? 1 : 0)) ** 2; } for (const v of Object.values(out)) v.b = r3(v.b / v.n); return out; })();
+// playoff favourites at 75%+ on our full history: how often they won against what we said
+const PFAV = (() => { const rows = R.log.filter((x) => x.warm && (/playoff|final|knockout|bracket|upper|lower|elimination/i.test(x.m.stage || "") || x.m.kind === "intl") && Math.max(x.pS, 1 - x.pS) >= 0.75); const said = rows.reduce((a, x) => a + Math.max(x.pS, 1 - x.pS), 0) / Math.max(1, rows.length), won = rows.filter((x) => (x.pS >= 0.5) === (x.m.score[0] > x.m.score[1])).length / Math.max(1, rows.length); return { n: rows.length, said: r3(said), won: r3(won) }; })();
+console.log("playoff favourites 75%+", JSON.stringify(PFAV));
 const warningsFor = (m, pS) => { const w = [], big = /playoff|final|knockout|bracket|upper|lower|elimination/i.test(m.stage || ""), lb = LGB[m.league];
   if (m.bo === 7) w.push("Best-of-7: our weakest format so far, so the chance is pulled toward 50%");
-  if (big && Math.max(pS, 1 - pS) >= 0.75) w.push("Playoff favourite at 75%+: these have won about 75%, less than we said");
+  if (big && Math.max(pS, 1 - pS) >= 0.75 && PFAV.n >= 30 && PFAV.won < PFAV.said - 0.03) w.push(`Playoff favourite at 75%+: in our history these won ${Math.round(PFAV.won * 100)}% while we said ${Math.round(PFAV.said * 100)}% (${PFAV.n} series)`);
   if (lb && lb.n >= 30 && lb.b >= 0.245) w.push(`${m.league}: our numbers here have been near coin-flip quality (Brier ${lb.b.toFixed(3)} over ${lb.n} series)`);
   return w; };
 const confOf0 = (p, n) => (n < 4 ? "low (thin record)" : Math.abs(p - 0.5) < 0.12 ? "low (near coin-flip)" : n < 10 ? "medium (fewer than 10 series for one side)" : Math.abs(p - 0.5) >= 0.25 ? "high" : "medium");
