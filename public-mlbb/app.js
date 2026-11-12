@@ -487,7 +487,7 @@ async function vPicks() {
     let q = { ...p };
     if (p.kind === "series") { const fav = m.pSeries >= 0.5 ? m.a : m.b; q = { ...q, pick: `${fav} to win the series`, p: Math.round(Math.min(0.9, Math.max(m.pSeries, 1 - m.pSeries)) * 1000) / 1000 }; }
     if (p.kind === "maps") { const line = parseFloat((p.pick.match(/([0-9.]+) maps/) || [])[1]); if (isFinite(line) && m.pGame != null) { const sr = seriesOf(m.pGame, m.bo), over = Object.entries(sr.sc).reduce((a, [k, v]) => a + (k.split("-").reduce((x, y) => +x + +y, 0) > line ? v : 0), 0); q = { ...q, pick: `${over >= 0.5 ? "Over" : "Under"} ${line} maps`, p: Math.round(Math.min(0.85, Math.max(over, 1 - over)) * 1000) / 1000 }; } }
-    if (!p.fewGames) { q.noPick = q.p < 0.6; q.why = q.noPick ? "Too close to call: under 60%." : undefined; }
+    if (!p.fewGames && !p.weakLeague) { q.noPick = q.p < 0.6; q.why = q.noPick ? "Too close to call: under 60%." : undefined; }
     return q; });
   const now = Date.now(), byM = new Map(); for (const p of picks) { /* every match still waiting for its result (the same list as Matches), started ones included */ (byM.get(p.id) || byM.set(p.id, []).get(p.id)).push(p); }
   S.pkf ||= "all"; const groups = [...byM.entries()].map(([id, ps]) => ({ id, ps, m: up.find((u) => u.id === id), top: Math.max(...ps.map((p) => p.p)) }));

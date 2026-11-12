@@ -638,6 +638,8 @@ for (const m of upcoming) {
   else { const fav = pr.pSeries >= 0.5 ? m.a : m.b; picks.push({ id: m.id, date: m.date, league: m.league, kind: "series", pick: `${fav} to win the series`, p: r3(Math.min(0.9, Math.max(pr.pSeries, 1 - pr.pSeries))), game: `${m.a} vs ${m.b}`, noPick: true, fewGames: true, why: `Not a pick: ${nA(m.a) < 6 ? m.a : m.b} has only ${Math.min(nA(m.a), nA(m.b))} series in our data (we need 6).` }); }
 }
 for (const p of picks) if (p.p < 0.6 && !p.fewGames) { p.noPick = true; p.why = "Too close to call: under 60%."; }
+// leagues where our series numbers have been near coin-flip quality: shown for reference, never counted as a pick
+for (const p of picks) { const lb = LGB[p.league]; if (lb && lb.n >= 30 && lb.b >= 0.245) { p.noPick = true; p.weakLeague = true; p.why = `Reference only: our numbers in ${p.league} have been near coin-flip quality (Brier ${lb.b.toFixed(3)} over ${lb.n} series).`; } }
 picks.sort((a, b) => b.p - a.p);
 writeJSON(path.join(OUT, "upcoming.json"), upOut);
 writeJSON(path.join(OUT, "picks.json"), { note: "Our own lines from the series math (game chance from team ratings). Capped at 90% (maps 85%) and only for teams with 6+ series in our data; under 60% is listed as too close to call. No sportsbook data.", picks });
