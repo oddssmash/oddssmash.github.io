@@ -745,7 +745,11 @@ function whyMissed(x) {
   for (const g of lost) { const gx = GAMEX.get(g); if (gx && g.h1.every(Boolean) && g.h2.every(Boolean)) { const v = lg(gx.base) - lg(gx.pre); if ((aFav ? -v : v) >= 0.01) draftLost++; } /* the draft tables as they stood before that game */ if (sig && [...(aFav ? g.b2 : g.b1)].includes(sig)) sigBanned++; }
   if (draftLost) out.push(`our draft model favoured ${poss(dog)} picks in ${draftLost} of the ${lost.length} games ${fav} lost`);
   { let k = 0; for (const e of priorOf(fav, x.i).reverse()) { if (e.p >= 0.5 && !e.won) k++; else break; } if (k >= 1) out.push(`${poss(fav)} ${ordw(k + 1)} straight loss as favourite`); }
-  { const pd = priorOf(dog, x.i).filter((e) => e.p < 0.5).slice(-4), w = pd.filter((e) => e.won).length; if (pd.length >= 2 && w >= 1) out.push(`${poss(dog)} ${ordw(w + 1)} upset in ${pd.length + 1} tries as the underdog`); }
+  { const last = priorOf(dog, x.i).slice(-7), w = last.filter((e) => e.p < 0.5 && e.won).length; if (w >= 1) out.push(`${poss(dog)} ${ordw(w + 1)} win as the underdog in its last ${last.length + 1} series`); }
+  // the underdog took away the hero that beat it: banned it in later games it went on to win
+  { const favPicks = (g) => (aFav ? g.h1 : g.h2), dogBans = (g) => (aFav ? g.b2 : g.b1), favWon = x.m.games.filter((g) => (g.w === 1) === aFav);
+    for (const h of new Set(favWon.flatMap(favPicks).filter(Boolean))) { const firstWin = Math.min(...favWon.filter((g) => favPicks(g).includes(h)).map((g) => g.n)), later = x.m.games.filter((g) => g.n > firstWin && (g.w === 1) !== aFav && (dogBans(g) || []).includes(h)).map((g) => g.n);
+      if (later.length >= 2) { out.push(`${dog} banned ${cap1(h)} in games ${later.length > 2 ? later.slice(0, -1).join(", ") + " and " + later.at(-1) : later.join(" and ")} after losing to it, and won them`); break; } } }
   { const sw = heroSwing(x, fav, aFav); if (sw) out.push(sw); }
   if (sigBanned) out.push(`${poss(fav)} signature ${cap1(sig)} was banned in ${sigBanned} of those games`);
   const [s1, s2] = x.m.score; if (x.m.bo > 1 && Math.abs(s1 - s2) === 1 && s1 + s2 === x.m.bo) out.push("lost the deciding game");
