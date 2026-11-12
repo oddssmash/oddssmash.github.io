@@ -1160,3 +1160,5 @@ a.gtab { color: var(--ink-2); }
 .ml-c.no { box-shadow: inset 0 0 0 1px var(--bad, #d64545); } .ml-c.no b { color: var(--bad, #d64545); }
 .ml-pd { margin-top: 6px; } .ml-pd ul { margin: 6px 0 0; display: grid; gap: 3px; }
 .ml-card > details { margin-top: 10px; } .ml-card > details > summary { cursor: pointer; }
+
+.rv-sw { margin: 4px 0 2px; } .rv-note { margin: 0 0 10px; }
