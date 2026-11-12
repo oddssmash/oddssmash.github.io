@@ -1,16 +1,16 @@
 // Player Stats tab data, derived from the research review file (review-all-players.json, built from the MLBBHub Season 18
 // scoreboards, Liquipedia winners and heroes, the MLBB Esports MENA scoreboard graphics and the MPL KH leaderboards).
 // Run by hand when the research file changes:  node scripts/mlbb/derive-pstats.mjs "<path to review-all-players.json>"
-// Writes data/mlbb/pstats/index.json (list, leaders, archetypes) and data/mlbb/pstats/p/<id>.json (one per player).
+// Writes derived/mlbb/pstats/index.json (list, leaders, archetypes) and derived/mlbb/pstats/p/<id>.json (one per player).
 // Publishing rule: derived numbers only. MENA comes from scoreboard graphics on Facebook, so only season averages and
 // splits are kept for it, never its per-game rows; the raw 5,500-row game log is not published at all.
 import fs from "node:fs";
 import path from "node:path";
-import { DATA, writeJSON } from "../lib/util.mjs";
+import { ROOT, writeJSON } from "../lib/util.mjs";
 
 const SRC = process.argv[2];
 if (!SRC || !fs.existsSync(SRC)) { console.log("usage: node scripts/mlbb/derive-pstats.mjs <review-all-players.json>"); process.exit(1); }
-const d = JSON.parse(fs.readFileSync(SRC, "utf8")), OUT = path.join(DATA, "mlbb", "pstats");
+const d = JSON.parse(fs.readFileSync(SRC, "utf8")), OUT = path.join(ROOT, "derived", "mlbb", "pstats"); // outside data/: the workflow restores a cached data/ over the checkout
 fs.rmSync(OUT, { recursive: true, force: true }); fs.mkdirSync(path.join(OUT, "p"), { recursive: true });
 const idOf = (lg, p) => `${lg}-${String(p).replace(/[^A-Za-z0-9]+/g, "_")}`.toLowerCase(); // lower case: file names must not clash on Windows/macOS
 // the research file sometimes lists one player twice under different capitalisation (MAYKIDSS / Maykidss): keep the larger entry

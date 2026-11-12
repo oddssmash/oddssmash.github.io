@@ -583,7 +583,7 @@ const nextEvents = all.filter((m) => !m.done && m.date && Date.parse(m.date) > n
 }
 { const SHT = readJSON(path.join(MD, "team-short.json"), {}), out = {}; for (const t of teamsOut) { const s2 = SHT[t.name] || Object.entries(SHT).find(([k]) => k.toLowerCase() === t.name.toLowerCase())?.[1]; if (s2) out[t.name] = s2; } writeJSON(path.join(OUT, "short.json"), out); }
 // Player Stats tab: derived files from scripts/mlbb/derive-pstats.mjs, copied as they are
-if (fs.existsSync(path.join(MD, "pstats"))) fs.cpSync(path.join(MD, "pstats"), path.join(OUT, "pstats"), { recursive: true });
+{ const PS = path.join(ROOT, "derived", "mlbb", "pstats"); if (fs.existsSync(PS)) { fs.rmSync(path.join(OUT, "pstats"), { recursive: true, force: true }); fs.cpSync(PS, path.join(OUT, "pstats"), { recursive: true }); } }
 writeJSON(path.join(OUT, "meta.json"), { momentum: momFit, patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release, changes: lastPatch.changes } : null, patches: LP.patches.slice(-8).reverse().map((p) => ({ patch: p.patch, release: p.release, changes: p.changes.length })), built: new Date().toISOString(), series: done.length, games: totalGames, teams: teamsOut.length, players: playersOut.length, heroes: HERO.length, upcoming: upOut.length, leagues: [...new Set(EVENTS.map((e) => e.league))], ratingScale: "Elo-style: 1500 average, 100 points = about 64% in a single game",
   roles: ROLES, source: "Liquipedia (CC-BY-SA) for matches, drafts and rosters; mlbb.io for ranked-game hero rates and counters. No betting data." });
 console.log(`wrote ${upOut.length} upcoming, ${teamsOut.length} teams, ${playersOut.length} players, ${HERO.length} heroes, ${picks.length} picks`);
