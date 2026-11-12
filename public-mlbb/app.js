@@ -836,14 +836,14 @@ async function vStats(sub = "players") {
   if (sub === "archetypes") return psArch(D);
   if (sub === "compare") return vPcompare("");
   const f = (S.psf ||= { q: "", lg: "", t: "", lane: "", arch: "" });
-  const teams = [...new Set(P.filter((p) => !f.lg || p.lg === f.lg).map((p) => p.t))].sort();
+  const tKey = (x) => `${x.t}|${x.lg}`, teams = [...new Map(P.filter((x) => !f.lg || x.lg === f.lg).map((x) => [tKey(x), x])).values()].sort((a, b) => a.t.localeCompare(b.t) || a.lg.localeCompare(b.lg)).map((x) => [tKey(x), `${x.t} · ${x.lg}`]); /* the same tag can be a different team in another league */
   const sel = (id, label, opts, v) => `<label class="ps-f"><span>${label}</span><select id="${id}"><option value="">All</option>${opts.map(([k, l]) => `<option value="${esc(k)}"${k === v ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
   app.innerHTML = `<h1>Player stats</h1>${psTabs("players")}
     <div class="ps-filters"><input id="ps-q" type="search" placeholder="Search a player or team" value="${esc(f.q)}" aria-label="Search a player or team">
-      ${sel("ps-lg", "League", Object.entries(LGN), f.lg)}${sel("ps-t", "Team", teams.map((t) => [t, t]), f.t)}${sel("ps-lane", "Lane", ["EXP", "Jungle", "Mid", "Gold", "Roam"].map((x) => [x, x]), f.lane)}${sel("ps-arch", "Archetype", Object.keys(AC).map((x) => [x, x]), f.arch)}</div>
+      ${sel("ps-lg", "League", Object.entries(LGN), f.lg)}${sel("ps-t", "Team", teams, f.t)}${sel("ps-lane", "Lane", ["EXP", "Jungle", "Mid", "Gold", "Roam"].map((x) => [x, x]), f.lane)}${sel("ps-arch", "Archetype", Object.keys(AC).map((x) => [x, x]), f.arch)}</div>
     <p class="small muted" id="ps-n"></p><div class="ps-grid" id="ps-list"></div>${psNote()}`;
   const draw = () => {
-    const q = f.q.toLowerCase(), rows = P.filter((p) => (!f.lg || p.lg === f.lg) && (!f.t || p.t === f.t) && (!f.lane || p.lane === f.lane) && (!f.arch || abase(p.arch) === f.arch) && (!q || p.p.toLowerCase().includes(q) || p.t.toLowerCase().includes(q))).sort((a, b) => b.g - a.g);
+    const q = f.q.toLowerCase(), rows = P.filter((p) => (!f.lg || p.lg === f.lg) && (!f.t || `${p.t}|${p.lg}` === f.t) && (!f.lane || p.lane === f.lane) && (!f.arch || abase(p.arch) === f.arch) && (!q || p.p.toLowerCase().includes(q) || p.t.toLowerCase().includes(q))).sort((a, b) => b.g - a.g);
     document.getElementById("ps-n").textContent = `${rows.length} players${f.lane ? " · lanes are not recorded for MENA" : ""}`;
     document.getElementById("ps-list").innerHTML = rows.map((p) => `<a class="ps-card${thin(p.g)}" href="#/pstat/${esc(p.id)}" style="--c:${acol(p.arch)}"><div class="ps-c-top">${tb(fullTeam(p.t), 34)}<span><b>${esc(p.p)}</b><em>${esc(p.t)} · ${esc(p.lane || p.lg)}${p.lane ? ` · ${esc(p.lg)}` : ""}</em></span></div>${abadge(p.arch, p.archConfLabel)}${mixBar(p.blend)}<div class="ps-c-st"><span><b class="num">${p.g}</b>games</span><span><b class="num">${Math.round(p.wp)}%</b>won</span><span><b class="num">${f1(p.kda)}</b>KDA</span><span><b class="num">${p.gpm || "-"}</b>GPM</span></div></a>`).join("") || `<p class="muted">No player matches these filters.</p>`;
   };
