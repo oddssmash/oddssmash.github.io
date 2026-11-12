@@ -3550,8 +3550,27 @@ function pickWhy(pick, sim, gameRaw) {
   return parts.join("") || `<p class="small muted">No extra detail for this pick.</p>`;
 }
 // ---- Picks: track record (every pick frozen before tip-off, graded after the final, followed live while in play)
+// against the sportsbook main lines: moneyline, pre-game spread, total and high-value props, game by game
+function mainlineCard(ML) {
+  if (!ML?.games?.length) return "";
+  const ab = (id) => (S.teams || []).find((t) => String(t.id) === String(id))?.abbr || id, R = ML.record;
+  const tile = (k, l) => { const r = R[k]; return `<div class="stat"><b>${r.n ? pct(r.hit / r.n) : "-"}</b><span>${l} · ${r.hit}/${r.n}${r.push ? ` · ${r.push} push` : ""}</span></div>`; };
+  const chip = (st, txt) => `<span class="ml-c ${st === "hit" ? "ok" : st === "miss" ? "no" : ""}"><b>${st === "hit" ? "✓" : st === "miss" ? "✗" : st === "push" ? "=" : "–"}</b> ${txt}</span>`;
+  const sgn = (v) => (v > 0 ? "+" : "") + v;
+  const famN = { pts: "pts", reb: "reb", ast: "ast", tpm: "3PM" };
+  const byDay = {}; for (const g of ML.games) (byDay[dayKey(g.date)] ||= []).push(g);
+  const dayRec = (arr) => { let n = 0, h = 0; for (const g of arr) for (const x of [g.ml, g.spread, g.total, ...(g.props || [])]) if (x && (x.status === "hit" || x.status === "miss")) { n++; if (x.status === "hit") h++; } return n ? `${h}/${n} hit (${pct(h / n)})` : "-"; };
+  const gameRow = (g) => { const props = (g.props || []).filter((x) => x.status !== "void"), ph = props.filter((x) => x.status === "hit").length;
+    return `<li class="ml-g"><div class="ml-sc"><b>${esc(ab(g.away))} ${g.as}</b> @ <b>${esc(ab(g.home))} ${g.hs}</b><span class="small muted"> · we projected ${esc(ab(g.away))} ${f1(g.proj.as)}, ${esc(ab(g.home))} ${f1(g.proj.hs)}</span></div>
+      <div class="ml-cs">${chip(g.ml.status, `ML ${esc(ab(g.ml.pick))}${g.ml.odds ? ` (${g.ml.odds > 0 ? "+" : ""}${g.ml.odds})` : ""}`)}${g.spread ? chip(g.spread.status, `Spread ${esc(ab(g.spread.pick))} ${sgn(g.spread.line)}`) : chip("", "Spread: no line saved")}${g.total ? chip(g.total.status, `${g.total.side === "over" ? "Over" : "Under"} ${g.total.line} (final ${g.total.actual})`) : chip("", "Total: no line saved")}${props.length ? chip(ph * 2 >= props.length ? "hit" : "miss", `Props ${ph}/${props.length}`) : ""}</div>
+      ${props.length ? `<details class="ml-pd"><summary class="small">Player props at the main line</summary><ul class="plain">${props.map((x) => `<li class="small">${x.status === "hit" ? "✓" : x.status === "miss" ? "✗" : "="} <b>${esc(x.player.n)}</b> ${x.side} ${x.line} ${famN[x.fam] || x.fam} · we said ${pct(x.p)} · final ${x.actual}</li>`).join("")}</ul></details>` : ""}</li>`; };
+  return `<div class="card ml-card"><h2>Against the sportsbook main lines</h2>
+    <div class="statgrid sg4">${tile("ml", "Moneyline")}${tile("spread", "Spread")}${tile("total", "Total")}${tile("props", "Player props")}</div>
+    <p class="small muted">Last 21 days. ${esc(ML.note)} Player props: our chance at the main prop line was 60%+ on one side. Hit rates leave pushes out.</p>
+    ${Object.entries(byDay).sort((a, b) => b[0].localeCompare(a[0])).map(([d, arr], i) => `<details${i === 0 ? " open" : ""}><summary><b>${esc(fmtD(arr[0].date, { weekday: "short", month: "short", day: "numeric" }))}</b> <span class="small muted">· ${dayRec(arr)}</span></summary><ul class="plain">${arr.map(gameRow).join("")}</ul></details>`).join("")}</div>`;
+}
 async function vPicksLog() {
-  const log = await load("picks-log.json").catch(() => null);
+  const log = await load("picks-log.json").catch(() => null), ML = await load("mainline-log.json").catch(() => null);
   const tabs = `<div class="filters" role="group" aria-label="Prop type">${[["main", "Main lines"], ["top", "85%+ picks"], ["player", "Player props"], ["team", "Team props"], ["parlay", "Parlays"], ["log", "Track record"]].map(([k, l]) => `<button class="fbtn" type="button" data-pk-kind="${k}" aria-pressed="${S.pkKind === k}">${l}</button>`).join("")}</div>`;
   const bind = () => app.querySelectorAll("[data-pk-kind]").forEach((b) => b.addEventListener("click", () => { S.pkKind = b.dataset.pkKind; clearInterval(S.pkLogTimer); vPicks(); }));
   if (!log?.picks?.length) { app.innerHTML = `<h1>Picks</h1>${tabs}<div class="card"><p class="small">The track record starts with the next update: every pick is saved at the last run before its game starts, then graded after the final.</p></div>`; bind(); return; }
@@ -3578,8 +3597,8 @@ async function vPicksLog() {
   const rec = (arr) => { const g = arr.filter((p) => p.status !== "void"), h = g.filter((p) => p.status === "hit").length; return g.length ? `${h}/${g.length} hit (${pct(h / g.length)})` : "-"; };
   const famName = { pts: "Points", reb: "Rebounds", ast: "Assists", tpm: "Threes", total: "Game totals", teamTotal: "Team totals", spread: "Spreads", winner: "Winners" };
   const liveRows = started.map((p) => ({ p, st: liveOf(p) })).sort((a, b) => ["hit", "pace", "behind", "miss", "void", "waiting"].indexOf(a.st.tag) - ["hit", "pace", "behind", "miss", "void", "waiting"].indexOf(b.st.tag));
-  app.innerHTML = `<h1>Picks</h1>${tabs}
-    <div class="card"><h2>Track record, last 21 days</h2><p class="big-n">${log.record.n ? `${log.record.hit}/${log.record.n} <span class="small muted">picks hit (${pct(log.record.hit / log.record.n)})</span>` : `<span class="small">First grades come in after the next finished games.</span>`}</p>
+  app.innerHTML = `<h1>Picks</h1>${tabs}${mainlineCard(ML)}
+    <div class="card"><h2>Our picks (85%+ lines), last 21 days</h2><p class="big-n">${log.record.n ? `${log.record.hit}/${log.record.n} <span class="small muted">picks hit (${pct(log.record.hit / log.record.n)})</span>` : `<span class="small">First grades come in after the next finished games.</span>`}</p>
       ${Object.keys(log.byFamily || {}).length ? `<div class="statgrid sg4">${Object.entries(log.byFamily).map(([k, v]) => `<div class="stat"><b>${pct(v.hit / v.n)}</b><span>${esc(famName[k] || k)} · ${v.hit}/${v.n}</span></div>`).join("")}</div>` : ""}
       <p class="small muted">${esc(log.note)}</p></div>
     ${liveRows.length ? `<div class="card"><h2>Live now <span class="small muted">· ${liveRows.filter((x) => x.st.tag === "hit").length} hit already, ${liveRows.filter((x) => x.st.tag === "pace").length} on pace, ${liveRows.filter((x) => x.st.tag === "behind").length} behind</span></h2><ul class="plain pl-list">${liveRows.map((x) => row(x.p, x.st)).join("")}</ul><p class="small muted">Straight from the live box score, refreshed every 30 seconds while this page is open. "On pace" scales the current number to a full game.</p></div>` : ""}

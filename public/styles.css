@@ -1151,3 +1151,12 @@ a.gtab { color: var(--ink-2); }
 .mc-sc { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; } .mc-sc b { font-size: 20px; color: #e9f8ff; }
 .mc-t td { padding: 4px; font-size: 12px; } .mc-t b { color: #7fd5ff; }
 :root[data-theme="light"] .mc-neon { background: #eef9ff; } :root[data-theme="light"] .mc-neon .num, :root[data-theme="light"] .mc-sc b { color: #04324a; text-shadow: none; } :root[data-theme="light"] .mc-blk { background: #fff; }
+
+/* main-line scorecard (NBA track record) */
+.ml-g { padding: 10px 0; border-bottom: 1px solid var(--line); } .ml-g:last-child { border-bottom: 0; }
+.ml-cs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.ml-c { display: inline-flex; gap: 4px; align-items: center; padding: 3px 9px; border-radius: 999px; font-size: 12.5px; background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
+.ml-c.ok { box-shadow: inset 0 0 0 1px var(--ok, #2e9e5b); } .ml-c.ok b { color: var(--ok, #2e9e5b); }
+.ml-c.no { box-shadow: inset 0 0 0 1px var(--bad, #d64545); } .ml-c.no b { color: var(--bad, #d64545); }
+.ml-pd { margin-top: 6px; } .ml-pd ul { margin: 6px 0 0; display: grid; gap: 3px; }
+.ml-card > details { margin-top: 10px; } .ml-card > details > summary { cursor: pointer; }

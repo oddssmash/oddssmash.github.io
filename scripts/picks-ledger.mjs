@@ -61,4 +61,33 @@ const recent = Object.values(led.picks).filter((p) => Date.parse(p.date) > now -
 const done = recent.filter((p) => p.status === "hit" || p.status === "miss"), hits = done.filter((p) => p.status === "hit").length;
 const fams = {}; for (const p of done) { const f = (fams[p.fam] ||= { n: 0, hit: 0 }); f.n++; if (p.status === "hit") f.hit++; }
 writeJSON(OUT, { format: 1, note: "Every Picks-tab pick, frozen at the last run before its game started and graded against the final box score. Live progress is worked out in the browser. No sportsbook data.", updated: new Date(now).toISOString(), record: { n: done.length, hit: hits }, byFamily: fams, picks: recent });
+// ---- MAIN-LINE SCORECARD (the user's priority: hit the sportsbook main lines, not only the winner). For every game:
+// moneyline (our winner), pre-game spread and total (our saved pre-tip projection against the bookmaker's closing main line),
+// and high-value player props (our chance at the bookmaker's main prop line, 60%+ on one side). The lines are only the
+// scoreboard: they choose which line is graded and never feed our numbers. Writes public/data/mainline-log.json.
+{ led.main ||= {}; led.mainGraded ||= {};
+  const PT = readJSON(path.join(DATA, "pretip.json"), { games: {} }).games || {}, ODD = readJSON(path.join(DATA, "odds.json"), { closing: {}, games: {} });
+  // freeze the prop picks at the main line for games not started (the last run before tip-off wins)
+  const byGame = {}; for (const p of board.picks || []) { if (Date.parse(p.date) <= now || !p.player || !p.comparison?.bookLine || p.comparison.ourProbAtBookLine == null) continue;
+    const q = p.comparison.ourProbAtBookLine, val = Math.max(q, 1 - q); if (val < 0.6) continue; const k = p.player.id + "|" + p.fam, G = (byGame[p.game] ||= { date: p.date, home: p.home, away: p.away, props: {} });
+    if (!G.props[k] || G.props[k].p < val) G.props[k] = { player: { id: p.player.id, n: p.player.n, t: p.player.t }, fam: p.fam, line: p.comparison.bookLine, side: q >= 0.5 ? "over" : "under", p: Math.round(val * 1000) / 1000 }; }
+  for (const [gid, G] of Object.entries(byGame)) if (!led.mainGraded[gid]) led.main[gid] = { date: G.date, home: G.home, away: G.away, props: Object.values(G.props).sort((a, b) => b.p - a.p).slice(0, 8) };
+  // grade every finished game that has a pre-tip projection and a closing main line
+  const ids = new Set([...Object.keys(PT), ...Object.keys(led.main)]); let mg = 0;
+  for (const gid of ids) { if (led.mainGraded[gid]) continue; const g = game(gid), pt = PT[gid], cl = ODD.closing?.[gid] || null; if (!g?.completed || !pt) continue;
+    const home = String(g.home), away = String(g.away), margin = g.hs - g.as, tot = g.hs + g.as, out = { date: pt.date || g.date, home, away, hs: g.hs, as: g.as, proj: { hs: pt.hs, as: pt.as, pHome: pt.pHome } };
+    const pickHome = pt.pHome >= 0.5; out.ml = { pick: pickHome ? home : away, p: Math.round(Math.max(pt.pHome, 1 - pt.pHome) * 1000) / 1000, odds: cl ? (pickHome ? cl.mlHome : cl.mlAway) : null, status: (margin > 0) === pickHome ? "hit" : "miss" };
+    if (cl && Number.isFinite(cl.spreadHome)) { const pm = pt.hs - pt.as, homeCovers = pm + cl.spreadHome > 0, res = margin + cl.spreadHome; out.spread = { pick: homeCovers ? home : away, line: homeCovers ? cl.spreadHome : -cl.spreadHome, ours: Math.round(pm * 10) / 10, status: res === 0 ? "push" : (res > 0) === homeCovers ? "hit" : "miss" }; }
+    if (cl && Number.isFinite(cl.total)) { const pt2 = pt.hs + pt.as, over = pt2 > cl.total; out.total = { side: over ? "over" : "under", line: cl.total, ours: Math.round(pt2 * 10) / 10, actual: tot, status: tot === cl.total ? "push" : (tot > cl.total) === over ? "hit" : "miss" }; }
+    out.props = (led.main[gid]?.props || []).map((x) => { const pl = (g.players || []).find((y) => String(y.id) === String(x.player.id)); if (!pl || pl.dnp || !pl.min) return { ...x, status: "void", actual: null };
+      const a = pl[x.fam] ?? 0; return { ...x, actual: a, status: a === x.line ? "push" : (a > x.line) === (x.side === "over") ? "hit" : "miss" }; });
+    out.noLines = !cl; led.mainGraded[gid] = out; delete led.main[gid]; mg++; }
+  for (const [k, v] of Object.entries(led.mainGraded)) if (Date.parse(v.date) < now - 60 * DAY) delete led.mainGraded[k];
+  for (const [k, v] of Object.entries(led.main)) if (Date.parse(v.date) < now - 3 * DAY) delete led.main[k];
+  writeJSON(LED, led);
+  const rows = Object.entries(led.mainGraded).map(([game, v]) => ({ game, ...v })).filter((v) => Date.parse(v.date) > now - 21 * DAY).sort((a, b) => b.date.localeCompare(a.date));
+  const tally = (get) => { let n = 0, hit = 0, push = 0; for (const r of rows) for (const x of [].concat(get(r) || [])) { if (!x || x.status === "void") continue; if (x.status === "push") { push++; continue; } n++; if (x.status === "hit") hit++; } return { n, hit, push }; };
+  writeJSON(path.join(ROOT, "public", "data", "mainline-log.json"), { format: 1, updated: new Date(now).toISOString(), note: "Graded against the sportsbook main line saved just before tip-off (moneyline, spread, total) and the main prop line. The lines only decide what is graded; our projections never use them.",
+    record: { ml: tally((r) => r.ml), spread: tally((r) => r.spread), total: tally((r) => r.total), props: tally((r) => r.props) }, games: rows });
+  console.log(`main-line scorecard: ${mg} games graded, ${rows.length} in the last 21 days`); }
 console.log(`picks ledger: ${frozen} frozen, ${fromPrev} taken from the published pre-tip list, ${graded} graded; last 21 days ${hits}/${done.length} hit`);
