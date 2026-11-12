@@ -31,7 +31,7 @@ const noArchOf = (m) => { if (!m) return m; if (!m.parts) return m.noArch && !ar
   return { ...m, pGame: r3x(pg), pSeries: r3x(Math.min(0.9, Math.max(0.1, s.win))), scores: Object.fromEntries(Object.entries(s.sc).map(([k, v]) => [k, r3x(v)])), expMaps: Math.round(s.exp * 10) / 10, archOff: !on.arch, optsOff: Object.keys(on).filter((k) => !on[k]) }; };
 const optsPanel = () => { const offN = OPTS.filter(([k]) => !optOn(k)).length; return `<details class="op-panel"${S.opOpen ? " open" : ""}><summary><span><b>Analysis settings</b><em>${offN ? `${offN} of ${OPTS.length} switched off` : "All parts switched on"}</em></span><span class="op-chev" aria-hidden="true">▾</span></summary>
     ${OPTS.map(([k, l, d]) => `<label class="ar-tg op-row"><input type="checkbox" data-opt="${k}"${optOn(k) ? " checked" : ""}><span class="ar-sw" aria-hidden="true"></span><span><b>${l}</b><em>${d}</em></span></label>`).join("")}
-    <p class="small muted">Ratings and drafts are always on. Past results stay as we predicted them at the time.</p></details>`; };
+    <p class="small muted">Ratings and drafts are always on. Switches change every upcoming prediction: Matches, match pages, Picks and the next match on team pages; comfort picks change the Draft lab. Versus and the M8 simulator use team ratings only, so the lineup-based switches have nothing to change there. Past results stay as we predicted them at the time.</p></details>`; };
 document.addEventListener("change", (e) => { const k = e.target.dataset?.opt; if (k) { S.opOpen = true; setOpt(k, e.target.checked); } });
 const archToggle = () => `<label class="ar-tg"><input type="checkbox" data-arch-tg${archOn() ? " checked" : ""}><span class="ar-sw" aria-hidden="true"></span><span><b>Include archetypes in the analysis</b><em>${archOn() ? "On: lane style matchups add a small capped nudge (not proven)." : "Off: predictions use ratings, draft, career and experience only."}</em></span></label>`;
 document.addEventListener("change", (e) => { if (e.target.matches?.("[data-arch-tg]")) setArch(e.target.checked); });
@@ -478,7 +478,15 @@ async function vResults() {
 }
 
 async function vPicks() {
-  const [{ picks, note }, up] = await Promise.all([load("picks.json"), load("upcoming.json").catch(() => [])]);
+  const [{ picks: picks0, note }, up] = await Promise.all([load("picks.json"), load("upcoming.json").catch(() => [])]);
+  // analysis switches: rebuild each pick from the match's recalculated chances (same rules: 90% series cap, 85% maps, under 60% too close)
+  const offAny = up.some((u) => u.optsOff?.length);
+  const picks = picks0.map((p) => { const m = up.find((u) => u.id === p.id); if (!m?.optsOff?.length) return p;
+    let q = { ...p };
+    if (p.kind === "series") { const fav = m.pSeries >= 0.5 ? m.a : m.b; q = { ...q, pick: `${fav} to win the series`, p: Math.round(Math.min(0.9, Math.max(m.pSeries, 1 - m.pSeries)) * 1000) / 1000 }; }
+    if (p.kind === "maps") { const line = parseFloat((p.pick.match(/([0-9.]+) maps/) || [])[1]); if (isFinite(line) && m.pGame != null) { const sr = seriesOf(m.pGame, m.bo), over = Object.entries(sr.sc).reduce((a, [k, v]) => a + (k.split("-").reduce((x, y) => +x + +y, 0) > line ? v : 0), 0); q = { ...q, pick: `${over >= 0.5 ? "Over" : "Under"} ${line} maps`, p: Math.round(Math.min(0.85, Math.max(over, 1 - over)) * 1000) / 1000 }; } }
+    if (!p.fewGames) { q.noPick = q.p < 0.6; q.why = q.noPick ? "Too close to call: under 60%." : undefined; }
+    return q; });
   const now = Date.now(), byM = new Map(); for (const p of picks) { /* every match still waiting for its result (the same list as Matches), started ones included */ (byM.get(p.id) || byM.set(p.id, []).get(p.id)).push(p); }
   S.pkf ||= "all"; const groups = [...byM.entries()].map(([id, ps]) => ({ id, ps, m: up.find((u) => u.id === id), top: Math.max(...ps.map((p) => p.p)) }));
   const nPick = groups.filter((g) => g.ps.some((p) => !p.noPick)).length, nClose = groups.filter((g) => g.ps.every((p) => p.noPick)).length;
