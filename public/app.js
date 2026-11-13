@@ -176,7 +176,7 @@ async function route() {
   const before = app.firstElementChild;
   const slow = setTimeout(() => { if (seq === S.seq && app.firstElementChild === before) app.innerHTML = `<p class="loading" role="status"><span class="spin" aria-hidden="true"></span>Loading...</p>`; }, 180);
   try {
-    const fn = { accuracy: vAccuracy, games: vGames, game: vGame, results: vResults, result: vResult, why: vWhy, teams: vTeams, team: vTeam, scout: vScout, players: vPlayers, player: vPlayer, more: vMore, lab: vMoreMenu, sim: vSim, board: vBoard, picks: vPicks, season: vSeason, insights: vInsights, breakout: vBreakout, today: vToday, compare: vCompare }[view] || vGames;
+    const fn = { accuracy: vAccuracy, games: vGames, game: vGame, results: vResults, result: vResult, why: vWhy, teams: vTeams, team: vTeam, scout: vScout, players: vPlayers, player: vPlayer, more: vMore, lab: vMoreMenu, sim: vSim, board: vBoard, picks: vPicks, cheats: vCheats, season: vSeason, insights: vInsights, breakout: vBreakout, today: vToday, compare: vCompare }[view] || vGames;
     await fn(arg, arg2, location.hash.split("/").slice(2));
     if (view === "game" && seq === S.seq) { gameTabs(); const g0 = S.curGame; const t0 = Date.parse(g0?.date || ""); if (g0 && Date.now() > t0 - 10 * 60000 && Date.now() < t0 + 6 * 3600000) startLive(g0); else clearInterval(S.liveTimer); }
     if (view !== "game") clearInterval(S.liveTimer);
@@ -916,6 +916,7 @@ async function vGames() {
     app.innerHTML = `<h1>Upcoming games</h1>
       <p class="lead">Projected score and win chance for every game, with the main reasons on each card. Tap a game for the full reasoning. Times are ${PHT} (Manila).</p>
       <p class="small pitch">Built without bookmaker data, and usually within a few points of the market anyway. When we disagree, we show you why.</p>
+      <p><a class="chip c-green" href="#/cheats">📋 Cheatsheet: props hitting at the main line ›</a></p>
       ${favRows.length ? `<section class="card favs" aria-labelledby="fav-h"><h2 id="fav-h">${STAR} Your favourites</h2><div class="fav-l2">${favRows.join("")}</div></section>` : ""}
       <div class="filters dayswitch" role="group" aria-label="Choose a day (${PHT})">${keys.map((k) => `<button class="fbtn" type="button" data-day="${esc(k)}" aria-pressed="${S.gday === k}">${esc(label(k))} <span class="cnt">${groups.get(k).length}</span></button>`).join("")}<button class="fbtn" type="button" data-day="all" aria-pressed="${S.gday === "all"}">All days <span class="cnt">${up.length}</span></button></div>
       ${shown.map((k) => { const gs = favGames(groups.get(k)); return `<h2 class="day"><span>${esc(dayLong(gs[0].date))}</span><span class="cnt">${gs.length} ${gs.length === 1 ? "game" : "games"} · ${PHT}</span></h2>${gs.map((g) => (g._past ? pastGameCard(g) : gameCard(g) + labLinks(g))).join("")}`; }).join("")}
@@ -2928,6 +2929,7 @@ function gameLabCard(g, row) {
 
 // ---- Lab hub
 const LAB = [
+  ["cheats", "Cheatsheet", "Today's sportsbook main-line props that hit in every recent game (or 80%+): last 5 and 10, vs opponent, home or away, as a starter, without an injured teammate, unders, team totals and spreads."],
   ["picks", "Picks", "Player and team props at 85% and up, near-certain 95%+ picks, alternative lines, why each one, and suggested parlays."],
   ["sim", "Simulation lab", "Each upcoming game played 10,000 times: win chance, score ranges, what-if scenarios and every player's range."],
   ["board", "High-confidence board", "Every market the simulation puts at 85% or more, next to how often picks like it came true before."],
@@ -4310,12 +4312,44 @@ async function hitFill(gid) { const box = document.getElementById("g-hit"); if (
   const draw = () => { const list = G.props.filter((x) => (st.fam === "all" || x.fam === st.fam) && x.l10[1] && x.l10[0] / x.l10[1] >= st.min);
     const teamRows = (G.team || []).map((x) => `<div class="hr-row"><div class="hr-top">${teamLogo(x.t)}<div><b>${esc(T(x.t).abbr)}</b><div class="hr-line">${x.kind === "tt" ? `${x.side} ${x.line} team total` : `${x.side === "Cover" ? "Covers" : "Fails to cover"} ${x.line > 0 ? "+" : ""}${x.line}`}</div></div></div><div class="hr-cells">${hrCell(x.l5, "L5")}${hrCell(x.l10, "L10")}${hrCell(x.l20, "L20")}${hrCell(x.vs, "vs " + T(x.t === G.home ? G.away : G.home).abbr)}${hrCell(x.ha, x.home ? "Home" : "Away")}</div></div>`).join("");
     box.innerHTML = `<section class="card" id="g-hitc"><h2>Hit rates at the sportsbook main line</h2>
+      <p><a class="go" href="#/cheats">Cheatsheet for every game ›</a></p>
       <p class="small muted">How often each player beat tonight's book line in his past games (L5, L10, L20 = last 5, 10, 20 games). Green 75%+, yellow 50%+, red under 40%. Counts only: shown next to our projections, never used by the model. Pushes are left out.</p>
       <div class="filters" role="group" aria-label="Stat">${[["all", "All"], ["pts", "Points"], ["reb", "Rebounds"], ["ast", "Assists"], ["tpm", "3PT"]].map(([k, l]) => `<button class="fbtn" type="button" data-hrf="${k}" aria-pressed="${st.fam === k}">${l}</button>`).join("")}<button class="fbtn" type="button" data-hrm aria-pressed="${st.min > 0}">L10 75%+ only</button></div>
       ${list.length ? list.map(hrPropRow).join("") : '<p class="small muted">No props match.</p>'}
       ${teamRows ? `<h3 style="margin-top:14px">Team total and spread</h3>${teamRows}` : ""}</section>`; };
   box.addEventListener("click", (e) => { const f = e.target.closest("[data-hrf]"); if (f) { st.fam = f.dataset.hrf; draw(); } if (e.target.closest("[data-hrm]")) { st.min = st.min ? 0 : 0.75; draw(); } });
   draw(); }
+// CHEATSHEET: every sportsbook main-line prop for today's and tomorrow's games, grouped by the sample it hit in
+async function vCheats() {
+  if (!S.hr) S.hr = await load("hitrates.json").catch(() => null);
+  const games = S.hr?.games || {}, all = [], teams = [];
+  for (const [gid, G] of Object.entries(games)) { for (const x of G.props) all.push({ ...x, gid, date: G.date }); for (const x of G.team || []) teams.push({ ...x, gid, date: G.date, opp: x.t === G.home ? G.away : G.home }); }
+  const st = S.chs || (S.chs = { bar: 1, day: "all" });
+  const draw = () => {
+    const ok = (a, minN) => a && a[1] >= minN && a[0] / a[1] >= st.bar, byRate = (k) => (a, b) => b[k][0] / b[k][1] - a[k][0] / a[k][1] || b[k][1] - a[k][1];
+    const G = [
+      ["Recent form · last 10", all.filter((x) => ok(x.l10, 6)).sort(byRate("l10")), (x) => x.l10],
+      ["Recent form · last 5", all.filter((x) => ok(x.l5, 4) && !ok(x.l10, 6)).sort(byRate("l5")), (x) => x.l5],
+      ["Versus tonight's opponent", all.filter((x) => ok(x.vs, 3)).sort(byRate("vs")), (x) => x.vs],
+      ["Home or away (tonight's side)", all.filter((x) => ok(x.ha, 5)).sort(byRate("ha")), (x) => x.ha],
+      ["As a starter", all.filter((x) => ok(x.st, 6)).sort(byRate("st")), (x) => x.st],
+      ["Without a teammate who is out tonight", all.flatMap((x) => (x.wo || []).filter((w) => ok([w.h, w.c], 3)).map((w) => ({ ...x, _w: w }))), (x) => [x._w.h, x._w.c]],
+      ["Unders only · last 10", all.filter((x) => x.side === "Under" && ok(x.l10, 6)).sort(byRate("l10")), (x) => x.l10],
+    ];
+    const row = (x, a) => `<a class="ch-r" href="#/game/${esc(x.gid)}">${avatar(x.pid, x.n, { size: "sm", team: x.t })}<span><b>${esc(shortName(x.n))}</b> ${x.side} ${x.line} ${HR_FAM[x.fam]}<small class="muted"> · ${esc(T(x.t).abbr)} vs ${esc(T(x.opp).abbr)}${x._w ? ` · without ${esc(shortName(x._w.n))}` : ""}</small></span><span class="chip ${hrTone(a)}">${a[0]}/${a[1]}</span></a>`;
+    const tRows = teams.filter((x) => ok(x.l10, 6)).sort(byRate("l10"));
+    app.innerHTML = `<h1>Cheatsheet</h1>
+      <p class="lead">Today's and tomorrow's sportsbook main-line props, grouped by the games they hit in. Tap one for the game page with every split.</p>
+      <p class="small muted">Counts of past games only (pushes left out). They are shown next to our projections and are never used by the model. A perfect run in a small sample often ends, so check our chance on the game page too.</p>
+      <div class="filters" role="group" aria-label="Hit rate">${[[1, "Hit every game"], [0.8, "80%+"]].map(([v, l]) => `<button class="fbtn" type="button" data-chb="${v}" aria-pressed="${st.bar === v}">${l}</button>`).join("")}</div>
+      ${all.length || teams.length ? "" : '<p class="muted">The sportsbook has not posted prop lines for the next games yet. Check back after the next refresh.</p>'}
+      ${G.map(([h, list, f]) => list.length ? `<section class="card"><h2>${h} <span class="cnt">${list.length}</span></h2>${list.slice(0, 12).map((x) => row(x, f(x))).join("")}</section>` : "").join("")}
+      ${tRows.length ? `<section class="card"><h2>Team form · last 10 <span class="cnt">${tRows.length}</span></h2>${tRows.map((x) => `<a class="ch-r" href="#/game/${esc(x.gid)}">${teamLogo(x.t)}<span><b>${esc(T(x.t).abbr)}</b> ${x.kind === "tt" ? `${x.side} ${x.line} team total` : `${x.side === "Cover" ? "" : "fails "}${x.line > 0 ? "+" : ""}${x.line} spread`}<small class="muted"> · vs ${esc(T(x.opp).abbr)}</small></span><span class="chip ${hrTone(x.l10)}">${x.l10[0]}/${x.l10[1]}</span></a>`).join("")}</section>` : ""}
+      <p class="small muted">Updated ${S.hr?.generated ? esc(ago2(S.hr.generated)) : "-"}.</p>`;
+    app.querySelectorAll("[data-chb]").forEach((b) => b.addEventListener("click", () => { st.bar = +b.dataset.chb; draw(); }));
+  };
+  draw();
+}
 // a finished game on a past day of the Games tab: final, projection, and what we hit against the main lines
 function pastGameCard(r) { const ph = r.pred.pHome, fav = ph >= 0.5 ? r.home : r.away;
   return `<a class="card gc" href="#/result/${esc(r.id)}"><div class="gc-h">${teamLogo(r.away, { size: "lg" })}<div class="gc-m"><b>${esc(T(r.away).abbr)} ${r.act.as} @ ${esc(T(r.home).abbr)} ${r.act.hs}</b><span>FINAL${r.act.ot ? " (OT)" : ""}</span></div>${teamLogo(r.home, { size: "lg" })}</div>
