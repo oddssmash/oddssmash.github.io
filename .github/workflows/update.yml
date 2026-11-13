@@ -55,6 +55,7 @@ jobs:
       - name: Insights and live snapshot
         run: |
           node scripts/insights.mjs
+          node scripts/hitrates.mjs || echo "hit rates skipped"
           node scripts/live.mjs
 
       # FIBA section: schedules, box scores, shot locations and the latest posted rosters (next 21 days) from fiba.basketball,

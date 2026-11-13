@@ -894,7 +894,7 @@ async function vGames() {
   await liveScoreboard();
   startScoreTicker();
   const up = await load("upcoming.json");
-  [S.oddsPub, S.boardPub, S.resPub] = await Promise.all([load("odds.json").catch(() => null), load("board.json").catch(() => null), load("results.json").catch(() => [])]); await loadScore();
+  [S.oddsPub, S.boardPub, S.resPub, S.hr] = await Promise.all([load("odds.json").catch(() => null), load("board.json").catch(() => null), load("results.json").catch(() => []), load("hitrates.json").catch(() => null)]); await loadScore();
   if (!up.length) { app.innerHTML = `<h1>Upcoming games</h1><p class="empty">No games on the schedule in the next week. Check back after the next data refresh.</p>`; return; }
   // Days are Philippine calendar days. The switcher shows one day at a time; favourite teams' games come first within it.
   const groups = new Map();
@@ -1164,6 +1164,7 @@ async function vGame(id) {
     <nav class="filters jumpnav" aria-label="Sections of this game">${[["g-q", "Quarters", away.quarters?.proj], ["g-lines", "Lines", true], ["g-keys", "Why win or lose", g.keys?.teams?.length], ["g-scn", "Scenarios", true], ["g-h2h", "Meetings", true], ["g-players", "Players", true]].filter((x) => x[2]).map(([k, l]) => `<button class="fbtn" type="button" data-jump="${k}">${l}</button>`).join("")}</nav>
     ${quarterCard(g, away, home)}
     ${linesCard(g, away, home)}
+    <div id="g-hit"></div>
 
     ${g.keys?.teams?.length ? `<section class="card" id="g-keys" tabindex="-1" aria-labelledby="g-keys-h"><h2 id="g-keys-h">Why each team can win or lose</h2>
       <p class="small muted">Edges found in the numbers before tip-off, strongest first, each with its evidence and sample. They explain the matchup; the forecast is the projection above. A team's reasons to lose are the other side's edges.</p>
@@ -1242,6 +1243,7 @@ async function vGame(id) {
     drawScn();
   }
 
+  hitFill(g.id);
   document.getElementById("whatif").addEventListener("change", async (e) => {
     const out = document.getElementById("whatif-out");
     if (!e.target.value) { out.innerHTML = ""; return; }
@@ -4284,13 +4286,36 @@ function linesBlock(g, L) { const o = S.oddsPub?.games?.[g.id], ph = g.pred.pHom
   // top player props at the SPORTSBOOK MAIN LINE: our chance at the book's own line, Over or Under, one per player and stat
   const famN = { pts: "pts", reb: "reb", ast: "ast", tpm: "3PM" }, seenP = new Set();
   const picks = (S.boardPub?.picks || []).filter((q) => String(q.game) === String(g.id) && q.player && q.comparison?.bookLine != null && q.comparison.ourProbAtBookLine != null).map((q) => { const c = q.comparison.ourProbAtBookLine; return { pid: String(q.player.id), k: q.player.id + "|" + q.fam, n: q.player.n, fam: q.fam, line: q.comparison.bookLine, side: c >= 0.5 ? "Over" : "Under", p: Math.max(c, 1 - c) }; }).sort((a, b) => b.p - a.p).filter((q) => (seenP.has(q.k) ? false : seenP.add(q.k))).slice(0, 3);
+  for (const q of picks) { const h = hrOf(g.id, q.pid, q.fam); if (h && h.line === q.line) q.l10 = q.side === h.side ? h.l10 : [h.l10[1] - h.l10[0], h.l10[1]]; }
   if (lv?.box) for (const q of picks) { const b = lv.box[q.pid], v = b ? b[["pts", "reb", "ast", "tpm"].indexOf(q.fam)] : null; if (v != null) { const d = q.side === "Over" ? v - q.line : q.line - v; q.r = d === 0 ? "push" : d > 0; q.act = v; } }
   return `<div class="gl-t"><div class="gl-r gl-h"><span></span><span>Ours</span><span>Sportsbook</span></div>
     <div class="gl-r"><span>Moneyline</span><span>${esc(A)} ${ml(fairML(1 - ph))} · ${esc(H)} ${ml(fairML(ph))}</span><span>${o ? `${esc(A)} ${ml(o.mlAway)} · ${esc(H)} ${ml(o.mlHome)}` : "-"}</span></div>
     <div class="gl-r"><span>Spread</span><span>${esc(T(L.fav).abbr)} ${spreadTxt(L.spread)}</span><span>${o && Number.isFinite(o.spreadHome) ? `${esc(H)} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : "-"}</span></div>
     <div class="gl-r"><span>Total</span><span>${L.total.toFixed(1)}</span><span>${o && Number.isFinite(o.total) ? o.total : "-"}</span></div></div>
     ${call.length ? `<div class="gc-x gl-call"><b>${fin && o ? `Our call at the main line · ${call.filter((c) => c.r === true).length}/${call.filter((c) => c.r != null && c.r !== "push").length} hit` : "Our call at the main line"}:</b> ${call.map((c) => `<span class="chip ${tone(c.p)}">${mark(c.r)}${esc(c.t)} · ${pct(c.p)}</span>`).join(" ")}</div>` : ""}
-    <div class="gc-x gl-call"><b>${picks.some((q) => q.r != null) ? `Top props at the main line · ${picks.filter((q) => q.r === true).length}/${picks.filter((q) => q.r != null && q.r !== "push").length} hit` : "Top props at the main line"}:</b> ${picks.length ? picks.map((q) => `<span class="chip ${tone(q.p)}">${mark(q.r)}${esc(shortName(q.n))} ${q.side} ${q.line} ${famN[q.fam] || q.fam} · ${pct(q.p)}${q.act != null ? ` <span class="hm-a">(${q.act})</span>` : ""}</span>`).join(" ") : `<span class="small muted">no sportsbook prop lines posted yet</span>`}</div>`; }
+    <div class="gc-x gl-call"><b>${picks.some((q) => q.r != null) ? `Top props at the main line · ${picks.filter((q) => q.r === true).length}/${picks.filter((q) => q.r != null && q.r !== "push").length} hit` : "Top props at the main line"}:</b> ${picks.length ? picks.map((q) => `<span class="chip ${tone(q.p)}">${mark(q.r)}${esc(shortName(q.n))} ${q.side} ${q.line} ${famN[q.fam] || q.fam} · ${pct(q.p)}${q.l10 ? ` <span class="hm-a">L10 ${q.l10[0]}/${q.l10[1]}</span>` : ""}${q.act != null ? ` <span class="hm-a">(${q.act})</span>` : ""}</span>`).join(" ") : `<span class="small muted">no sportsbook prop lines posted yet</span>`}</div>`; }
+// HIT RATES (scripts/hitrates.mjs): how often a player or team beat tonight's sportsbook main line in past games.
+// Counts only, shown next to our projections; the model never uses them.
+const HR_FAM = { pts: "Points", reb: "Rebounds", ast: "Assists", tpm: "3PT made" };
+function hrOf(gid, pid, fam) { return (S.hr?.games?.[gid]?.props || []).find((x) => x.pid === String(pid) && x.fam === fam) || null; }
+const hrTone = (a) => { if (!a || !a[1]) return ""; const r = a[0] / a[1]; return r >= 0.75 ? "c-green" : r >= 0.5 ? "c-yellow" : r < 0.4 ? "c-red" : ""; };
+const hrCell = (a, lbl) => (a && a[1] ? `<span class="hr-c ${hrTone(a)}"><em>${lbl}</em><b>${a[0]}/${a[1]}</b><i>${Math.round((100 * a[0]) / a[1])}%</i></span>` : `<span class="hr-c none"><em>${lbl}</em><b>-</b></span>`);
+function hrPropRow(x) { const opp = T(x.opp).abbr;
+  return `<div class="hr-row"><div class="hr-top">${avatar(x.pid, x.n, { size: "sm", team: x.t })}<div><b>${esc(x.n)}</b> <span class="small muted">${esc(T(x.t).abbr)} · ${x.pos}</span><div class="hr-line">${x.side} ${x.line} ${HR_FAM[x.fam]} <span class="small muted">· avg L10 ${f1(x.avg10)}</span></div></div></div>
+    <div class="hr-cells">${hrCell(x.l5, "L5")}${hrCell(x.l10, "L10")}${hrCell(x.l20, "L20")}${hrCell(x.vs, "vs " + opp)}${hrCell(x.ha, x.home ? "Home" : "Away")}${hrCell(x.st, "Starter")}</div>
+    ${(x.wo || []).map((w) => `<div class="small">Without <b>${esc(w.n)}</b> (out tonight): <span class="chip ${hrTone([w.h, w.c])}">${w.h}/${w.c}</span></div>`).join("")}
+    ${x.oppRank ? `<div class="small muted">${esc(opp)} ranks <b>${x.oppRank}${["th", "st", "nd", "rd"][x.oppRank % 10 > 3 || [11, 12, 13].includes(x.oppRank % 100) ? 0 : x.oppRank % 10]}</b> of ${x.oppOf} for ${x.side === "Over" ? "most" : "fewest"} ${HR_FAM[x.fam].toLowerCase()} allowed to ${({ G: "guards", F: "forwards", C: "centres" })[x.pos]}</div>` : ""}</div>`; }
+async function hitFill(gid) { const box = document.getElementById("g-hit"); if (!box) return; if (!S.hr) S.hr = await load("hitrates.json").catch(() => null); const G = S.hr?.games?.[gid]; if (!G) return;
+  const st = { fam: "all", min: 0 };
+  const draw = () => { const list = G.props.filter((x) => (st.fam === "all" || x.fam === st.fam) && x.l10[1] && x.l10[0] / x.l10[1] >= st.min);
+    const teamRows = (G.team || []).map((x) => `<div class="hr-row"><div class="hr-top">${teamLogo(x.t)}<div><b>${esc(T(x.t).abbr)}</b><div class="hr-line">${x.kind === "tt" ? `${x.side} ${x.line} team total` : `${x.side === "Cover" ? "Covers" : "Fails to cover"} ${x.line > 0 ? "+" : ""}${x.line}`}</div></div></div><div class="hr-cells">${hrCell(x.l5, "L5")}${hrCell(x.l10, "L10")}${hrCell(x.l20, "L20")}${hrCell(x.vs, "vs " + T(x.t === G.home ? G.away : G.home).abbr)}${hrCell(x.ha, x.home ? "Home" : "Away")}</div></div>`).join("");
+    box.innerHTML = `<section class="card" id="g-hitc"><h2>Hit rates at the sportsbook main line</h2>
+      <p class="small muted">How often each player beat tonight's book line in his past games (L5, L10, L20 = last 5, 10, 20 games). Green 75%+, yellow 50%+, red under 40%. Counts only: shown next to our projections, never used by the model. Pushes are left out.</p>
+      <div class="filters" role="group" aria-label="Stat">${[["all", "All"], ["pts", "Points"], ["reb", "Rebounds"], ["ast", "Assists"], ["tpm", "3PT"]].map(([k, l]) => `<button class="fbtn" type="button" data-hrf="${k}" aria-pressed="${st.fam === k}">${l}</button>`).join("")}<button class="fbtn" type="button" data-hrm aria-pressed="${st.min > 0}">L10 75%+ only</button></div>
+      ${list.length ? list.map(hrPropRow).join("") : '<p class="small muted">No props match.</p>'}
+      ${teamRows ? `<h3 style="margin-top:14px">Team total and spread</h3>${teamRows}` : ""}</section>`; };
+  box.addEventListener("click", (e) => { const f = e.target.closest("[data-hrf]"); if (f) { st.fam = f.dataset.hrf; draw(); } if (e.target.closest("[data-hrm]")) { st.min = st.min ? 0 : 0.75; draw(); } });
+  draw(); }
 // a finished game on a past day of the Games tab: final, projection, and what we hit against the main lines
 function pastGameCard(r) { const ph = r.pred.pHome, fav = ph >= 0.5 ? r.home : r.away;
   return `<a class="card gc" href="#/result/${esc(r.id)}"><div class="gc-h">${teamLogo(r.away, { size: "lg" })}<div class="gc-m"><b>${esc(T(r.away).abbr)} ${r.act.as} @ ${esc(T(r.home).abbr)} ${r.act.hs}</b><span>FINAL${r.act.ot ? " (OT)" : ""}</span></div>${teamLogo(r.home, { size: "lg" })}</div>

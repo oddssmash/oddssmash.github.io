@@ -1182,3 +1182,9 @@ a.card .ml-cs { margin-top: 8px; }
 .hm { font-weight: 800; } .hm.up { color: #1f9d55; } .hm.dn { color: #d64545; } .hm.push { color: var(--muted, #888); font-weight: 600; }
 :root:not([data-theme="light"]) .hm.up { color: #5fd38f; } :root:not([data-theme="light"]) .hm.dn { color: #ff7a6e; }
 .hm-a { opacity: .75; font-weight: 500; }
+
+/* hit rates at the sportsbook main line */
+.hr-row { padding: 10px 0; border-top: 1px solid var(--line, rgba(127,127,127,.2)); display: grid; gap: 6px; } .hr-top { display: flex; gap: 10px; align-items: center; } .hr-line { font-weight: 600; font-size: 14px; }
+.hr-cells { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 4px; }
+.hr-c { display: grid; text-align: center; padding: 4px 2px; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.1)); font-size: 12px; min-width: 0; } .hr-c em { font-style: normal; font-size: 10px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .hr-c b { font-size: 13px; } .hr-c i { font-style: normal; font-size: 10px; opacity: .8; }
+.hr-c.c-green { background: rgba(46,158,91,.16); box-shadow: inset 0 0 0 1px rgba(46,158,91,.5); } .hr-c.c-yellow { background: rgba(214,160,20,.14); box-shadow: inset 0 0 0 1px rgba(214,160,20,.5); } .hr-c.c-red { background: rgba(214,69,69,.13); box-shadow: inset 0 0 0 1px rgba(214,69,69,.45); } .hr-c.none { opacity: .5; }

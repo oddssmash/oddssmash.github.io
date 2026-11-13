@@ -1074,7 +1074,7 @@ function recordGame(g) {
     const p = getP(x.id, x.n, x.pos);
     const avail = !(x.dnp && INJURY_DNP(x.why));
     if (x.min > 0 || x.dnp) {
-      p.recs.push({ gid: g.id, date: g.date, season: g.season, stype: g.stype, cup: !!g.cup, opp: x.t === g.home ? g.away : g.home, team: x.t, avail, st: x.st,
+      p.recs.push({ gid: g.id, date: g.date, season: g.season, stype: g.stype, cup: !!g.cup, opp: x.t === g.home ? g.away : g.home, team: x.t, home: x.t === g.home, avail, st: x.st,
         min: x.min, pts: x.pts, reb: x.reb, ast: x.ast, tpm: x.tpm, tpa: x.tpa, stl: x.stl, blk: x.blk, to: x.to, fga: x.fga, fta: x.fta, tsa: tsa(x), pf: x.pf });
     }
     if (x.min > 0) {
@@ -1586,7 +1586,7 @@ for (const p of P.values()) {
       overall: p.splitAll.n ? { n: p.splitAll.n, pts: round(p.splitAll.pts / p.splitAll.n), tpa: round(p.splitAll.tpa / p.splitAll.n) } : null,
       rule: { minGames: { opponent: SPLIT_MIN.opp, opposingPlayer: SPLIT_MIN.vs, arena: SPLIT_MIN.arena, other: SPLIT_MIN_DEFAULT }, smallSample: SPLIT_SMALL },
       note: `Each number is his gap against the projection in that situation minus his overall gap across all ${p.splitAll.n} of his projected games${p.splitAll.n ? ` (${round(p.splitAll.pts / p.splitAll.n) >= 0 ? "+" : ""}${round(p.splitAll.pts / p.splitAll.n)} points)` : ""}. Counts already include last season (2025-26, with its play-in and playoffs), this season and preseason games. Listed from ${SPLIT_MIN.opp} games against a specific team, opposing player or arena (the schedule allows only 3-4 meetings a season) and from ${SPLIT_MIN_DEFAULT} games for situations, styles, sizes and archetypes; under ${SPLIT_SMALL} games is a small sample.` },
-    log: p.recs.filter((r) => r.stype !== 1).slice(-12).reverse().map((r) => ({ d: r.date, opp: r.opp, min: r.min, pts: r.pts, reb: r.reb, ast: r.ast, dnp: r.min ? 0 : 1 })),
+    log: p.recs.filter((r) => r.stype !== 1).slice(-20).reverse().map((r) => ({ d: r.date, g: r.gid, opp: r.opp, h: r.home ? 1 : 0, st: r.st ? 1 : 0, min: r.min, pts: r.pts, reb: r.reb, ast: r.ast, tpm: r.tpm || 0, dnp: r.min ? 0 : 1 })), /* last 20 games: hit rates against sportsbook main lines (scripts/hitrates.mjs) */
     absence: absenceImpact(p),
     ...ppl,
     ...playerFlowBlocks(p),
