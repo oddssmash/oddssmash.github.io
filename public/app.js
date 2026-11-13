@@ -2682,7 +2682,7 @@ const MORE_MENU = [
   ["accuracy", "Accuracy report", "Calibration, Brier score, log loss, accuracy by prediction type and the biggest misses."],
   ["why", "How accurate is it?", "Accuracy week by week, what causes misses, and what the model learned."],
   ["sim", "Simulation lab", "Each upcoming game played 10,000 times, with what-if scenarios."],
-  ["board", "High-confidence board", "Every 85%+ market in one long list, with past hit rates."],
+  ["board", "High-confidence board", "Our strongest picks at the sportsbook main lines, plus every 85%+ market at any line."],
   ["season", "Season simulation", "Projected wins, seeds and playoff chances."],
   ["breakout", "Breakout watch", "Players whose minutes or role should jump tonight."],
   ["today", "What changed today", "New injuries, role changes and the biggest projection moves."],
@@ -2935,7 +2935,7 @@ const LAB = [
   ["cheats", "Cheatsheet", "Today's sportsbook main-line props that hit in every recent game (or 80%+): last 5 and 10, vs opponent, home or away, as a starter, without an injured teammate, unders, team totals and spreads."],
   ["picks", "Picks", "Player and team props at 85% and up, near-certain 95%+ picks, alternative lines, why each one, and suggested parlays."],
   ["sim", "Simulation lab", "Each upcoming game played 10,000 times: win chance, score ranges, what-if scenarios and every player's range."],
-  ["board", "High-confidence board", "Every market the simulation puts at 85% or more, next to how often picks like it came true before."],
+  ["board", "High-confidence board", "Confidence judged at the sportsbook main lines (the line you would actually see), with our record there; every 85%+ market at any line is one tap away."],
   ["season", "Season simulation", "The rest of the season played out 20,000 times: projected wins, seeds and playoff chances."],
   ["insights", "Insights", "Similar past games and where the five rating systems disagree, game by game, plus the trust meter."],
   ["breakout", "Breakout watch", "Players whose minutes or role should jump, with the back-tested hit rate."],
@@ -3188,9 +3188,45 @@ function cmpCard(c, s) {
 // ---- High-confidence board
 const FAM = { winner: "Winner", spread: "Spread", total: "Game total", teamTotal: "Team total", pts: "Points", reb: "Rebounds", ast: "Assists", tpm: "Threes" };
 async function vBoard() {
-  const [b, odds] = await Promise.all([load("board.json"), load("odds.json").catch(() => null)]);
+  const [b, odds, mlog] = await Promise.all([load("board.json"), load("odds.json").catch(() => null), load("mainline-log.json").catch(() => null)]);
   const picks = b.picks || [];
   const B = S.bd = S.bd || { g: "all", fam: "all", cmp: false, shown: 60, sort: "time" };
+  B.mode ||= "main";
+  // MAIN-LINE CONFIDENCE: an 85% pick at an easy alternative line (2+ assists when his line is 6.5) says little. Here every
+  // market is judged at the sportsbook's main line: High = our chance 70%+, Medium 62-70%, Lean 55-62%. The book only
+  // chooses which line is tested; the chance is our own simulation. Past record = our graded main-line picks per tier.
+  const ML_TIER = (q) => (q >= 0.7 ? "High" : q >= 0.62 ? "Medium" : "Lean");
+  const ML_WORD = { pts: "points", reb: "rebounds", ast: "assists", tpm: "threes" };
+  const tierRec = { props: {}, ml: {} };
+  { const add = (o, x) => { if (!x || (x.status !== "hit" && x.status !== "miss") || x.p == null) return; const a = (o[ML_TIER(x.p)] ||= [0, 0]); a[1]++; if (x.status === "hit") a[0]++; };
+    for (const g of mlog?.games || []) { for (const x of g.props || []) add(tierRec.props, x); add(tierRec.ml, g.ml); } }
+  const sgn = (l) => `${l > 0 ? "+" : ""}${l}`;
+  const mainRows = () => {
+    const out = [];
+    for (const g of games) {
+      const sm = S.bdSim?.[g.game], c = sm?.comparison; if (!c || Date.parse(g.date) < Date.now()) continue;
+      const H = T(g.home).abbr, A = T(g.away).abbr, base = { game: g.game, date: g.date, home: g.home, away: g.away };
+      if (c.winner?.ourProb != null) { const tm = c.winner.team || H, ot = tm === H ? A : H, q = c.winner.ourProb, y = q >= 0.5;
+        out.push({ ...base, fam: "winner", kind: "ml", label: `${y ? tm : ot} to win`, q: Math.max(q, 1 - q), book: c.winner.bookProb == null ? null : y ? c.winner.bookProb : 1 - c.winner.bookProb }); }
+      if (c.spread?.ourProb != null && c.spread.bookLine != null) { const tm = c.spread.team || H, ot = tm === H ? A : H, q = c.spread.ourProb, l = c.spread.bookLine, y = q >= 0.5;
+        out.push({ ...base, fam: "spread", kind: "spread", label: y ? `${tm} ${sgn(l)}` : `${ot} ${sgn(-l)}`, q: Math.max(q, 1 - q), book: c.spread.bookProb == null ? null : y ? c.spread.bookProb : 1 - c.spread.bookProb }); }
+      if (c.total?.ourProb != null && c.total.bookLine != null) { const q = c.total.ourProb, y = q >= 0.5;
+        out.push({ ...base, fam: "total", kind: "total", label: `${y ? "Over" : "Under"} ${c.total.bookLine} total points`, q: Math.max(q, 1 - q), book: c.total.bookProb == null ? null : y ? c.total.bookProb : 1 - c.total.bookProb }); }
+      for (const x of Array.isArray(c.props) ? c.props : []) {
+        if (!ML_WORD[x.stat] || x.ourProbOver == null || x.bookLine == null) continue;
+        const pl = (sm.players || []).find((p) => String(p.id) === String(x.id)); if (!pl || (pl.proj?.min || 0) < 20 || (pl.pDnp || 0) > 0.25) continue;
+        if (devCheck(S.bdGames?.[g.game], x.id, x.stat)?.unexplained) continue; /* projection far from his average with no named reason */
+        const ov = x.ourProbOver >= 0.5;
+        out.push({ ...base, fam: x.stat, kind: "props", label: `${x.n} ${ov ? "over" : "under"} ${x.bookLine} ${ML_WORD[x.stat]}`, q: Math.max(x.ourProbOver, 1 - x.ourProbOver), median: x.ourMedian, player: { id: x.id, n: x.n, t: pl.side === 0 ? g.home : g.away, projMin: pl.proj?.min } });
+      }
+    }
+    for (const r of out) r.tier = ML_TIER(r.q);
+    return out;
+  };
+  const recCell = (r) => {
+    if (r.kind === "props" || r.kind === "ml") { const a = tierRec[r.kind][r.tier]; return a ? `${a[0]}/${a[1]}<i>${Math.round((a[0] / a[1]) * 100)}% hit</i>` : `<span class="muted">-</span>`; }
+    const R = mlog?.record?.[r.kind]; return R?.n ? `${R.hit}/${R.n}<i>all ${r.kind}s</i>` : `<span class="muted">-</span>`;
+  };
   const games = [...new Map(picks.map((p) => [p.game, p])).values()].sort((x, y) => Date.parse(x.date) - Date.parse(y.date));
   const cmpCell = (p) => {
     const c = p.comparison; if (!c) return `<span class="muted">-</span>`;
@@ -3201,12 +3237,34 @@ async function vBoard() {
   const draw = (focusSel) => {
     const safeHidden = picks.filter((p) => tooFarBelow(p)).length;
     if (!S.bdGames) { S.bdGames = {}; Promise.all([...new Set(picks.map((p) => p.game))].map((id) => load(`upcoming/${id}.json`).then((g) => { S.bdGames[id] = g; }).catch(() => {}))).then(() => draw()); }
+    if (!S.bdSim) { S.bdSim = {}; Promise.all(games.map((g) => load(`sim/${g.game}.json`).then((x) => { S.bdSim[g.game] = x; }).catch(() => {}))).then(() => draw()); }
     const unexpB = (p) => p.player && devCheck(S.bdGames?.[p.game], p.player.id, p.fam)?.unexplained;
+    const M = B.mode === "main" ? mainRows().filter((r) => r.q >= 0.55) : [];
+    const rowsM = M.filter((r) => (B.g === "all" || r.game === B.g) && (B.fam === "all" || r.fam === B.fam)).sort(B.sort === "p" ? (x, y) => y.q - x.q : (x, y) => Date.parse(x.date) - Date.parse(y.date) || y.q - x.q);
     const rows = picks.filter((p) => (B.g === "all" || p.game === B.g) && (B.fam === "all" || p.fam === B.fam) && (B.safe || !tooFarBelow(p)) && !unexpB(p))
       .sort(B.sort === "p" ? (x, y) => y.p - x.p : (x, y) => Date.parse(x.date) - Date.parse(y.date) || y.p - x.p);
-    const famCount = (k) => picks.filter((p) => (B.g === "all" || p.game === B.g) && (k === "all" || p.fam === k)).length;
+    const famCount = (k) => (B.mode === "main" ? M : picks).filter((p) => (B.g === "all" || p.game === B.g) && (k === "all" || p.fam === k)).length;
+    const modeBtns = `<div class="filters" role="group" aria-label="Which lines">${[["main", "At sportsbook main lines"], ["alt", "85%+ at any line"]].map(([k, l]) => `<button class="fbtn" type="button" data-bd-mode="${k}" aria-pressed="${B.mode === k}">${l}</button>`).join("")}</div>`;
+    const famBtns = `<div class="filters" role="group" aria-label="Filter by market">${["all", ...Object.keys(FAM)].filter((k) => k === "all" || famCount(k)).map((k) => `<button class="fbtn" type="button" data-fam="${k}" aria-pressed="${B.fam === k}">${k === "all" ? "All markets" : FAM[k]} <span class="cnt">${famCount(k)}</span></button>`).join("")}</div>`;
+    const gl = B.mode === "main" ? games.filter((g) => M.some((r) => r.game === g.game)) : games, gameSel = `<label class="small" for="bd-g">Game</label>
+        <select class="field" id="bd-g"><option value="all">All games (${gl.length})</option>${gl.map((g) => `<option value="${esc(g.game)}"${B.g === g.game ? " selected" : ""}>${abbr(g.away)} at ${abbr(g.home)} · ${esc(day(g.date))} ${esc(time(g.date))}</option>`).join("")}</select>`;
+    const tc = { High: "good", Medium: "", Lean: "warn" }, nTier = (t) => M.filter((r) => r.tier === t).length, loading = Object.keys(S.bdSim || {}).length < games.length && !M.length;
+    const mainHtml = `<p class="lead">Confidence judged at the <b>sportsbook's main line</b>: the line you would actually see (e.g. 22.5 points), not an easier alternative line. <b>High</b> = our chance 70%+, <b>Medium</b> 62-70%, <b>Lean</b> 55-62%.</p>
+      <p class="small muted">Main lines are set close to even, so 70%+ there is rare and means much more than 95% at a line far below it. The book only chooses which line is tested: the chance is our own simulation, never the odds. Past record = how our graded main-line picks in the same tier did (last 21 days; small samples so far, spreads and totals show all of that market). Statistical analysis only, not betting advice.</p>
+      <div class="statgrid" style="grid-template-columns:repeat(3,1fr)">${["High", "Medium", "Lean"].map((t) => `<div class="stat"><b>${nTier(t)}</b><span>${t}${tierRec.props[t] ? ` · props ${tierRec.props[t][0]}/${tierRec.props[t][1]} before` : ""}</span></div>`).join("")}</div>
+      ${famBtns}
+      <div class="bd-ctl">${gameSel}
+        <div class="filters" role="group" aria-label="Sort"><button class="fbtn" type="button" data-sort="time" aria-pressed="${B.sort === "time"}">By tip-off</button><button class="fbtn" type="button" data-sort="p" aria-pressed="${B.sort === "p"}">By chance</button></div>
+      </div>
+      <div class="card"><div class="tw"><table class="bd"><thead><tr><th>Pick at the main line</th><th class="n">Ours</th><th class="n">Confidence<i>past record, same tier</i></th></tr></thead><tbody>
+        ${loading ? `<tr><td colspan="3" class="empty">Loading the main lines…</td></tr>` : rowsM.slice(0, B.shown).map((r) => `<tr><td><b>${esc(r.label)}</b><div class="small muted">${r.player ? `${abbr(r.player.t)}, ${f0(r.player.projMin)} min projected${r.median != null ? `, our median ${esc(r.median)}` : ""} · ` : ""}${r.book != null ? `book's fair chance ${pct(r.book)} · ` : ""}<a href="#/sim/${esc(r.game)}">${abbr(r.away)} at ${abbr(r.home)}</a> · ${esc(day(r.date))} ${esc(timePH(r.date))}</div></td>
+          <td class="n"><b>${pc1(r.q)}</b></td><td class="n"><span class="chip ${tc[r.tier]}">${r.tier}</span><br>${recCell(r)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">No main-line pick at 55%+ in this filter (the sportsbook lines usually post a day before).</td></tr>`}
+      </tbody></table></div>
+      ${rowsM.length > B.shown ? `<button class="btn block" type="button" id="bd-more">Show ${Math.min(100, rowsM.length - B.shown)} more of ${rowsM.length - B.shown}</button>` : ""}
+      <p class="small muted" style="margin-top:10px">${rowsM.length} picks at 55%+. Players projected under 20 minutes, likely to sit, or with a projection far from their average and no named reason are left out. Player chances at main lines ran a few points high in past games; the past record column shows the real rate.</p></div>
+      <p class="small muted">Lines from the sportsbook feed, for choosing the line only. Generated ${esc(stamp(b.generated))}.</p>`;
     const cal = b.calibration || {};
-    app.innerHTML = `${labBack}<h1>High-confidence board</h1>
+    app.innerHTML = `${labBack}<h1>High-confidence board</h1>${modeBtns}${B.mode === "main" ? mainHtml : `
       <p class="lead">Every market where the simulation gives 85% or more for an upcoming game, with how often picks chosen by exactly this rule came true in the back-test.</p>
       <p class="small muted">Lines far below a player's main line (e.g. 5+ points when his line is 16.5) are hidden by default: they almost always hit but pay almost nothing. Use "Show very safe lines" to see them.</p>
       <div class="card caveat" role="note"><b>Past hit rate, not a guarantee.</b>
@@ -3234,12 +3292,13 @@ async function vBoard() {
       </tbody></table></div>
       ${rows.length > B.shown ? `<button class="btn block" type="button" id="bd-more">Show ${Math.min(100, rows.length - B.shown)} more of ${rows.length - B.shown}</button>` : ""}
       <p class="small muted" style="margin-top:10px">${rows.length} picks. ${esc(b.rules?.players || "")}. "(all types)" = fewer than 30 back-test picks of this market type, so the rate of all types in that band is shown. Some lines are low on purpose (the strictest line still at 85%, such as 2+ rebounds for a starter).</p></div>
-      <p class="small muted">Generated ${esc(stamp(b.generated))}. ${esc(b.note || "")}</p>`;
+      <p class="small muted">Generated ${esc(stamp(b.generated))}. ${esc(b.note || "")}</p>`}`;
     app.querySelectorAll("[data-fam]").forEach((x) => x.addEventListener("click", () => { B.fam = x.dataset.fam; B.shown = 60; draw(`[data-fam="${CSS.escape(B.fam)}"]`); }));
     app.querySelectorAll("[data-sort]").forEach((x) => x.addEventListener("click", () => { B.sort = x.dataset.sort; draw(`[data-sort="${CSS.escape(B.sort)}"]`); }));
-    document.getElementById("bd-cmp").addEventListener("click", () => { B.cmp = !B.cmp; draw("#bd-cmp"); });
+    document.getElementById("bd-cmp")?.addEventListener("click", () => { B.cmp = !B.cmp; draw("#bd-cmp"); });
+    app.querySelectorAll("[data-bd-mode]").forEach((x) => x.addEventListener("click", () => { B.mode = x.dataset.bdMode; B.fam = "all"; B.shown = 60; draw(`[data-bd-mode="${B.mode}"]`); }));
     document.getElementById("bd-safe")?.addEventListener("click", () => { B.safe = !B.safe; draw("#bd-safe"); });
-    document.getElementById("bd-g").addEventListener("change", (e) => { B.g = e.target.value; B.shown = 60; draw("#bd-g"); });
+    document.getElementById("bd-g")?.addEventListener("change", (e) => { B.g = e.target.value; B.shown = 60; draw("#bd-g"); });
     document.getElementById("bd-more")?.addEventListener("click", () => { B.shown += 100; draw("#bd-more"); });
     if (focusSel) app.querySelector(focusSel)?.focus({ preventScroll: true });
   };
