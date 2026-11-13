@@ -564,3 +564,12 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 .hr-cells { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; }
 .hr-c { display: grid; text-align: center; padding: 4px 2px; border-radius: 8px; background: var(--surface-2, rgba(127,127,127,.1)); font-size: 12px; min-width: 0; } .hr-c em { font-style: normal; font-size: 10px; opacity: .75; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; } .hr-c b { font-size: 13px; } .hr-c i { font-style: normal; font-size: 10px; opacity: .8; }
 .hr-c.c-green { background: rgba(46,158,91,.16); box-shadow: inset 0 0 0 1px rgba(46,158,91,.5); } .hr-c.c-yellow { background: rgba(214,160,20,.14); box-shadow: inset 0 0 0 1px rgba(214,160,20,.5); } .hr-c.c-red { background: rgba(214,69,69,.13); box-shadow: inset 0 0 0 1px rgba(214,69,69,.45); } .hr-c.none { opacity: .5; }
+
+/* read a draft from a screenshot */
+.shot-ov { position: fixed; inset: 0; z-index: 90; background: rgba(0,0,0,.6); display: flex; align-items: flex-start; justify-content: center; overflow-y: auto; padding: 12px; }
+.shot-box { background: var(--surface, #111); color: inherit; border-radius: 14px; padding: 14px; width: 100%; max-width: 720px; display: grid; gap: 10px; }
+.shot-cv canvas { width: 100%; height: auto; border-radius: 8px; touch-action: manipulation; cursor: crosshair; display: block; }
+.shot-res { display: grid; gap: 6px; } .shot-row { display: grid; grid-template-columns: 52px 1fr; gap: 6px; align-items: center; }
+.shot-c { display: flex; gap: 4px; overflow-x: auto; } .shot-h { display: grid; justify-items: center; gap: 2px; min-width: 58px; padding: 4px; border-radius: 8px; border: 1px solid var(--line, rgba(127,127,127,.3)); background: transparent; color: inherit; font-size: 10px; }
+.shot-h.on { border-color: var(--accent, #2bb3ff); box-shadow: inset 0 0 0 2px var(--accent, #2bb3ff); }
+.shot-row .shot-sel { grid-column: 2; width: 100%; font-size: 12px; }

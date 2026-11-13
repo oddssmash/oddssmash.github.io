@@ -204,6 +204,75 @@ async function matchup(a, b, bo, pre = null) {
 // section tabs on match pages scroll to their section (hash routing is left alone)
 document.addEventListener("click", (e) => { const b = e.target.closest?.("[data-jump]"); if (!b) return; document.getElementById(b.dataset.jump)?.scrollIntoView({ behavior: "smooth", block: "start" }); b.parentElement.querySelectorAll("[data-jump]").forEach((x) => x.removeAttribute("aria-current")); b.setAttribute("aria-current", "true"); });
 
+// ---------------------------------------------------------------- Read a draft from a screenshot
+// Runs only in the browser: the picture never leaves the phone. Each hero portrait in the screenshot is compared with our
+// hero icons (colour histogram + an 8x8 colour layout, over a few sizes and offsets) and the closest heroes are offered.
+// Broadcast pick cards often show skins and cropped art, so the top match is a suggestion: tap another to correct it.
+const SHOT = { feats: null };
+function shotFeat(ctx, x, y, w, h) {
+  const c = document.createElement("canvas"); c.width = c.height = 16; const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(ctx.canvas, x, y, w, h, 0, 0, 16, 16);
+  const d = g.getImageData(0, 0, 16, 16).data, hist = new Float32Array(48), grid = new Float32Array(192);
+  for (let i = 0; i < 256; i++) { const r = d[i * 4], gg = d[i * 4 + 1], b = d[i * 4 + 2], mx = Math.max(r, gg, b), mn = Math.min(r, gg, b), v = mx / 255, s = mx ? (mx - mn) / mx : 0;
+    let hu = 0; if (mx !== mn) hu = mx === r ? ((gg - b) / (mx - mn)) % 6 : mx === gg ? (b - r) / (mx - mn) + 2 : (r - gg) / (mx - mn) + 4; hu = ((hu * 60) + 360) % 360;
+    hist[s < 0.18 ? 36 + Math.min(11, Math.floor(v * 12)) : Math.min(11, Math.floor(hu / 30)) * 3 + Math.min(2, Math.floor(v * 3))] += 1 / 256;
+    const gx = (i % 16) >> 1, gy = (i >> 4) >> 1, k = (gy * 8 + gx) * 3; grid[k] += r / 1020; grid[k + 1] += gg / 1020; grid[k + 2] += b / 1020; }
+  return { hist, grid };
+}
+const shotDist = (a, b) => { let h = 0, q = 0; for (let i = 0; i < 48; i++) { const s = a.hist[i] + b.hist[i]; if (s) h += ((a.hist[i] - b.hist[i]) ** 2) / s; } for (let i = 0; i < 192; i++) q += (a.grid[i] - b.grid[i]) ** 2; return h * 1.6 + Math.sqrt(q / 192) * 2.2; };
+async function shotHeroFeats() {
+  if (SHOT.feats) return SHOT.feats; const list = Object.entries(IMG().heroes || {}); const c = document.createElement("canvas"); c.width = c.height = 64; const g = c.getContext("2d", { willReadFrequently: true }); const out = [];
+  await Promise.all(list.map(([h, u]) => new Promise((res) => { const im = new Image(); im.onload = () => { g.clearRect(0, 0, 64, 64); g.drawImage(im, 0, 0, 64, 64); out.push({ h, f: [shotFeat(g, 0, 0, 64, 64), shotFeat(g, 10, 4, 44, 44)] }); res(); }; im.onerror = res; im.src = `img/${u}`; })));
+  return (SHOT.feats = out);
+}
+// best heroes for a square around (cx, cy) of size sz (image pixels), trying a few sizes and offsets
+function shotMatch(ctx, cx, cy, sz, feats) {
+  const best = new Map(), W = ctx.canvas.width, H = ctx.canvas.height;
+  for (const sc of [0.75, 1, 1.3]) for (const ox of [-0.18, 0, 0.18]) for (const oy of [-0.18, 0, 0.18]) {
+    const s = sz * sc, x = Math.round(cx - s / 2 + ox * sz), y = Math.round(cy - s / 2 + oy * sz); if (x < 0 || y < 0 || x + s > W || y + s > H) continue;
+    const f = shotFeat(ctx, x, y, s, s); for (const hf of feats) { const d = Math.min(shotDist(f, hf.f[0]), shotDist(f, hf.f[1])); if (!best.has(hf.h) || d < best.get(hf.h)) best.set(hf.h, d); } }
+  return [...best.entries()].sort((a, b) => a[1] - b[1]).slice(0, 8).map(([h, d]) => ({ h, d }));
+}
+// broadcast layouts we know (fractions of the picture): the ten pick cards along the bottom of the MPL draft screen
+const SHOT_PRESETS = {
+  mpl: { label: "MPL draft screen", slots: (W, H) => { const cw = W * 0.0855, top = H * 0.715, out = []; for (let i = 0; i < 5; i++) out.push({ x: W * 0.012 + cw * (i + 0.5) + i * W * 0.0005, y: top + cw * 0.62, s: cw * 0.9 }); for (let i = 0; i < 5; i++) out.push({ x: W * 0.5625 + cw * (i + 0.5) + i * W * 0.0005, y: top + cw * 0.62, s: cw * 0.9 }); return out; } },
+};
+function shotReader(onDone) {
+  const ov = document.createElement("div"); ov.className = "shot-ov"; ov.setAttribute("role", "dialog"); ov.setAttribute("aria-label", "Read a draft from a screenshot");
+  const st = { img: null, taps: [], res: [], pick: [], size: 0.06 };
+  ov.innerHTML = `<div class="shot-box"><div class="spread"><b>Read the draft from a screenshot</b><button class="btn sm" type="button" data-x="close">Close</button></div>
+    <p class="small muted">Choose a screenshot of the draft (pick screen or in-game scoreboard). It is read on your phone only and never uploaded. Pick cards often show skins, so the first guess can be wrong: check each slot and tap the right hero, or choose it from the list.</p>
+    <label class="btn block"><input type="file" accept="image/*" hidden data-x="file">📷 Choose screenshot</label><div class="shot-main"></div></div>`;
+  document.body.appendChild(ov);
+  const main = ov.querySelector(".shot-main"), close = () => ov.remove();
+  const draw = () => {
+    if (!st.img) { main.innerHTML = ""; return; }
+    const A = st.pick.slice(0, 5), B = st.pick.slice(5, 10);
+    main.innerHTML = `<div class="filters"><button class="fbtn" type="button" data-x="mpl">Auto: MPL draft screen</button><button class="fbtn" type="button" data-x="clear">Clear taps</button></div>
+      <p class="small">${st.taps.length < 10 ? `<b>Tap the face of each picked hero</b>: first the 5 on the left (blue side), then the 5 on the right. ${st.taps.length}/10 tapped.` : "All 10 read. Check each hero below and tap another suggestion if it is wrong."}</p>
+      <label class="small">Box size <input type="range" min="0.025" max="0.12" step="0.005" value="${st.size}" data-x="size"></label>
+      <div class="shot-cv"><canvas></canvas></div>
+      ${st.res.length ? `<div class="shot-res">${st.res.map((r, i) => `<div class="shot-row"><span class="small muted">${i < 5 ? "Blue" : "Red"} ${i % 5 + 1}</span><div class="shot-c">${r.map((c) => `<button type="button" class="shot-h${st.pick[i] === c.h ? " on" : ""}" data-pk="${i}|${esc(c.h)}">${heroImg(c.h, 30)}<span>${esc(cap(c.h))}</span></button>`).join("")}</div><select class="shot-sel" data-sel="${i}" aria-label="Choose the hero for this slot"><option value="">${st.pick[i] && !r.some((c) => c.h === st.pick[i]) ? esc(cap(st.pick[i])) : "Other hero…"}</option>${Object.keys(IMG().heroes || {}).sort().map((h) => `<option value="${esc(h)}">${esc(cap(h))}</option>`).join("")}</select></div>`).join("")}</div>
+      <button class="btn block" type="button" data-x="use"${st.pick.filter(Boolean).length ? "" : " disabled"}>Use this draft: ${esc(A.filter(Boolean).map(cap).join(", ") || "-")} vs ${esc(B.filter(Boolean).map(cap).join(", ") || "-")}</button>` : ""}`;
+    const cv = main.querySelector("canvas"); cv.width = st.img.width; cv.height = st.img.height; const g = cv.getContext("2d", { willReadFrequently: true }); g.drawImage(st.img, 0, 0);
+    g.lineWidth = Math.max(2, st.img.width / 300); st.taps.forEach((t, i) => { g.strokeStyle = i < 5 ? "#3fa9ff" : "#ff5a5a"; g.strokeRect(t.x - t.s / 2, t.y - t.s / 2, t.s, t.s); g.fillStyle = g.strokeStyle; g.font = `${Math.round(t.s / 3)}px sans-serif`; g.fillText(String(i % 5 + 1), t.x - t.s / 2 + 3, t.y - t.s / 2 + t.s / 3); });
+    cv.addEventListener("click", async (e) => { if (st.taps.length >= 10) return; const r = cv.getBoundingClientRect(), x = ((e.clientX - r.left) / r.width) * cv.width, y = ((e.clientY - r.top) / r.height) * cv.height; st.taps.push({ x, y, s: st.size * cv.width }); await readTaps(); });
+  };
+  const readTaps = async () => { const feats = await shotHeroFeats(), c = document.createElement("canvas"); c.width = st.img.width; c.height = st.img.height; const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(st.img, 0, 0);
+    st.res = st.taps.map((t) => shotMatch(g, t.x, t.y, t.s, feats));
+    // one hero per draft: the closest unclaimed suggestion for each slot
+    const used = new Set(); st.pick = st.res.map((r) => { const c2 = r.find((x) => !used.has(x.h)); if (c2) used.add(c2.h); return c2?.h || ""; }); draw(); };
+  ov.addEventListener("change", (e) => { const t = e.target;
+    if (t.dataset.x === "file" && t.files?.[0]) { const im = new Image(); im.onload = () => { st.img = im; st.taps = []; st.res = []; st.pick = []; draw(); }; im.src = URL.createObjectURL(t.files[0]); }
+    if (t.dataset.x === "size") { st.size = +t.value; }
+    if (t.dataset.sel != null && t.value) { st.pick[+t.dataset.sel] = t.value; draw(); } });
+  ov.addEventListener("click", async (e) => { const b = e.target.closest("[data-x],[data-pk]"); if (!b) return;
+    if (b.dataset.x === "close") close();
+    if (b.dataset.x === "clear") { st.taps = []; st.res = []; st.pick = []; draw(); }
+    if (b.dataset.x === "mpl" && st.img) { st.taps = SHOT_PRESETS.mpl.slots(st.img.width, st.img.height); await readTaps(); }
+    if (b.dataset.pk) { const [i, h] = b.dataset.pk.split("|"); st.pick[+i] = h; draw(); }
+    if (b.dataset.x === "use") { onDone(st.pick.slice(0, 5).concat(["", "", "", "", ""]).slice(0, 5), st.pick.slice(5, 10).concat(["", "", "", "", ""]).slice(0, 5)); close(); } });
+}
+
 // ---------------------------------------------------------------- Draft lab
 async function vDraft() {
   const [D, heroes, teams] = await Promise.all([load("draft.json"), load("heroes.json"), load("teams.json")]);
@@ -351,7 +420,7 @@ async function vSim() {
   const track = () => { const i = step(); return `<div class="ds-track" aria-hidden="true">${ORD().map(([c, k], j) => `<span class="${j === i ? "cur" : col(sideOf(c))} ${k}${j < i ? " done" : ""}"></span>`).join("")}</div>`; };
   const phaseLine = () => { const { i, s, k } = now(); return `<span class="ds-tag">${phase(i)}</span><b>${s ? `${esc(tname(s))} to ${k === "b" ? "ban" : "pick"}` : "Draft complete"}</b><span class="muted">${Math.min(i + 1, ORD().length)} of ${ORD().length}</span>`; };
   // board tools: skip the bans (or bring them back), remove the selected pick, reset the board
-  const toolRow = () => { const t = st.target, th = t ? st[`h${t.s}`][t.i] : ""; return `<div class="ds-tools"><button type="button" class="ds-tl" data-act="nobans" aria-pressed="${!!st.noBans}">${st.noBans ? "Add ban phase back" : "Skip bans"}</button><button type="button" class="ds-tl warn" data-act="remove"${th ? "" : " disabled"}>${th ? `Remove ${esc(cap(th))}` : "Remove pick"}</button><button type="button" class="ds-tl" data-act="reset">Reset</button></div><p class="small muted ds-tip">Tap a hero, then a lane, or double-tap a hero to pick it. Double-tap a picked or banned hero to remove it.</p>`; };
+  const toolRow = () => { const t = st.target, th = t ? st[`h${t.s}`][t.i] : ""; return `<div class="ds-tools"><button type="button" class="ds-tl" data-act="nobans" aria-pressed="${!!st.noBans}">${st.noBans ? "Add ban phase back" : "Skip bans"}</button><button type="button" class="ds-tl warn" data-act="remove"${th ? "" : " disabled"}>${th ? `Remove ${esc(cap(th))}` : "Remove pick"}</button><button type="button" class="ds-tl" data-act="reset">Reset</button><button type="button" class="ds-tl" data-act="shot">📷 From screenshot</button></div><p class="small muted ds-tip">Tap a hero, then a lane, or double-tap a hero to pick it. Double-tap a picked or banned hero to remove it.</p>`; };
   const winBar = (r) => { const pb = st.fp === 1 ? r.p : 1 - r.p, base = st.fp === 1 ? lg(r.base) : 1 - lg(r.base), mv = Math.round(((st.fp === 1 ? lg(r.base + r.edge) - lg(r.base) : lg(r.base) - lg(r.base + r.edge))) * 100); return { pb, html: `<div class="ds-win"><div class="spread"><span class="num b">${pct(pb)}</span><span class="lbl">WIN CHANCE THIS GAME</span><span class="num r">${pct(1 - pb)}</span></div><div class="ds-wbar"><span style="width:${(pb * 100).toFixed(1)}%"></span><span style="width:${((1 - pb) * 100).toFixed(1)}%"></span></div><p class="small muted">Teams alone: ${pct(base)} blue. Blue side: ${(() => { const sv = Math.round((lg(r.base + (st.fp === 1 ? r.pSide : -r.pSide)) - lg(r.base)) * 100); return `${sv >= 0 ? "+" : ""}${sv}`; })()} points (blue sides win slightly more in pro games). The draft moves it ${mv >= 0 ? "+" : ""}${mv} points so far.${r.cfD ? ` Comfort picks: ${(st.fp === 1 ? r.cf : -r.cf) >= 0 ? "+" : "−"}${Math.abs(Math.round(r.cf * 25 * 10) / 10)} points blue (small nudge, not proven).` : ""}</p></div>` }; };
   const grid = () => { const { s } = now(), tk = taken(), used = s ? new Set(st.series ? st[`used${s}`] : []) : new Set(), sg = new Set(sugNow().map((x) => x.h)), q = st.q.trim().toLowerCase();
     return heroes.filter((h) => (!st.role || h.roles[0]?.r === st.role || h.roles[1]?.r === st.role) && (!q || h.id.includes(q))).sort((a, b) => (sg.has(b.id) - sg.has(a.id)) || b.recent.presence - a.recent.presence)
@@ -419,6 +488,7 @@ async function vSim() {
       if (fill) { const s = +fill.dataset.fill, dt = det(s), used = taken(); setSide(s, ROLES.map((r) => { const c = (dt?.d.profile.comfort || []).find((x) => x.role === r && !used.has(x.h)); if (c) used.add(c.h); return c?.h || ""; }), null); return; }
       if (pool) { const [s, i, hh] = pool.dataset.pool.split(","); if (!taken().has(hh)) { st[`h${s}`][+i] = hh; st.hist.push({ k: "h", s: +s, j: +i }); } render(); return; }
       if (!ac) return; const a = ac.dataset.act;
+      if (a === "shot") { shotReader((h1, h2) => { st.h1 = h1; st.h2 = h2; st.hist = []; st.target = null; st.sel = ""; render(); }); return; }
       if (a === "nobans") { st.noBans = !st.noBans; if (st.noBans) { st.b1 = st.b1.map(() => ""); st.b2 = st.b2.map(() => ""); st.hist = st.hist.filter((x) => x.k !== "b"); } try { localStorage.setItem("mlbb-nobans", st.noBans ? "1" : "0"); } catch {} st.sel = ""; render(); return; }
       if (a === "remove") { const t = st.target; if (t && st[`h${t.s}`][t.i]) { st[`h${t.s}`][t.i] = ""; st.hist = st.hist.filter((x) => !(x.k === "h" && x.s === t.s && x.j === t.i)); } st.target = null; st.sel = ""; render(); return; }
       if (a === "lock") lockIn(); else if (a === "undo") undo(); else if (a === "reset") { const keep = { a: st.a, b: st.b, fp: st.fp, series: st.series, used1: st.used1, used2: st.used2, map: st.map, wide: st.wide, noBans: st.noBans }; S.sim = null; Object.assign(S.sim = { h1: ["", "", "", "", ""], h2: ["", "", "", "", ""], b1: ["", "", "", "", ""], b2: ["", "", "", "", ""] }, keep); vSim(); }
