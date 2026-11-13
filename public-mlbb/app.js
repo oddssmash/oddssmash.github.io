@@ -343,7 +343,7 @@ async function vSim() {
   const prof = (hs) => { const p = {}; for (const k of Object.keys(TRAIT_LBL)) p[k] = hs.reduce((a, h) => a + (D.traits[h]?.[k] || 0), 0); return p; };
   const detail = async (t) => { if (!t) return null; const d = await load(`teams/${sid(t.name)}.json`).catch(() => null); if (!d) return null; const pl = await Promise.all(d.roster.map((r) => load(`players/${r.id}.json`).catch(() => null))); return { d, pl }; };
   const [dA, dB] = await Promise.all([detail(st.a), detail(st.b)]);
-  const MAPS = Object.fromEntries(Object.entries(await load("maps.json").catch(() => ({}))).map(([k, v]) => [k.trim(), v]).filter(([, v]) => v.games >= 10));
+  const MAPS = Object.fromEntries(Object.entries(await load("maps.json").catch(() => ({}))).map(([k, v]) => [k.trim(), v]).filter(([, v]) => v.games >= 5));
   const pastGames = async (t) => { if (!t?.league) return []; const rows = await load(`library/${sid(t.league)}.json`).catch(() => []); return rows.filter((r) => r[2] === t.name || r[3] === t.name).slice(0, 25); };
   const [pgA, pgB] = await Promise.all([pastGames(st.a), pastGames(st.b)]);
   const det = (s) => (s === 1 ? dA : dB), team = (s) => (s === 1 ? st.a : st.b), tname = (s) => (team(s) ? sn(team(s).name) : s === st.fp ? "Blue side" : "Red side");
@@ -361,11 +361,21 @@ async function vSim() {
       const mt = sh(D.heroes[h.id], 4) * D.scale.hero * 2, cnt = opp.reduce((a, o) => a + sh(D.vs[`${h.id}>${o}`], 3), 0) * D.scale.cnt * 2, syn = mine.reduce((a, o) => a + sh(D.pairs[pk(h.id, o)], 3), 0) * D.scale.syn * 2;
       const c = comfort.get(h.id), pp = ppool.get(h.id), tm = c ? Math.min(0.3, c.n * 0.03) : 0, own = pp ? Math.min(0.35, pp.n * 0.02) + (pp.wr - 0.5) * 0.3 : -0.1;
       const od = det(3 - s), deny = (od?.d.profile.comfort || []).find((x) => x.h === h.id && x.n >= 3), flex = h.flex && h.laneSplit?.length > 1, cur = prof(mine), need = mine.length >= 2 ? [["tank", "adds frontline"], ["cc", "adds crowd control"], ["dmg", "adds damage"]].find(([k]) => cur[k] < (D.avgLineup[k] || 0) * (mine.length / 5) * 0.7 && (D.traits[h.id]?.[k] || 0) > (D.avgLineup[k] || 0) / 5 * 1.2) : null;
+      const mh = mapHero(h.id), mb = mh ? Math.max(-0.08, Math.min(0.08, logit((mh[0] + 3) / (mh[1] + 6)) * 0.3)) : 0;
       const rkHits = opp.map((o) => ({ o, x: byId[o]?.rankedCounters?.by.find((y) => y.h === h.id) })).filter((y) => y.x), rk = rkHits.reduce((a, y) => a + y.x.adv, 0);
-      const why = [cnt > 0.05 ? "counters their picks" : null, syn > 0.05 ? "combos with your picks" : null, mt > 0.08 ? "strong in the meta" : null, c ? `${dt.d.name} comfort (${c.n} games)` : null, pp ? `${player.name}: ${pp.n} games, ${pct(pp.wr)}` : null, deny ? `denies ${od.d.name}'s ${deny.role} comfort` : null, flex ? `flex: hides your lane` : null, need ? need[1] : null, rkHits.length ? `ranked (all players): counters ${rkHits.map((y) => cap(y.o)).join(", ")}` : null].filter(Boolean);
-      return { h: h.id, score: mt + cnt + syn + tm + own + rk * 0.01 + (deny ? 0.08 : 0) + (flex ? 0.03 : 0) + (need ? 0.06 : 0), why };
+      const why = [cnt > 0.05 ? "counters their picks" : null, syn > 0.05 ? "combos with your picks" : null, mt > 0.08 ? "strong in the meta" : null, c ? `${dt.d.name} comfort (${c.n} games)` : null, pp ? `${player.name}: ${pp.n} games, ${pct(pp.wr)}` : null, deny ? `denies ${od.d.name}'s ${deny.role} comfort` : null, flex ? `flex: hides your lane` : null, need ? need[1] : null, rkHits.length ? `ranked (all players): counters ${rkHits.map((y) => cap(y.o)).join(", ")}` : null, mh && mh[0] / mh[1] >= 0.6 ? `strong on ${st.map} (${mh[0]}-${mh[1] - mh[0]})` : null].filter(Boolean);
+      return { h: h.id, score: mt + cnt + syn + tm + own + mb + rk * 0.01 + (deny ? 0.08 : 0) + (flex ? 0.03 : 0) + (need ? 0.06 : 0), why };
     }).sort((a, b) => b.score - a.score).slice(0, 5);
   };
+  const mapEff = () => { const MI = st.map && MAPS[st.map]; if (!MI) return { rMap: null, t: 0, h: 0, tip: "" };
+    const sr = sideRate().rate, rMap = (MI.blueWin * MI.games + sr * 40) / (MI.games + 40);
+    const tr = (t) => { const r = t && MI.teams[t.name]; return r ? logit((r[0] + 2) / (r[1] + 4)) : 0; }, t = Math.max(-0.15, Math.min(0.15, 0.5 * (tr(st.a) - tr(st.b))));
+    const hr = (h) => { const r = MI.heroes[h]; return r ? logit((r[0] + 3) / (r[1] + 6)) : 0; }, hsum = (k) => st[k].filter(Boolean).reduce((a, x) => a + hr(x), 0), h = Math.max(-0.2, Math.min(0.2, 0.3 * (hsum("h1") - hsum("h2"))));
+    return { rMap, t, h }; };
+  const mapHero = (h) => { const MI = st.map && MAPS[st.map], r = MI?.heroes[h]; return r && r[1] >= 3 ? r : null; };
+  const mapRow = () => { const keys = Object.keys(MAPS); if (!keys.length) return ""; const MI = st.map && MAPS[st.map], e = mapEff();
+    return `<div class="ds-maps"><span class="small muted">Battlefield:</span><div class="ds-mchips">${keys.map((k) => `<button type="button" class="ds-mc" data-mapc="${esc(k)}" aria-pressed="${st.map === k}">${esc(k)}${MAPS[k].games < 20 ? " ·" : ""}</button>`).join("")}</div>
+      ${MI ? `<p class="small muted">${esc(st.map)}: blue side won ${pct(MI.blueWin)} of ${MI.games} pro games${MI.games < 20 ? " (few games, pulled toward the usual blue rate)" : ""}. ${[st.a, st.b].filter(Boolean).map((t) => { const r = MI.teams[t.name]; return r ? `${esc(sn(t.name))} ${r[0]}-${r[1] - r[0]} here. ` : ""; }).join("")}Heroes strong here get a gold note in suggestions; picked heroes' records here move the win chance a little (capped).</p>` : '<p class="small muted">Choose the map event: it changes the blue-side edge, each team&#39;s record on it and which heroes do well. Dot = fewer than 20 pro games.</p>'}</div>`; };
   const sideRate = () => { const lgName = (st.a || st.b)?.league, L = LGS?.leagues.find((x) => x.league === lgName), r = L?.blue || LGS?.blueAll || [0, 0]; return { rate: (r[0] + 50) / (r[1] + 100), n: r[1], league: L ? L.league : "all leagues" }; };
   const compute = () => {
     const h1 = st.h1.filter(Boolean), h2 = st.h2.filter(Boolean);
@@ -373,7 +383,7 @@ async function vSim() {
     let syn = 0, cnt = 0; for (const [hs, sg] of [[h1, 1], [h2, -1]]) for (let i = 0; i < hs.length; i++) for (let j = i + 1; j < hs.length; j++) syn += sg * sh(D.pairs[pk(hs[i], hs[j])], 3);
     for (const a of h1) for (const b of h2) cnt += sh(D.vs[`${a}>${b}`], 3);
     const cfN = (s) => ROLES.reduce((x, r, i) => x + (st[`h${s}`][i] && comfortBadge(s, i, st[`h${s}`][i]) ? 1 : 0), 0), cfD = cfN(1) - cfN(2), cf = optOn("comfort") ? Math.max(-0.12, Math.min(0.12, 0.04 * cfD)) : 0; // comfort picks: small capped nudge (not proven)
-    const base = st.a && st.b ? st.a.rating - st.b.rating : 0, edge = D.wd * (hero * D.scale.hero + syn * D.scale.syn + cnt * D.scale.cnt), pSide = (st.fp === 1 ? 1 : -1) * logit(sideRate().rate), p = lg(base + edge + pSide + cf);
+    const base = st.a && st.b ? st.a.rating - st.b.rating : 0, edge = D.wd * (hero * D.scale.hero + syn * D.scale.syn + cnt * D.scale.cnt), ME = mapEff(), pSide = (st.fp === 1 ? 1 : -1) * logit(ME.rMap ?? sideRate().rate), p = lg(base + edge + pSide + cf + ME.t + ME.h);
     const es = (h1.reduce((a, h) => a + lgShort(h), 0) - h2.reduce((a, h) => a + lgShort(h), 0)) * 0.25, el = (h1.reduce((a, h) => a + lgLong(h), 0) - h2.reduce((a, h) => a + lgLong(h), 0)) * 0.25;
     const at = (min) => { const w = Math.max(0, Math.min(1, (min - 12) / 8)); return lg(logit(p) + es * (1 - w) + el * w); };
     let seed = 99; const rnd = () => ((seed = (seed * 1664525 + 1013904223) >>> 0) / 4294967296); let wins = 0, long = 0, sumLen = 0; const N = 10000;
@@ -448,7 +458,7 @@ async function vSim() {
     if (isWide()) {
       document.body.classList.add("sim-wide-on");
       app.innerHTML = `<div class="simw" id="sim"><div class="sw-top"><div class="sw-side"><button class="icon-btn" type="button" data-act="narrow" aria-label="Back to upright view">${icon("M15 6l-6 6 6 6")}</button><b class="b">${esc(tname(blue))}</b>${bans(blue)}</div>
-        <div class="sw-mid"><div class="ds-ph">${phaseLine()}</div>${toolRow()}${track()}</div>
+        <div class="sw-mid"><div class="ds-ph">${phaseLine()}</div>${toolRow()}${mapRow()}${track()}</div>
         <div class="sw-side end">${bans(red)}<b class="r">${esc(tname(red))}</b><button class="icon-btn" type="button" data-act="settings" aria-label="Draft settings: series mode, first pick, battlefield" aria-expanded="${!!st.showSet}">${icon("M4 7h10M18 7h2M4 17h2M10 17h10M16 5a2 2 0 110 4 2 2 0 010-4zM8 15a2 2 0 110 4 2 2 0 010-4z")}</button></div></div>
         <div class="sw-main">${picks(blue)}<div class="sw-grid"><div class="sw-tools">${roleBtns(true)}${search("Search")}</div><div class="dg dg9" id="dg">${grid()}</div><p class="small ds-info" id="dsi">${selInfo()}</p></div>${picks(red)}</div>
         <div class="sw-bot"><button class="btn" type="button" data-act="undo">Undo</button><div class="sw-win"><span class="num b">${pct(W.pb)}</span><span class="ds-wbar"><span style="width:${(W.pb * 100).toFixed(1)}%"></span><span style="width:${((1 - W.pb) * 100).toFixed(1)}%"></span></span><span class="num r">${pct(1 - W.pb)}</span><button class="ds-lock" type="button" data-act="lock"${!st.sel || !n.s ? " disabled" : ""}>${lockLbl()}</button></div><button class="btn" type="button" data-act="reset">Reset</button></div>
@@ -458,7 +468,7 @@ async function vSim() {
       const tbox = (s) => `<div class="ds-team ${col(s)}"><span class="lbl">${s === blue ? "BLUE · FIRST PICK" : "RED · SECOND PICK"}</span>${pickBox(`st${s}`, "Choose a team", team(s) ? sn(team(s).name) : "")}</div>`;
       app.innerHTML = `<div class="sim" id="sim"><div class="ds-head"><h1>Draft simulator</h1><button class="ds-widebtn" type="button" data-act="wide">${icon("M3 9h18v10H3zM7 3l-2 2 2 2M5 5h9a4 4 0 014 4")}Wide view</button></div>
         <div class="ds-teams">${tbox(blue)}${tbox(red)}</div>
-        <section class="ds-stage" aria-label="Draft stage"><div class="ds-ph">${phaseLine()}</div>${toolRow()}${track()}<div class="ds-banrow">${bans(blue)}<span class="lbl">BANS</span>${bans(red)}</div><div class="ds-cols">${picks(blue)}${picks(red)}</div>${W.html}</section>
+        <section class="ds-stage" aria-label="Draft stage"><div class="ds-ph">${phaseLine()}</div>${toolRow()}${mapRow()}${track()}<div class="ds-banrow">${bans(blue)}<span class="lbl">BANS</span>${bans(red)}</div><div class="ds-cols">${picks(blue)}${picks(red)}</div>${W.html}</section>
         <section class="ds-picker" aria-label="Hero picker">${roleBtns(false)}${search("Search heroes")}<p class="small ds-info" id="dsi">${selInfo()}</p><div class="dg" id="dg">${grid()}</div></section>
         <div class="ds-bar"><button class="ds-ib" type="button" data-act="undo" aria-label="Undo">${icon("M9 7L4 12l5 5M4 12h11a5 5 0 010 10h-2")}</button><button class="ds-lock" type="button" data-act="lock"${!st.sel || !n.s ? " disabled" : ""}>${lockLbl()}</button><button class="ds-ib" type="button" data-act="reset" aria-label="Reset draft">${icon("M4 12a8 8 0 108-8H7M10 1L7 4l3 3")}</button></div>
         <div class="ds-rows">${settings(mapInfo())}
@@ -487,6 +497,7 @@ async function vSim() {
       if (fp) { st.fp = +fp.dataset.fp; render(); return; }
       if (fill) { const s = +fill.dataset.fill, dt = det(s), used = taken(); setSide(s, ROLES.map((r) => { const c = (dt?.d.profile.comfort || []).find((x) => x.role === r && !used.has(x.h)); if (c) used.add(c.h); return c?.h || ""; }), null); return; }
       if (pool) { const [s, i, hh] = pool.dataset.pool.split(","); if (!taken().has(hh)) { st[`h${s}`][+i] = hh; st.hist.push({ k: "h", s: +s, j: +i }); } render(); return; }
+      const mc = e.target.closest("[data-mapc]"); if (mc) { st.map = st.map === mc.dataset.mapc ? "" : mc.dataset.mapc; render(); return; }
       if (!ac) return; const a = ac.dataset.act;
       if (a === "shot") { shotReader((h1, h2) => { st.h1 = h1; st.h2 = h2; st.hist = []; st.target = null; st.sel = ""; render(); }); return; }
       if (a === "nobans") { st.noBans = !st.noBans; if (st.noBans) { st.b1 = st.b1.map(() => ""); st.b2 = st.b2.map(() => ""); st.hist = st.hist.filter((x) => x.k !== "b"); } try { localStorage.setItem("mlbb-nobans", st.noBans ? "1" : "0"); } catch {} st.sel = ""; render(); return; }

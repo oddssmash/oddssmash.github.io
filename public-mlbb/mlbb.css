@@ -573,3 +573,8 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 .shot-c { display: flex; gap: 4px; overflow-x: auto; } .shot-h { display: grid; justify-items: center; gap: 2px; min-width: 58px; padding: 4px; border-radius: 8px; border: 1px solid var(--line, rgba(127,127,127,.3)); background: transparent; color: inherit; font-size: 10px; }
 .shot-h.on { border-color: var(--accent, #2bb3ff); box-shadow: inset 0 0 0 2px var(--accent, #2bb3ff); }
 .shot-row .shot-sel { grid-column: 2; width: 100%; font-size: 12px; }
+
+/* battlefield (map event) chooser in the draft simulator */
+.ds-maps { display: grid; gap: 4px; margin: 6px 0; } .ds-mchips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
+.ds-mc { flex: none; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line-2, rgba(127,127,127,.35)); background: transparent; color: inherit; font-size: 12px; white-space: nowrap; }
+.ds-mc[aria-pressed="true"] { background: var(--gold, #e0b93b); color: #1a1400; border-color: transparent; font-weight: 700; }
