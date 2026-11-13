@@ -900,9 +900,10 @@ async function vGames() {
   const groups = new Map();
   for (const g of up) { const k = dayKey(g.date); if (!groups.has(k)) groups.set(k, []); groups.get(k).push(g); }
   const today = dayKey(new Date().toISOString()), tmr = dayKey(new Date(Date.now() + 864e5).toISOString()), yst = dayKey(new Date(Date.now() - 864e5).toISOString());
-  const past = new Map(); for (const r of S.resPub || []) { if (Date.parse(r.date) < Date.now() - 8 * 864e5) continue; const k = dayKey(r.date); if (k >= today) continue; (past.get(k) || past.set(k, []).get(k)).push(r); }
-  const pastKeys = [...past.keys()].sort().slice(-7), keys = [...pastKeys, ...[...groups.keys()].filter((k) => !past.has(k))];
-  for (const k of pastKeys) if (!groups.has(k)) groups.set(k, past.get(k).map((r) => ({ ...r, _past: true })));
+  const past = new Map(); for (const r of S.resPub || []) { if (Date.parse(r.date) < Date.now() - 8 * 864e5) continue; const k = dayKey(r.date); if (k > today) continue; (past.get(k) || past.set(k, []).get(k)).push(r); }
+  const pastKeys = [...past.keys()].sort().slice(-8), keys = [...new Set([...pastKeys, ...groups.keys()])].sort();
+  /* finished games (including today's) sit with their day; finals first, then games still to come */
+  for (const k of pastKeys) { const have = new Set((groups.get(k) || []).map((g) => String(g.id))), fin = past.get(k).filter((r) => !have.has(String(r.id))).map((r) => ({ ...r, _past: true })); groups.set(k, [...fin, ...(groups.get(k) || [])]); }
   if (!groups.has(S.gday) && S.gday !== "all") S.gday = keys.find((k) => k >= today) || keys[keys.length - 1];
   const label = (k) => (k === today ? "Today" : k === tmr ? "Tomorrow" : k === yst ? "Yesterday" : day(groups.get(k)[0].date));
   const ft = favs().t.filter((id) => S.T[id]), fp = favs().p.filter((id) => S.P[id]);
@@ -4385,7 +4386,19 @@ async function vCheats() {
 function pastGameCard(r) { const ph = r.pred.pHome, fav = ph >= 0.5 ? r.home : r.away;
   return `<a class="card gc" href="#/result/${esc(r.id)}"><div class="gc-h">${teamLogo(r.away, { size: "lg" })}<div class="gc-m"><b>${esc(T(r.away).abbr)} ${r.act.as} @ ${esc(T(r.home).abbr)} ${r.act.hs}</b><span>FINAL${r.act.ot ? " (OT)" : ""}</span></div>${teamLogo(r.home, { size: "lg" })}</div>
     <div class="gc-x">Projected ${f0(r.pred.as)}-${f0(r.pred.hs)} · ${esc(T(fav).abbr)} ${pct(Math.max(ph, 1 - ph))} <span class="chip ${r.correct ? "good" : "bad"}">${r.correct ? "✓ Winner" : "✗ Winner"}</span></div>
-    ${scoreChips(r.id) || `<div class="gc-x small muted">No sportsbook main line was saved for this game.</div>`}<div class="gc-x small">Tap for every line, prop and pick ›</div></a>`; }
+    ${mlFinal(r) || scoreChips(r.id) || `<div class="gc-x small muted">No sportsbook main line was saved for this game.</div>`}<div class="gc-x small">Tap for every line, prop and pick ›</div></a>`; }
+// a finished game graded at the sportsbook main line saved just before tip-off (mainline-log.json): our call on the
+// moneyline, spread and total, and our top props, each with our chance (coloured like upcoming cards) and hit or miss
+function mlFinal(r) { const m = S.mlMap?.get(String(r.id)); if (!m || m.noLines) return "";
+  const ab = (t) => T(t).abbr, tone = (q) => (q >= 0.75 ? "c-green" : q >= 0.5 ? "c-yellow" : q < 0.4 ? "c-red" : ""), mk = (st) => (st === "push" ? '<b class="hm push">• Push</b> ' : st === "hit" ? '<b class="hm up">✓</b> ' : st === "miss" ? '<b class="hm dn">✗</b> ' : "");
+  const pm = m.proj.hs - m.proj.as, pt = m.proj.hs + m.proj.as, calls = [];
+  if (m.ml) calls.push({ t: `${ab(m.ml.pick)} ML`, p: m.ml.p, st: m.ml.status });
+  if (m.spread) { const my = m.spread.pick === m.home ? pm : -pm; calls.push({ t: `${ab(m.spread.pick)} ${m.spread.line > 0 ? "+" : ""}${m.spread.line}`, p: 1 - pNorm((-m.spread.line - my) / 13), st: m.spread.status }); }
+  if (m.total) { const po = 1 - pNorm((m.total.line - pt) / 18); calls.push({ t: `${m.total.side === "over" ? "Over" : "Under"} ${m.total.line}`, p: m.total.side === "over" ? po : 1 - po, st: m.total.status }); }
+  const famN = { pts: "pts", reb: "reb", ast: "ast", tpm: "3PM" }, props = (m.props || []).filter((x) => x.status !== "void").sort((a, b) => b.p - a.p).slice(0, 3);
+  const rec = (L) => `${L.filter((x) => x.st === "hit" || x.status === "hit").length}/${L.filter((x) => ["hit", "miss"].includes(x.st || x.status)).length} hit`;
+  return `<div class="gc-x gl-call"><b>Our call at the main line · ${rec(calls)}:</b> ${calls.map((c) => `<span class="chip ${tone(c.p)}">${mk(c.st)}${esc(c.t)} · ${pct(c.p)}</span>`).join(" ")}</div>
+    ${props.length ? `<div class="gc-x gl-call"><b>Top props at the main line · ${rec(props)}:</b> ${props.map((x) => `<span class="chip ${tone(x.p)}">${mk(x.status)}${esc(shortName(x.player.n))} ${x.side === "over" ? "Over" : "Under"} ${x.line} ${famN[x.fam] || x.fam} · ${pct(x.p)} <span class="hm-a">(${x.actual})</span></span>`).join(" ")}</div>` : ""}`; }
 // What could change the prediction: every line comes from the model or the 10,000 simulations.
 async function flipCard(g, sim, raw) {
   const H = T(g.home).abbr, A = T(g.away).abbr, fav = g.pred.pHome >= 0.5 ? "h" : "a", favT = fav === "h" ? H : A, dogT = fav === "h" ? A : H;
