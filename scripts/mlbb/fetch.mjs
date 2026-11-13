@@ -39,7 +39,7 @@ function params(block) {
     if (c === "|" && d === 0) { push(); cur = ""; continue; } cur += c; }
   push(); return out;
 }
-const TZ = { SGT: 8, PHT: 8, PST: 8, MYT: 8, WIB: 7, WITA: 8, WIT: 9, ICT: 7, KST: 9, JST: 9, CST: 8, CET: 1, CEST: 2, EET: 2, EEST: 3, TRT: 3, GST: 4, AST: 3, MSK: 3, UTC: 0, GMT: 0, BST: 1, EST: -5, EDT: -4, CDT: -5, PDT: -7, BRT: -3 };
+const TZ = { MMT: 6.5, IST: 5.5, SGT: 8, PHT: 8, PST: 8, MYT: 8, WIB: 7, WITA: 8, WIT: 9, ICT: 7, KST: 9, JST: 9, CST: 8, CET: 1, CEST: 2, EET: 2, EEST: 3, TRT: 3, GST: 4, AST: 3, MSK: 3, UTC: 0, GMT: 0, BST: 1, EST: -5, EDT: -4, CDT: -5, PDT: -7, BRT: -3 };
 function parseDate(s) {
   if (!s) return null; const tz = ((s.match(/abbr\/(\w+)/i) || [])[1] || "SGT").toUpperCase(), clean = s.replace(/\{\{[^}]*\}\}/g, "").replace(/,(\d)/, ", $1").trim();
   const iso = clean.match(/(\d{4})-(\d{2})-(\d{2})(?:\s*-\s*(\d{1,2}):(\d{2}))?/); // "2026-11-12 - 13:00"
@@ -108,7 +108,7 @@ function parseCards(html) {
   return out;
 }
 const seasonPages = [...new Set(EVENTS.map((e) => e.page.split("/").slice(0, -1).join("/")))];
-const srev = {}; { const j = await api({ action: "query", prop: "revisions", rvprop: "ids", titles: seasonPages.join("|") }); for (const pg of Object.values(j?.query?.pages || {})) if (pg.revisions) srev[pg.title] = pg.revisions[0].revid; }
+const srev = {}; for (let i = 0; i < seasonPages.length; i += 40) { const j = await api({ action: "query", prop: "revisions", rvprop: "ids", titles: seasonPages.slice(i, i + 40).join("|") }); for (const pg of Object.values(j?.query?.pages || {})) if (pg.revisions) srev[pg.title] = pg.revisions[0].revid; } /* batches of 40: the API caps titles per request */
 let lastParse = 0, rosterPages = 0;
 const MAX_ROSTER = +(process.env.MLBB_ROSTER_MAX || 8); // each page render waits 30 s (Liquipedia limit); spread a full refresh over runs
 for (const sp of seasonPages) {

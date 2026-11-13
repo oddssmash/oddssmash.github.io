@@ -3,6 +3,8 @@
 // picks it up on the next run. Each league is its own region; international events link the regions.
 const STAGES = ["Regular Season", "Playoffs", "Group Stage", "League Stage", "Knockout Stage", "Play-in"];
 const league = (base, label, region, seasons, stages = STAGES) => seasons.flatMap((s) => stages.map((st) => ({ page: `${base}/${s}/${st}`, league: label, season: s.replace("Season ", "S"), stage: st, region, kind: "league" })));
+// one event with explicit stage pages ("" = the event page itself)
+const ev = (base, label, region, kind, stages) => stages.map((st) => ({ page: st ? `${base}/${st}` : base, league: label, season: base.split("/").slice(1).join(" ") || base, stage: st || "Main", region, kind }));
 const S = (...n) => n.map((x) => `Season ${x}`);
 export const EVENTS = [
   ...league("MPL/Philippines", "MPL PH", "PH", S(16, 17, 18)),
@@ -28,6 +30,16 @@ export const EVENTS = [
   ...["Wildcard", "Group Stage", "Knockout Stage"].map((st) => ({ page: `MSC/2026/${st}`, league: "MSC 2026", season: "2026", stage: st, region: "INTL", kind: "intl" })),
   ...["Wildcard", "Swiss Stage", "Knockout Stage"].map((st) => ({ page: `M7 World Championship/${st}`, league: "M7", season: "M7", stage: st, region: "INTL", kind: "intl" })),
   ...["Wildcard", "Swiss Stage", "Knockout Stage"].map((st) => ({ page: `M8 World Championship/${st}`, league: "M8", season: "M8", stage: st, region: "INTL", kind: "intl" })),
+  // other pro events running now (added 2026-11-13). Missing stage pages are skipped; a few events keep matches on the main page.
+  ...ev("GG Gaming Festival/2026/Men", "GG Fest 2026", "INTL", "intl", ["", "Group Stage", "Playoffs"]),
+  ...ev("GG Gaming Festival/2026/Women", "GG Fest 2026 Women", "WOMEN", "league", ["", "Group Stage", "Playoffs"]),
+  ...league("MLBB Super League/Myanmar", "MSL MM", "MM", S(4)),
+  ...ev("SURGE/MLBB European Championship/Season 3", "SURGE EU S3", "EU", "league", ["", "Group Stage", "Playoffs"]),
+  ...ev("Mahar Invitational Cup/2026/Season 3", "Mahar Cup S3", "MM", "intl", ["", "Group Stage", "Playoffs"]),
+  ...ev("M Challenge Cup/Mekong/Season 7", "MCC Mekong S7", "INTL", "intl", ["", "Group Stage", "Playoffs"]),
+  ...ev("Esports Nations Cup/2026", "Esports Nations Cup 2026", "INTL", "intl", ["", "Group Stage", "Playoffs"]),
+  ...ev("Global Esports Games/2026/Open", "GEG 2026", "INTL", "intl", ["", "Group Stage", "Playoffs"]),
+  ...ev("IESF/World Esports Championship/2026", "IESF WEC 2026", "INTL", "intl", ["", "Group Stage", "Playoffs"]),
 ];
 // Liquipedia lists each game's five picks in role order.
 export const ROLES = ["EXP", "Jungle", "Mid", "Gold", "Roam"];
