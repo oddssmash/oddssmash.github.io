@@ -2639,11 +2639,13 @@ async function vPlayer(id) {
         ${p.k2.attrs ? `<div class="stat"><b>${f0(p.k2.attrs.three)}</b><span>Three</span></div><div class="stat"><b>${f0(p.k2.attrs.perD)}</b><span>Perimeter D</span></div><div class="stat"><b>${f0(p.k2.attrs.intD)}</b><span>Interior D</span></div><div class="stat"><b>${f0(p.k2.attrs.hustle)}</b><span>Hustle</span></div><div class="stat"><b>${f0(p.k2.attrs.stam)}</b><span>Stamina</span></div>` : ""}</div>
       <p class="small muted" style="margin-top:8px">${p.k2.arch ? `Archetype: ${esc(p.k2.arch)}. ` : ""}From a community dataset, not from 2K. It only nudges projections for players with very few games.</p></div>` : ""}
 
+    <div id="p-bars"></div>
     <div class="card"><h2>Recent games</h2><div class="tw"><table><thead><tr><th>Date (PH)</th><th>Opp</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Reb</th><th class="n">Ast</th></tr></thead>
       <tbody>${(p.log || []).map((g) => `<tr><td>${esc(day(g.d))}</td><td>${esc(T(g.opp).abbr)}</td>${g.dnp ? `<td class="n muted" colspan="4">Did not play</td>` : `<td class="n">${g.min}</td><td class="n"><b>${g.pts}</b></td><td class="n">${g.reb}</td><td class="n">${g.ast}</td>`}</tr>`).join("")}</tbody></table></div></div>
     ${mine.length ? `<div class="card"><h2>What analysts and fans are saying</h2>${mine.map(takeRow).join("")}</div>` : ""}
     <div class="card">${glossary(["usage", "ts", "net", "per100", "per36", "onoff", "poss", "vsexp", "split", "trust", "small", "evidence", "k2"], "What the terms on this page mean")}</div>`;
 
+  barsFill(p, ng0);
   const slider = document.getElementById("carry");
   if (slider) {
     const draw = () => {
@@ -4318,6 +4320,35 @@ async function hitFill(gid) { const box = document.getElementById("g-hit"); if (
       ${list.length ? list.map(hrPropRow).join("") : '<p class="small muted">No props match.</p>'}
       ${teamRows ? `<h3 style="margin-top:14px">Team total and spread</h3>${teamRows}` : ""}</section>`; };
   box.addEventListener("click", (e) => { const f = e.target.closest("[data-hrf]"); if (f) { st.fam = f.dataset.hrf; draw(); } if (e.target.closest("[data-hrm]")) { st.min = st.min ? 0 : 0.75; draw(); } });
+  draw(); }
+// PLAYER BAR CHART: each recent game against a line (the sportsbook main line for his next game when posted, otherwise
+// his recent average rounded to a half), with stat, timeframe, home/away and "without a teammate" filters. Counts only.
+async function barsFill(p, ng) { const box = document.getElementById("p-bars"); if (!box || !(p.log || []).length) return;
+  if (!S.oddsPub) S.oddsPub = await load("odds.json").catch(() => null);
+  const book = ng ? S.oddsPub?.games?.[ng.id]?.props?.[p.id] || {} : {};
+  const mates = Object.values(S.P || {}).filter((q) => String(q.team) === String(p.team) && String(q.id) !== String(p.id) && (q.cur?.[1] || q.prev?.[1] || 0) >= 15).sort((a, b) => (b.cur?.[1] || b.prev?.[1] || 0) - (a.cur?.[1] || a.prev?.[1] || 0)).slice(0, 8);
+  const st = { fam: "pts", n: 10, ha: "all", wo: "", woSet: null, line: {} };
+  const games = p.log.filter((r) => !r.dnp && r.min > 0);
+  const defLine = (fam) => { if (Number.isFinite(book[fam])) return book[fam]; const a = games.slice(0, 10).reduce((s, r) => s + (r[fam] || 0), 0) / Math.max(1, Math.min(10, games.length)); return Math.max(0.5, Math.round(a) - 0.5); };
+  const draw = () => {
+    const fam = st.fam, line = st.line[fam] ?? defLine(fam), isBook = st.line[fam] == null && Number.isFinite(book[fam]);
+    let list = games.filter((r) => (st.ha === "all" || (st.ha === "home" ? r.h === 1 : r.h === 0)) && (fam !== "tpm" || r.tpm != null));
+    if (st.woSet) list = list.filter((r) => r.g && !st.woSet.has(r.g));
+    list = list.slice(0, st.n).reverse();
+    const vals = list.map((r) => r[fam] || 0), max = Math.max(line * 1.4, ...vals, 1), over = vals.filter((v) => v > line).length, dec = vals.filter((v) => v !== line).length;
+    const sel = (k, opts, cur) => `<label class="pb-s"><span>${k}</span><select data-pb="${k}">${opts.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+    box.innerHTML = `<section class="card"><h2>Game by game against the line</h2>
+      <div class="pb-ctl">${sel("Stat", [["pts", "Points"], ["reb", "Rebounds"], ["ast", "Assists"], ["tpm", "3PT made"]], fam)}${sel("Games", [[5, "Last 5"], [10, "Last 10"], [20, "Last 20"]], st.n)}${sel("Where", [["all", "Home + away"], ["home", "Home"], ["away", "Away"]], st.ha)}${sel("Without", [["", "Nobody"], ...mates.map((m) => [m.id, m.n])], st.wo)}</div>
+      <div class="pb-line"><button class="btn sm" type="button" data-pbl="-1" aria-label="Lower the line">−</button><span>Line <b>${line}</b> ${isBook ? '<span class="chip">sportsbook main line</span>' : '<span class="small muted">(recent average)</span>'}</span><button class="btn sm" type="button" data-pbl="1" aria-label="Raise the line">+</button></div>
+      <p class="pb-sum"><span class="chip ${hrTone([over, dec])}">Over ${over}/${dec}${dec ? ` · ${Math.round((100 * over) / dec)}%` : ""}</span> <span class="chip ${hrTone([dec - over, dec])}">Under ${dec - over}/${dec}</span> <span class="small muted">avg ${f1(vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length))}</span></p>
+      ${list.length ? `<div class="pb-chart" role="img" aria-label="${over} of ${dec} games over ${line}"><span class="pb-ln" style="bottom:${(line / max) * 100}%"></span>${list.map((r, i) => { const v = r[fam] || 0; return `<div class="pb-b ${v > line ? "o" : v === line ? "p" : "u"}" style="height:${Math.max(2, (v / max) * 100)}%" title="${esc(day(r.d))} ${r.h ? "vs" : "@"} ${esc(T(r.opp).abbr)}: ${v}"><b>${v}</b><i>${esc(T(r.opp).abbr)}</i></div>`; }).join("")}</div>` : '<p class="small muted">No games match these filters.</p>'}
+      <p class="small muted">Green over the line, red under. Counts of past games only; our projection for his next game is above.</p></section>`;
+  };
+  box.addEventListener("change", async (e) => { const k = e.target.dataset.pb; if (!k) return; const v = e.target.value;
+    if (k === "Stat") st.fam = v; if (k === "Games") st.n = +v; if (k === "Where") st.ha = v;
+    if (k === "Without") { st.wo = v; st.woSet = null; if (v) { const m = await load(`players/${v}.json`).catch(() => null); st.woSet = new Set((m?.log || []).filter((r) => !r.dnp && r.min > 0).map((r) => r.g)); } }
+    draw(); });
+  box.addEventListener("click", (e) => { const b = e.target.closest("[data-pbl]"); if (!b) return; const cur = st.line[st.fam] ?? defLine(st.fam); st.line[st.fam] = Math.max(0.5, cur + Number(b.dataset.pbl)); draw(); });
   draw(); }
 // CHEATSHEET: every sportsbook main-line prop for today's and tomorrow's games, grouped by the sample it hit in
 async function vCheats() {
