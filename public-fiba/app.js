@@ -179,7 +179,7 @@ async function vPicks() {
   app.innerHTML = `<h1>Picks</h1><p class="lead">Our own lines for every upcoming FIBA game, sorted by how often they came true in 10,000 simulated games. Only picks at 60% or better are listed.</p>
     <p><a class="go" href="#/record">Track record: every pick, hit or missed, and why ›</a></p><div class="callout small"><b>Nothing here is 100%.</b> ${esc(note)} The chance is ours; "fair odds" is what that chance is worth in decimal odds.</div>
     <div class="filters" role="group" aria-label="Pick type">${Object.entries(kinds).map(([k, l]) => `<button class="fbtn" data-pf="${k}" aria-pressed="${S.pf === k}">${l}</button>`).join("")}</div>
-    ${days.map((d) => { const ps = list.filter((p) => dayKey(p.date) === d).slice(0, 40); return `<h3 class="dayh">${esc(dayLabel(ps[0].date))}</h3><div class="tgrid">${ps.map((p) => `<a class="titem" href="#/game/${esc(p.gid)}"><span class="pk-p ${p.p >= 0.75 ? "hi" : ""}">${pct(p.p)}</span><span><span class="t1">${esc(p.pick)}</span><span class="t2">${esc(p.game)} · ${esc(p.comp)}${p.why ? " · " + esc(p.why) : ""}</span></span><span class="t3">fair ${dec(p.p)}</span></a>`).join("")}</div>`; }).join("") || `<p class="empty">No picks at 60% or better right now.</p>`}`;
+    ${days.map((d) => { const ps = list.filter((p) => dayKey(p.date) === d).slice(0, 40); return `<h3 class="dayh">${esc(dayLabel(ps[0].date))}</h3><div class="tgrid">${ps.map((p) => `<a class="titem" href="#/game/${esc(p.gid)}"><span class="pk-p ${p.p >= 0.75 ? "hi" : ""}">${pct(p.p)}</span><span><span class="t1">${esc(p.pick)}</span><span class="t2">${esc(p.game)} · ${esc(p.comp)}${p.l10?.[1] ? ` · <b class="${p.l10[0] / p.l10[1] >= 0.75 ? "up" : p.l10[0] / p.l10[1] < 0.4 ? "down" : ""}">L${p.l10[1]} ${p.l10[0]}/${p.l10[1]} at this line</b>` : ""}${p.why ? " · " + esc(p.why) : ""}</span></span><span class="t3">fair ${dec(p.p)}</span></a>`).join("")}</div>`; }).join("") || `<p class="empty">No picks at 60% or better right now.</p>`}`;
   app.querySelectorAll("[data-pf]").forEach((b) => b.addEventListener("click", () => { S.pf = b.dataset.pf; vPicks(); }));
 }
 
@@ -234,13 +234,37 @@ async function vPlayer(pid) {
     <div class="card"><h2>Shooting</h2><p>FG ${p.shooting.fg ?? "-"}% on ${f1(p.shooting.fga)} a game · three ${p.shooting.three ?? "-"}% on ${f1(p.shooting.f3a)} · free throws ${p.shooting.ft ?? "-"}% on ${f1(p.shooting.fta)}.</p>
       <p class="small">${hot.length ? `<b class="up">Strengths:</b> ${hot.map((z) => `${esc(z.label.toLowerCase())} ${f1(z.pct)}% (FIBA ${f1(z.lgPct)}%)`).join("; ")}. ` : ""}${cold.length ? `<b class="down">Weaknesses:</b> ${cold.map((z) => `${esc(z.label.toLowerCase())} ${f1(z.pct)}% (FIBA ${f1(z.lgPct)}%)`).join("; ")}.` : ""}${!hot.length && !cold.length ? "No zone stands out from the FIBA average yet." : ""}</p></div>
     <div class="card"><h2>Hot and cold zones</h2><div class="court-wrap">${court(p.shots, p.zones)}</div><p class="small muted">His last ${p.shots.length} shots with a location. Filled = made.</p>${zoneTable(p.zones)}</div>
+    <div id="p-bars"></div>
     <div class="card"><h2>Game log</h2><div class="tw"><table class="ft"><thead><tr><th>Date</th><th>Opp</th><th class="n">Min</th><th class="n">Pts</th><th class="n">Reb</th><th class="n">Ast</th><th class="n">FG</th><th class="n">3PT</th><th class="n">FT</th><th class="n">+/-</th></tr></thead><tbody>
       ${p.log.map((l) => `<tr><td>${esc(dayShort(l.date))}</td><td><a href="#/team/${esc(l.opp)}">${esc(l.opp)}</a></td><td class="n">${f0(l.min)}</td><td class="n"><b>${l.pts}</b></td><td class="n">${l.reb}</td><td class="n">${l.ast}</td><td class="n">${esc(l.fg)}</td><td class="n">${esc(l.three)}</td><td class="n">${esc(l.ft)}</td><td class="n">${sg(l.pm).replace(".0", "")}</td></tr>`).join("")}</tbody></table></div></div>`;
   // opponent ids → names
   const teams = await load("teams.json"), nm = Object.fromEntries(teams.map((t) => [t.tid, t.code || t.name]));
   app.querySelectorAll('a[href^="#/team/"]').forEach((a) => { const id = a.getAttribute("href").split("/")[2]; if (a.textContent === id && nm[id]) a.textContent = nm[id]; });
   playerVersus(p);
+  barsFill(p, nm);
 }
+
+// ---------------------------------------------------------------- Game by game against a line (player page)
+// Each logged game against a line (his average rounded to a half, movable with - and +), with stat, timeframe and
+// starter filters. Counts of past games only; FIBA has no sportsbook lines, so the line is ours.
+function barsFill(p, nm) { const box = document.getElementById("p-bars"); if (!box || !(p.log || []).length) return;
+  const three = (l) => +String(l.three || "0/0").split("/")[0] || 0, val = (l, f) => (f === "tpm" ? three(l) : l[f] || 0);
+  const games = p.log.filter((l) => l.min > 0), st = { fam: "pts", n: 10, role: "all", line: {} };
+  const defLine = (f) => { const a = games.slice(0, 10).reduce((s, l) => s + val(l, f), 0) / Math.max(1, Math.min(10, games.length)); return Math.max(0.5, Math.round(a) - 0.5); };
+  const tone = (a, n) => (!n ? "" : a / n >= 0.75 ? "up" : a / n < 0.4 ? "down" : "");
+  const draw = () => { const f = st.fam, line = st.line[f] ?? defLine(f);
+    const list = games.filter((l) => st.role === "all" || (st.role === "start" ? l.start : !l.start)).slice(0, st.n).reverse();
+    const vals = list.map((l) => val(l, f)), max = Math.max(line * 1.4, ...vals, 1), over = vals.filter((v) => v > line).length, dec = vals.filter((v) => v !== line).length;
+    const sel = (k, opts, cur) => `<label class="pb-s"><span>${k}</span><select data-pb="${k}">${opts.map(([v, l]) => `<option value="${esc(v)}"${String(v) === String(cur) ? " selected" : ""}>${esc(l)}</option>`).join("")}</select></label>`;
+    box.innerHTML = `<div class="card"><h2>Game by game against the line</h2>
+      <div class="pb-ctl">${sel("Stat", [["pts", "Points"], ["reb", "Rebounds"], ["ast", "Assists"], ["tpm", "3PT made"]], f)}${sel("Games", [[5, "Last 5"], [10, "Last 10"], [40, "All logged"]], st.n)}${sel("Role", [["all", "All games"], ["start", "As a starter"], ["bench", "Off the bench"]], st.role)}</div>
+      <div class="pb-line"><button class="btn sm" type="button" data-pbl="-1" aria-label="Lower the line">−</button><span>Line <b>${line}</b> <span class="small muted">${st.line[f] == null ? "(his recent average)" : "(your line)"}</span></span><button class="btn sm" type="button" data-pbl="1" aria-label="Raise the line">+</button></div>
+      <p class="pb-sum"><b class="${tone(over, dec)}">Over ${over}/${dec}${dec ? ` · ${Math.round((100 * over) / dec)}%` : ""}</b> · <b class="${tone(dec - over, dec)}">Under ${dec - over}/${dec}</b> <span class="small muted">avg ${f1(vals.reduce((a, b) => a + b, 0) / Math.max(1, vals.length))}</span></p>
+      ${list.length ? `<div class="pb-chart" role="img" aria-label="${over} of ${dec} games over ${line}"><span class="pb-ln" style="bottom:${(line / max) * 100}%"></span>${list.map((l) => { const v = val(l, f); return `<div class="pb-b ${v > line ? "o" : v === line ? "p" : "u"}" style="height:${Math.max(2, (v / max) * 100)}%" title="${esc(dayShort(l.date))} vs ${esc(nm[l.opp] || l.opp)}: ${v}"><b>${v}</b><i>${esc(nm[l.opp] || "")}</i></div>`; }).join("")}</div>` : '<p class="small muted">No games match these filters.</p>'}
+      <p class="small muted">Green over the line, red under. FIBA has no sportsbook lines here, so the line is his own recent average; move it with − and +.</p></div>`; };
+  box.addEventListener("change", (e) => { const k = e.target.dataset.pb; if (!k) return; if (k === "Stat") st.fam = e.target.value; if (k === "Games") st.n = +e.target.value; if (k === "Role") st.role = e.target.value; draw(); });
+  box.addEventListener("click", (e) => { const b = e.target.closest("[data-pbl]"); if (!b) return; st.line[st.fam] = Math.max(0.5, (st.line[st.fam] ?? defLine(st.fam)) + Number(b.dataset.pbl)); draw(); });
+  draw(); }
 
 // ---------------------------------------------------------------- Versus (player and team pages)
 // Projections for any matchup from our FIBA data, even with no head-to-head games: per-minute rates, pace,

@@ -241,7 +241,8 @@ for (const g of upcoming) {
     picks.push({ gid: g.id, date: g.date, comp: g.comp, kind: "total", pick: `${rec.proj.over >= 0.5 ? "Over" : "Under"} ${total}`, p: r3(Math.max(rec.proj.over, 1 - rec.proj.over)), game: `${g.a.code || g.a.name} vs ${g.b.code || g.b.name}`, fair: r1(1 / Math.max(rec.proj.over, 1 - rec.proj.over) * 100) / 100 });
     let perGame = 0;
     for (const p of players.filter((x) => x.gp >= 3 && x.avgPts >= 8 && x.line != null && !x.flagged && !x.noPick).sort((a, b) => Math.abs(b.pOver - 0.5) - Math.abs(a.pOver - 0.5))) { if (perGame >= 2) break; perGame++; const po = p.pOver, side = po >= 0.5 ? "over" : "under", pp = Math.min(p.gp < 10 ? 0.85 : 0.9, Math.max(po, 1 - po)); /* cap: a handful of games cannot support 95% */
-      picks.push({ gid: g.id, date: g.date, comp: g.comp, kind: "prop", pick: `${p.n} ${side} ${p.line} points`, p: r3(pp), game: `${g.a.code || g.a.name} vs ${g.b.code || g.b.name}`, proj: p.pts, avg: p.avgPts, fair: r1(1 / pp * 100) / 100, why: `projected ${p.pts} (range ${p.lo}-${p.hi}) vs his ${p.avgPts} average over ${p.gp} games${p.lineWhy ? ": " + p.lineWhy : ""}` }); }
+      const hl = (PL.get(p.pid)?.log || []).slice(-10).filter((l) => l[5] !== p.line), hov = hl.filter((l) => l[5] > p.line).length; /* his last 10 games at this line (counts only, shown with the pick) */
+      picks.push({ gid: g.id, date: g.date, comp: g.comp, kind: "prop", pick: `${p.n} ${side} ${p.line} points`, p: r3(pp), pid: p.pid, l10: [side === "over" ? hov : hl.length - hov, hl.length], game: `${g.a.code || g.a.name} vs ${g.b.code || g.b.name}`, proj: p.pts, avg: p.avgPts, fair: r1(1 / pp * 100) / 100, why: `projected ${p.pts} (range ${p.lo}-${p.hi}) vs his ${p.avgPts} average over ${p.gp} games${p.lineWhy ? ": " + p.lineWhy : ""}` }); }
   }
 }
 

@@ -60,3 +60,11 @@ tr.sub td { padding-top: 0; border-top: 0; }
 
 .chip.live { background: var(--crit); color: #fff; font-weight: 700; } .livec { border-color: var(--crit); }
 
+
+/* player bar chart against a line */
+.pb-ctl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; } .pb-s { display: grid; gap: 2px; font-size: 11px; } .pb-s span { opacity: .7; } .pb-s select { width: 100%; min-width: 0; }
+.pb-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 10px 0 4px; } .pb-sum { margin: 6px 0; }
+.pb-chart { position: relative; height: 170px; display: flex; align-items: flex-end; gap: 3px; padding-bottom: 16px; margin-top: 18px; }
+.pb-ln { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed currentColor; opacity: .55; z-index: 1; margin-bottom: 16px; }
+.pb-b { flex: 1; position: relative; border-radius: 4px 4px 0 0; min-width: 0; } .pb-b.o { background: #2e9e5b; } .pb-b.u { background: #c94b4b; } .pb-b.p { background: #8a8a8a; }
+.pb-b b { position: absolute; top: -16px; left: 0; right: 0; text-align: center; font-size: 10px; } .pb-b i { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 8px; font-style: normal; opacity: .7; overflow: hidden; }
