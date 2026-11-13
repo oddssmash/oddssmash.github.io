@@ -4274,15 +4274,23 @@ function linesBlock(g, L) { const o = S.oddsPub?.games?.[g.id], ph = g.pred.pHom
   const SDM = 13, SDT = 18, pCover = Number.isFinite(o?.spreadHome) ? 1 - pNorm((-o.spreadHome - pm) / SDM) : null, pOver = Number.isFinite(o?.total) ? 1 - pNorm((o.total - pt) / SDT) : null;
   const call = o ? [{ t: ph >= 0.5 ? `${H} ML` : `${A} ML`, p: Math.max(ph, 1 - ph) }, pCover != null ? { t: pCover >= 0.5 ? `${H} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : `${A} ${-o.spreadHome > 0 ? "+" : ""}${-o.spreadHome}`, p: Math.max(pCover, 1 - pCover) } : null, pOver != null ? { t: `${pOver >= 0.5 ? "Over" : "Under"} ${o.total}`, p: Math.max(pOver, 1 - pOver) } : null].filter(Boolean) : [];
   const tone = (q) => (q >= 0.75 ? "c-green" : q >= 0.5 ? "c-yellow" : q < 0.4 ? "c-red" : "");
+  /* FINISHED GAME: grade each call against the final score and each prop against the final box score (hit, miss or push) */
+  const lv = (S.liveData?.games || []).find((x) => x.id === g.id && x.state === "post"), fin = lv ? { hs: +lv.hs, as: +lv.as } : null;
+  const mark = (r) => (r == null ? "" : r === "push" ? '<b class="hm push">• Push</b> ' : r ? '<b class="hm up">✓</b> ' : '<b class="hm dn">✗</b> ');
+  if (fin && o) { const m = fin.hs - fin.as, tot = fin.hs + fin.as;
+    call[0].r = (m > 0) === (ph >= 0.5);
+    if (pCover != null && call[1]) { const cv = pCover >= 0.5 ? m + o.spreadHome : -(m + o.spreadHome); call[1].r = cv === 0 ? "push" : cv > 0; }
+    const tc = call.find((c) => /^(Over|Under) /.test(c.t)); if (tc) { const d = tc.t.startsWith("Over") ? tot - o.total : o.total - tot; tc.r = d === 0 ? "push" : d > 0; } }
   // top player props at the SPORTSBOOK MAIN LINE: our chance at the book's own line, Over or Under, one per player and stat
   const famN = { pts: "pts", reb: "reb", ast: "ast", tpm: "3PM" }, seenP = new Set();
-  const picks = (S.boardPub?.picks || []).filter((q) => String(q.game) === String(g.id) && q.player && q.comparison?.bookLine != null && q.comparison.ourProbAtBookLine != null).map((q) => { const c = q.comparison.ourProbAtBookLine; return { k: q.player.id + "|" + q.fam, n: q.player.n, fam: q.fam, line: q.comparison.bookLine, side: c >= 0.5 ? "Over" : "Under", p: Math.max(c, 1 - c) }; }).sort((a, b) => b.p - a.p).filter((q) => (seenP.has(q.k) ? false : seenP.add(q.k))).slice(0, 3);
+  const picks = (S.boardPub?.picks || []).filter((q) => String(q.game) === String(g.id) && q.player && q.comparison?.bookLine != null && q.comparison.ourProbAtBookLine != null).map((q) => { const c = q.comparison.ourProbAtBookLine; return { pid: String(q.player.id), k: q.player.id + "|" + q.fam, n: q.player.n, fam: q.fam, line: q.comparison.bookLine, side: c >= 0.5 ? "Over" : "Under", p: Math.max(c, 1 - c) }; }).sort((a, b) => b.p - a.p).filter((q) => (seenP.has(q.k) ? false : seenP.add(q.k))).slice(0, 3);
+  if (lv?.box) for (const q of picks) { const b = lv.box[q.pid], v = b ? b[["pts", "reb", "ast", "tpm"].indexOf(q.fam)] : null; if (v != null) { const d = q.side === "Over" ? v - q.line : q.line - v; q.r = d === 0 ? "push" : d > 0; q.act = v; } }
   return `<div class="gl-t"><div class="gl-r gl-h"><span></span><span>Ours</span><span>Sportsbook</span></div>
     <div class="gl-r"><span>Moneyline</span><span>${esc(A)} ${ml(fairML(1 - ph))} · ${esc(H)} ${ml(fairML(ph))}</span><span>${o ? `${esc(A)} ${ml(o.mlAway)} · ${esc(H)} ${ml(o.mlHome)}` : "-"}</span></div>
     <div class="gl-r"><span>Spread</span><span>${esc(T(L.fav).abbr)} ${spreadTxt(L.spread)}</span><span>${o && Number.isFinite(o.spreadHome) ? `${esc(H)} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : "-"}</span></div>
     <div class="gl-r"><span>Total</span><span>${L.total.toFixed(1)}</span><span>${o && Number.isFinite(o.total) ? o.total : "-"}</span></div></div>
-    ${call.length ? `<div class="gc-x gl-call"><b>Our call at the main line:</b> ${call.map((c) => `<span class="chip ${tone(c.p)}">${esc(c.t)} · ${pct(c.p)}</span>`).join(" ")}</div>` : ""}
-    <div class="gc-x gl-call"><b>Top props at the main line:</b> ${picks.length ? picks.map((q) => `<span class="chip ${tone(q.p)}">${esc(shortName(q.n))} ${q.side} ${q.line} ${famN[q.fam] || q.fam} · ${pct(q.p)}</span>`).join(" ") : `<span class="small muted">no sportsbook prop lines posted yet</span>`}</div>`; }
+    ${call.length ? `<div class="gc-x gl-call"><b>${fin && o ? `Our call at the main line · ${call.filter((c) => c.r === true).length}/${call.filter((c) => c.r != null && c.r !== "push").length} hit` : "Our call at the main line"}:</b> ${call.map((c) => `<span class="chip ${tone(c.p)}">${mark(c.r)}${esc(c.t)} · ${pct(c.p)}</span>`).join(" ")}</div>` : ""}
+    <div class="gc-x gl-call"><b>${picks.some((q) => q.r != null) ? `Top props at the main line · ${picks.filter((q) => q.r === true).length}/${picks.filter((q) => q.r != null && q.r !== "push").length} hit` : "Top props at the main line"}:</b> ${picks.length ? picks.map((q) => `<span class="chip ${tone(q.p)}">${mark(q.r)}${esc(shortName(q.n))} ${q.side} ${q.line} ${famN[q.fam] || q.fam} · ${pct(q.p)}${q.act != null ? ` <span class="hm-a">(${q.act})</span>` : ""}</span>`).join(" ") : `<span class="small muted">no sportsbook prop lines posted yet</span>`}</div>`; }
 // a finished game on a past day of the Games tab: final, projection, and what we hit against the main lines
 function pastGameCard(r) { const ph = r.pred.pHome, fav = ph >= 0.5 ? r.home : r.away;
   return `<a class="card gc" href="#/result/${esc(r.id)}"><div class="gc-h">${teamLogo(r.away, { size: "lg" })}<div class="gc-m"><b>${esc(T(r.away).abbr)} ${r.act.as} @ ${esc(T(r.home).abbr)} ${r.act.hs}</b><span>FINAL${r.act.ot ? " (OT)" : ""}</span></div>${teamLogo(r.home, { size: "lg" })}</div>
@@ -5287,6 +5295,8 @@ async function liveScoreboard() {
         games.push(row);
       }
     }
+    /* keep the saved final box scores (used to grade prop calls on finished games) */
+    const oldBox = new Map((S.liveData?.games || []).filter((x) => x.box).map((x) => [x.id, x.box])); for (const r of games) if (oldBox.has(r.id)) r.box = oldBox.get(r.id);
     S.liveData = { fetched: new Date().toISOString(), games, src: "live" };
   } catch { /* host blocks outside requests: keep the snapshot */ }
 }

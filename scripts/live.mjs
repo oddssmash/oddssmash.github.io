@@ -57,6 +57,9 @@ for (const d of [addDays(today, -1), today]) {
     if (preH != null) { row.preH = preH; row.preA = preA; row.prePHome = pre?.pred?.pHome ?? done?.pred?.pHome; }
     if (state === "post") {
       if (preH != null) row.called = (hs > as) === (preH > preA);
+      // final box score (points, rebounds, assists, threes made per player id) so game cards can grade our prop calls
+      const fin = playerLines(await getJSON(`${ESPN}/summary?event=${ev.id}`).catch(() => null));
+      if (fin.size) { row.box = {}; for (const [pid, v] of fin) if (!v.dnp && v.min > 0) row.box[pid] = [v.pts, v.reb, v.ast, v.tpm]; }
       games.push(row); continue;
     }
     // in progress

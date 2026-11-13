@@ -1177,3 +1177,8 @@ a.card .ml-cs { margin-top: 8px; }
 .chip.c-yellow { background: rgba(214,160,20,.16); color: #9a6b00; box-shadow: inset 0 0 0 1px rgba(214,160,20,.55); }
 .chip.c-red { background: rgba(214,69,69,.14); color: #c03b3b; box-shadow: inset 0 0 0 1px rgba(214,69,69,.5); }
 :root:not([data-theme="light"]) .chip.c-green { color: #5fd38f; } :root:not([data-theme="light"]) .chip.c-yellow { color: #f2c94c; } :root:not([data-theme="light"]) .chip.c-red { color: #ff7a6e; }
+
+/* hit / miss marks on finished games' main-line calls and props */
+.hm { font-weight: 800; } .hm.up { color: #1f9d55; } .hm.dn { color: #d64545; } .hm.push { color: var(--muted, #888); font-weight: 600; }
+:root:not([data-theme="light"]) .hm.up { color: #5fd38f; } :root:not([data-theme="light"]) .hm.dn { color: #ff7a6e; }
+.hm-a { opacity: .75; font-weight: 500; }
