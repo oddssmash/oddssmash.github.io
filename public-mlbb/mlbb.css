@@ -578,3 +578,7 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 .ds-maps { display: grid; gap: 4px; margin: 6px 0; } .ds-mchips { display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px; }
 .ds-mc { flex: none; padding: 5px 10px; border-radius: 999px; border: 1px solid var(--line-2, rgba(127,127,127,.35)); background: transparent; color: inherit; font-size: 12px; white-space: nowrap; }
 .ds-mc[aria-pressed="true"] { background: var(--gold, #e0b93b); color: #1a1400; border-color: transparent; font-weight: 700; }
+
+/* free-order drafting */
+.ds-free { margin-top: 4px; align-items: center; } .ds-tl.blue[aria-pressed="true"] { background: #2b7fd6; color: #fff; border-color: transparent; } .ds-tl.red[aria-pressed="true"] { background: #d64545; color: #fff; border-color: transparent; }
+.ds-tl[data-act="free"][aria-pressed="true"], .ds-tl[data-fk][aria-pressed="true"] { background: var(--gold, #e0b93b); color: #1a1400; border-color: transparent; }
