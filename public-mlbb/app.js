@@ -121,7 +121,22 @@ function resultRow(r) { const aw = r.score[0] > r.score[1], scored = r.graded &&
     <div class="sc"><span class="${aw ? "w" : "l"}">${esc(sn(r.a))}</span><span class="num">${r.score[0]} – ${r.score[1]}</span><span class="${aw ? "l" : "w"}">${esc(sn(r.b))}</span></div>
     <div class="bot-r"><span>We said <b>${esc(sn(r.pSeries >= 0.5 ? r.a : r.b))} ${pct(Math.max(r.pSeries, 1 - r.pSeries))}</b></span>${r.mvp ? `<span class="mvp">★ MVP ${esc(r.mvp)}</span>` : ""}</div>${scored && !r.right && r.why ? `<div class="why small"><b>Why we missed:</b> ${esc(r.why)}</div>` : ""}${scored && r.right && r.whyHit ? `<div class="why hit small"><b>Why we hit:</b> ${esc(r.whyHit)}</div>` : ""}${betsStrip(r, r.score)}${r.id ? `<span class="go small">Game-by-game analysis ›</span>` : ""}</${tag}>`; }
 
-async function vMatch(id) { const m = await load(`matches/${id}.json`); app.innerHTML = `${subHead("#/matches", `${m.league} · ${m.stage} · BO${m.bo}`, when(m.date) + " PH")}${await matchup(m.a, m.b, m.bo, m)}${ctxHtml(m)}`; }
+async function vMatch(id) { const m = await load(`matches/${id}.json`); app.innerHTML = `${subHead("#/matches", `${m.league} · ${m.stage} · BO${m.bo}`, when(m.date) + " PH")}${await matchup(m.a, m.b, m.bo, m)}${ctxHtml(m)}${await hitHtml(m)}`; }
+// HIT RATES: each team's recent series of the same length against this match's lines (win the series, win by 2+ maps,
+// take at least one map, total games over the usual line), plus head to head. Counts of past series only; not a model input.
+async function hitHtml(m) { if (!m?.bo || m.bo < 3) return ""; const H = await load("history.json").catch(() => null); if (!H) return "";
+  const line = m.bo === 3 ? 2.5 : m.bo === 5 ? 4.5 : m.bo === 7 ? 5.5 : null, need = (m.bo + 1) / 2;
+  const mine = (t) => H.filter((r) => (r[4] === t || r[5] === t) && Math.max(r[6], r[7]) === need).sort((a, b) => (a[1] < b[1] ? 1 : -1)).map((r) => { const a = r[4] === t; return { w: a ? r[6] : r[7], l: a ? r[7] : r[6], opp: a ? r[5] : r[4] }; });
+  const cnt = (list, f) => [list.filter(f).length, list.length];
+  const tone = ([a, n]) => (!n ? "none" : a / n >= 0.75 ? "c-green" : a / n >= 0.5 ? "c-yellow" : a / n < 0.4 ? "c-red" : "");
+  const cell = (lbl, x) => `<span class="hr-c ${tone(x)}"><em>${lbl}</em><b>${x[1] ? `${x[0]}/${x[1]}` : "-"}</b>${x[1] ? `<i>${Math.round((100 * x[0]) / x[1])}%</i>` : ""}</span>`;
+  const row = (t, n) => { const L = mine(t).slice(0, n); if (!L.length) return `<div class="hr-row"><b>${esc(sn(t))}</b><p class="small muted">No finished BO${m.bo} series in our data yet.</p></div>`;
+    return `<div class="hr-row"><div><b>${esc(sn(t))}</b> <span class="small muted">last ${L.length} BO${m.bo} series</span></div><div class="hr-cells">${cell("Won", cnt(L, (x) => x.w > x.l))}${cell("−1.5 maps", cnt(L, (x) => x.w - x.l >= 2))}${cell("+1.5 maps", cnt(L, (x) => x.w >= 1))}${line ? cell(`Over ${line}`, cnt(L, (x) => x.w + x.l > line)) : ""}</div></div>`; };
+  const h2h = mine(m.a).filter((x) => x.opp === m.b).slice(0, 10);
+  return `<section class="card"><h2>Hit rates · recent series</h2>
+    <p class="small muted">How often each team cleared this match's lines in its last 10 BO${m.bo} series: won the series, won by 2+ maps (−1.5), took at least one map (+1.5), and total games over ${line}. Green 75%+, yellow 50%+, red under 40%. Counts only; our projection is above.</p>
+    ${row(m.a, 10)}${row(m.b, 10)}
+    ${h2h.length ? `<div class="hr-row"><div><b>Head to head</b> <span class="small muted">last ${h2h.length} BO${m.bo}</span></div><div class="hr-cells">${cell(`${esc(sn(m.a))} won`, cnt(h2h, (x) => x.w > x.l))}${line ? cell(`Over ${line}`, cnt(h2h, (x) => x.w + x.l > line)) : ""}</div><p class="small muted">${h2h.map((x) => `${x.w}-${x.l}`).join(" · ")}</p></div>` : ""}</section>`; }
 // context for a match: experience, career win rate, archetype mix (clearly marked when it does not move the prediction)
 function ctxHtml(m) {
   const c = m.context; if (!c) return "";
