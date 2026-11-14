@@ -3197,9 +3197,9 @@ async function vBoard() {
   // chooses which line is tested; the chance is our own simulation. Past record = our graded main-line picks per tier.
   const ML_TIER = (q) => (q >= 0.7 ? "High" : q >= 0.62 ? "Medium" : "Lean");
   const ML_WORD = { pts: "points", reb: "rebounds", ast: "assists", tpm: "threes" };
-  const tierRec = { props: {}, ml: {} };
-  { const add = (o, x) => { if (!x || (x.status !== "hit" && x.status !== "miss") || x.p == null) return; const a = (o[ML_TIER(x.p)] ||= [0, 0]); a[1]++; if (x.status === "hit") a[0]++; };
-    for (const g of mlog?.games || []) { for (const x of g.props || []) add(tierRec.props, x); add(tierRec.ml, g.ml); } }
+  const tierRec = { props: {}, ml: {}, spread: {}, total: {} };
+  { const add = (o, x) => { if (!x || (x.status !== "hit" && x.status !== "miss") || x.p == null || x.p < 0.55) return; /* under 55% is a coin-flip and is not on this board */ const a = (o[ML_TIER(x.p)] ||= [0, 0]); a[1]++; if (x.status === "hit") a[0]++; };
+    for (const g of mlog?.games || []) { for (const x of g.props || []) add(tierRec.props, x); add(tierRec.ml, g.ml); add(tierRec.spread, g.spread); add(tierRec.total, g.total); } }
   const sgn = (l) => `${l > 0 ? "+" : ""}${l}`;
   const mainRows = () => {
     const out = [];
@@ -3224,8 +3224,7 @@ async function vBoard() {
     return out;
   };
   const recCell = (r) => {
-    if (r.kind === "props" || r.kind === "ml") { const a = tierRec[r.kind][r.tier]; return a ? `${a[0]}/${a[1]}<i>${Math.round((a[0] / a[1]) * 100)}% hit</i>` : `<span class="muted">-</span>`; }
-    const R = mlog?.record?.[r.kind]; return R?.n ? `${R.hit}/${R.n}<i>all ${r.kind}s</i>` : `<span class="muted">-</span>`;
+    { const a = tierRec[r.kind][r.tier]; if (!a && (r.kind === "spread" || r.kind === "total") && !Object.keys(tierRec[r.kind]).length) { const R0 = mlog?.record?.[r.kind]; return R0?.n ? `${R0.hit}/${R0.n}<i>all ${r.kind}s</i>` : `<span class="muted">-</span>`; } return a ? `${a[0]}/${a[1]}<i>${Math.round((a[0] / a[1]) * 100)}% hit</i>` : `<span class="muted">-</span>`; }
   };
   const games = [...new Map(picks.map((p) => [p.game, p])).values()].sort((x, y) => Date.parse(x.date) - Date.parse(y.date));
   const cmpCell = (p) => {
@@ -3237,7 +3236,7 @@ async function vBoard() {
   const draw = (focusSel) => {
     const safeHidden = picks.filter((p) => tooFarBelow(p)).length;
     if (!S.bdGames) { S.bdGames = {}; Promise.all([...new Set(picks.map((p) => p.game))].map((id) => load(`upcoming/${id}.json`).then((g) => { S.bdGames[id] = g; }).catch(() => {}))).then(() => draw()); }
-    if (!S.bdSim) { S.bdSim = {}; Promise.all(games.map((g) => load(`sim/${g.game}.json`).then((x) => { S.bdSim[g.game] = x; }).catch(() => {}))).then(() => draw()); }
+    if (!S.bdSim) { S.bdSim = {}; Promise.all(games.map((g) => load(`sim/${g.game}.json`).then((x) => { S.bdSim[g.game] = x; }).catch(() => {}))).then(() => { S.bdSimDone = true; draw(); }); }
     const unexpB = (p) => p.player && devCheck(S.bdGames?.[p.game], p.player.id, p.fam)?.unexplained;
     const M = B.mode === "main" ? mainRows().filter((r) => r.q >= 0.55) : [];
     const rowsM = M.filter((r) => (B.g === "all" || r.game === B.g) && (B.fam === "all" || r.fam === B.fam)).sort(B.sort === "p" ? (x, y) => y.q - x.q : (x, y) => Date.parse(x.date) - Date.parse(y.date) || y.q - x.q);
@@ -3248,9 +3247,9 @@ async function vBoard() {
     const famBtns = `<div class="filters" role="group" aria-label="Filter by market">${["all", ...Object.keys(FAM)].filter((k) => k === "all" || famCount(k)).map((k) => `<button class="fbtn" type="button" data-fam="${k}" aria-pressed="${B.fam === k}">${k === "all" ? "All markets" : FAM[k]} <span class="cnt">${famCount(k)}</span></button>`).join("")}</div>`;
     const gl = B.mode === "main" ? games.filter((g) => M.some((r) => r.game === g.game)) : games, gameSel = `<label class="small" for="bd-g">Game</label>
         <select class="field" id="bd-g"><option value="all">All games (${gl.length})</option>${gl.map((g) => `<option value="${esc(g.game)}"${B.g === g.game ? " selected" : ""}>${abbr(g.away)} at ${abbr(g.home)} · ${esc(day(g.date))} ${esc(time(g.date))}</option>`).join("")}</select>`;
-    const tc = { High: "good", Medium: "", Lean: "warn" }, nTier = (t) => M.filter((r) => r.tier === t).length, loading = Object.keys(S.bdSim || {}).length < games.length && !M.length;
+    const tc = { High: "good", Medium: "", Lean: "warn" }, nTier = (t) => M.filter((r) => r.tier === t).length, loading = !S.bdSimDone && !M.length;
     const mainHtml = `<p class="lead">Confidence judged at the <b>sportsbook's main line</b>: the line you would actually see (e.g. 22.5 points), not an easier alternative line. <b>High</b> = our chance 70%+, <b>Medium</b> 62-70%, <b>Lean</b> 55-62%.</p>
-      <p class="small muted">Main lines are set close to even, so 70%+ there is rare and means much more than 95% at a line far below it. The book only chooses which line is tested: the chance is our own simulation, never the odds. Past record = how our graded main-line picks in the same tier did (last 21 days; small samples so far, spreads and totals show all of that market). Statistical analysis only, not betting advice.</p>
+      <p class="small muted">Main lines are set close to even, so 70%+ there is rare and means much more than 95% at a line far below it. The book only chooses which line is tested: the chance is our own simulation, never the odds. Past record = how our graded main-line picks in the same tier did (last 21 days; small samples so far). Statistical analysis only, not betting advice.</p>
       <div class="statgrid" style="grid-template-columns:repeat(3,1fr)">${["High", "Medium", "Lean"].map((t) => `<div class="stat"><b>${nTier(t)}</b><span>${t}${tierRec.props[t] ? ` · props ${tierRec.props[t][0]}/${tierRec.props[t][1]} before` : ""}</span></div>`).join("")}</div>
       ${famBtns}
       <div class="bd-ctl">${gameSel}
@@ -3685,8 +3684,8 @@ async function vPicksLog() {
   const liveOf = (p) => { const g = L[p.game]; if (!g || g.state === "pre") return { tag: "waiting", txt: "not started yet" };
     const rem = remShare(g.period, g.clock), el = Math.max(0.05, 1 - rem), fin = g.state === "post", ts = String(p.team) === String(p.home) ? g.hs : g.as, os = String(p.team) === String(p.home) ? g.as : g.hs;
     let cur, need, pass, txt;
-    if (p.player) { const b = g.box?.get(String(p.player.id)); if (!b) return { tag: "waiting", txt: "not on the box score yet" }; if (b.dnp) return { tag: "void", txt: "did not play" }; cur = b[p.fam] || 0; pass = cur > p.line;
-      const proj = fin ? cur : cur / el; txt = `${cur} now (needs ${Math.floor(p.line) + 1})${fin ? "" : ` · on pace for ${Math.round(proj)}`}`; return { tag: pass ? "hit" : fin ? "miss" : proj > p.line ? "pace" : "behind", txt }; }
+    if (p.player) { const b = g.box?.get(String(p.player.id)); if (!b) return { tag: "waiting", txt: "not on the box score yet" }; if (b.dnp) return { tag: "void", txt: "did not play" }; cur = b[p.fam] || 0; pass = p.side === "under" ? fin && cur < p.line : cur >= p.line; /* "N+" is hit at exactly N */
+      const proj = fin ? cur : cur / el; txt = `${cur} now (needs ${Math.ceil(p.line)})${fin ? "" : ` · on pace for ${Math.round(proj)}`}`; return { tag: pass ? "hit" : fin ? "miss" : proj >= p.line ? "pace" : "behind", txt }; }
     if (p.fam === "total" || p.fam === "teamTotal") { cur = p.fam === "total" ? g.hs + g.as : ts; const proj = fin ? cur : cur / el, over = p.side === "over";
       pass = over ? cur > p.line : fin && cur < p.line; const out = !over && cur > p.line; txt = `${cur} now${fin ? " (final)" : ` · on pace for ${Math.round(proj)}`}`;
       return { tag: pass ? "hit" : out || (fin && !pass) ? "miss" : (over ? proj > p.line : proj < p.line) ? "pace" : "behind", txt }; }
