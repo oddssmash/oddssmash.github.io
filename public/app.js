@@ -3204,15 +3204,26 @@ async function vBoard() {
   const mainRows = () => {
     const out = [];
     for (const g of games) {
-      const sm = S.bdSim?.[g.game], c = sm?.comparison; if (!c || Date.parse(g.date) < Date.now()) continue;
+      const sm = S.bdSim?.[g.game], c = sm?.comparison; if (!sm || Date.parse(g.date) < Date.now()) continue;
       const H = T(g.home).abbr, A = T(g.away).abbr, base = { game: g.game, date: g.date, home: g.home, away: g.away };
-      if (c.winner?.ourProb != null) { const tm = c.winner.team || H, ot = tm === H ? A : H, q = c.winner.ourProb, y = q >= 0.5;
+      if (c?.winner?.ourProb != null) { const tm = c.winner.team || H, ot = tm === H ? A : H, q = c.winner.ourProb, y = q >= 0.5;
         out.push({ ...base, fam: "winner", kind: "ml", label: `${y ? tm : ot} to win`, q: Math.max(q, 1 - q), book: c.winner.bookProb == null ? null : y ? c.winner.bookProb : 1 - c.winner.bookProb }); }
-      if (c.spread?.ourProb != null && c.spread.bookLine != null) { const tm = c.spread.team || H, ot = tm === H ? A : H, q = c.spread.ourProb, l = c.spread.bookLine, y = q >= 0.5;
+      if (c?.spread?.ourProb != null && c.spread.bookLine != null) { const tm = c.spread.team || H, ot = tm === H ? A : H, q = c.spread.ourProb, l = c.spread.bookLine, y = q >= 0.5;
         out.push({ ...base, fam: "spread", kind: "spread", label: y ? `${tm} ${sgn(l)}` : `${ot} ${sgn(-l)}`, q: Math.max(q, 1 - q), book: c.spread.bookProb == null ? null : y ? c.spread.bookProb : 1 - c.spread.bookProb }); }
-      if (c.total?.ourProb != null && c.total.bookLine != null) { const q = c.total.ourProb, y = q >= 0.5;
+      if (c?.total?.ourProb != null && c.total.bookLine != null) { const q = c.total.ourProb, y = q >= 0.5;
         out.push({ ...base, fam: "total", kind: "total", label: `${y ? "Over" : "Under"} ${c.total.bookLine} total points`, q: Math.max(q, 1 - q), book: c.total.bookProb == null ? null : y ? c.total.bookProb : 1 - c.total.bookProb }); }
-      for (const x of Array.isArray(c.props) ? c.props : []) {
+      /* BOOK LINES NOT POSTED YET (they usually appear the day before): so the board is never empty, show our winner and each
+         player at the line a book would most likely post, his season average (the same rule as the Picks tab). Marked as an
+         estimated line and replaced as soon as the real one appears. */
+      const soon = Date.parse(g.date) < Date.now() + 48 * 3600e3; /* estimates only for the next two days */
+      if (soon && c?.winner?.ourProb == null && Number.isFinite(sm.pHome)) { const y = sm.pHome >= 0.5; out.push({ ...base, fam: "winner", kind: "ml", est: true, label: `${y ? H : A} to win`, q: Math.max(sm.pHome, 1 - sm.pHome), book: null }); }
+      if (soon && !(Array.isArray(c?.props) && c.props.length)) for (const pl of sm.players || []) {
+        if ((pl.proj?.min || 0) < 20 || (pl.pDnp || 0) > 0.25) continue; const sp = S.P?.[String(pl.id)], cu = sp?.cur, b = cu && cu[0] >= 5 ? { pts: cu[2], reb: cu[3], ast: cu[4] } : seasonLine(sp); if (!b) continue; /* this season once he has 5+ games, else blended with last */
+        for (const fam of ["pts", "reb", "ast"]) { const avg = b[fam]; if (!(avg >= (fam === "pts" ? 6 : 2))) continue; const L = Math.floor(avg) + 0.5;
+          const th = (pl.thr?.[fam] || []).find(([v]) => v === Math.floor(L) + 1), d = pl.dist?.[fam], pO = th ? th[1] : d && d[2] > 0 ? Math.min(0.995, Math.max(0.005, 1 - pNorm((L - d[0]) / d[2]))) : null; if (pO == null) continue;
+          const q = Math.max(pO, 1 - pO); if (q < 0.65 || devCheck(S.bdGames?.[g.game], pl.id, fam)?.unexplained) continue;
+          out.push({ ...base, fam, kind: "props", est: true, estAvg: avg, label: `${pl.n} ${pO >= 0.5 ? "over" : "under"} ${L} ${ML_WORD[fam]}`, q, median: d?.[1], player: { id: pl.id, n: pl.n, t: pl.side === 0 ? g.home : g.away, projMin: pl.proj?.min } }); } }
+      for (const x of Array.isArray(c?.props) ? c.props : []) {
         if (!ML_WORD[x.stat] || x.ourProbOver == null || x.bookLine == null) continue;
         const pl = (sm.players || []).find((p) => String(p.id) === String(x.id)); if (!pl || (pl.proj?.min || 0) < 20 || (pl.pDnp || 0) > 0.25) continue;
         if (devCheck(S.bdGames?.[g.game], x.id, x.stat)?.unexplained) continue; /* projection far from his average with no named reason */
@@ -3220,11 +3231,11 @@ async function vBoard() {
         out.push({ ...base, fam: x.stat, kind: "props", label: `${x.n} ${ov ? "over" : "under"} ${x.bookLine} ${ML_WORD[x.stat]}`, q: Math.max(x.ourProbOver, 1 - x.ourProbOver), median: x.ourMedian, player: { id: x.id, n: x.n, t: pl.side === 0 ? g.home : g.away, projMin: pl.proj?.min } });
       }
     }
-    for (const r of out) r.tier = ML_TIER(r.q);
+    for (const r of out) r.tier = r.est ? "Estimate" : ML_TIER(r.q); /* an estimated line never gets a confidence tier */
     return out;
   };
   const recCell = (r) => {
-    { const a = tierRec[r.kind][r.tier]; if (!a && (r.kind === "spread" || r.kind === "total") && !Object.keys(tierRec[r.kind]).length) { const R0 = mlog?.record?.[r.kind]; return R0?.n ? `${R0.hit}/${R0.n}<i>all ${r.kind}s</i>` : `<span class="muted">-</span>`; } return a ? `${a[0]}/${a[1]}<i>${Math.round((a[0] / a[1]) * 100)}% hit</i>` : `<span class="muted">-</span>`; }
+    { if (r.est) return ""; const a = tierRec[r.kind][r.tier]; if (!a && (r.kind === "spread" || r.kind === "total") && !Object.keys(tierRec[r.kind]).length) { const R0 = mlog?.record?.[r.kind]; return R0?.n ? `${R0.hit}/${R0.n}<i>all ${r.kind}s</i>` : `<span class="muted">-</span>`; } return a ? `${a[0]}/${a[1]}<i>${Math.round((a[0] / a[1]) * 100)}% hit</i>` : `<span class="muted">-</span>`; }
   };
   const games = [...new Map(picks.map((p) => [p.game, p])).values()].sort((x, y) => Date.parse(x.date) - Date.parse(y.date));
   const cmpCell = (p) => {
@@ -3239,7 +3250,7 @@ async function vBoard() {
     if (!S.bdSim) { S.bdSim = {}; Promise.all(games.map((g) => load(`sim/${g.game}.json`).then((x) => { S.bdSim[g.game] = x; }).catch(() => {}))).then(() => { S.bdSimDone = true; draw(); }); }
     const unexpB = (p) => p.player && devCheck(S.bdGames?.[p.game], p.player.id, p.fam)?.unexplained;
     const M = B.mode === "main" ? mainRows().filter((r) => r.q >= 0.55) : [];
-    const rowsM = M.filter((r) => (B.g === "all" || r.game === B.g) && (B.fam === "all" || r.fam === B.fam)).sort(B.sort === "p" ? (x, y) => y.q - x.q : (x, y) => Date.parse(x.date) - Date.parse(y.date) || y.q - x.q);
+    const rowsM = M.filter((r) => (B.g === "all" || r.game === B.g) && (B.fam === "all" || r.fam === B.fam)).sort(B.sort === "p" ? (x, y) => !!x.est - !!y.est || y.q - x.q : (x, y) => Date.parse(x.date) - Date.parse(y.date) || !!x.est - !!y.est || y.q - x.q);
     const rows = picks.filter((p) => (B.g === "all" || p.game === B.g) && (B.fam === "all" || p.fam === B.fam) && (B.safe || !tooFarBelow(p)) && !unexpB(p))
       .sort(B.sort === "p" ? (x, y) => y.p - x.p : (x, y) => Date.parse(x.date) - Date.parse(y.date) || y.p - x.p);
     const famCount = (k) => (B.mode === "main" ? M : picks).filter((p) => (B.g === "all" || p.game === B.g) && (k === "all" || p.fam === k)).length;
@@ -3247,20 +3258,21 @@ async function vBoard() {
     const famBtns = `<div class="filters" role="group" aria-label="Filter by market">${["all", ...Object.keys(FAM)].filter((k) => k === "all" || famCount(k)).map((k) => `<button class="fbtn" type="button" data-fam="${k}" aria-pressed="${B.fam === k}">${k === "all" ? "All markets" : FAM[k]} <span class="cnt">${famCount(k)}</span></button>`).join("")}</div>`;
     const gl = B.mode === "main" ? games.filter((g) => M.some((r) => r.game === g.game)) : games, gameSel = `<label class="small" for="bd-g">Game</label>
         <select class="field" id="bd-g"><option value="all">All games (${gl.length})</option>${gl.map((g) => `<option value="${esc(g.game)}"${B.g === g.game ? " selected" : ""}>${abbr(g.away)} at ${abbr(g.home)} · ${esc(day(g.date))} ${esc(time(g.date))}</option>`).join("")}</select>`;
-    const tc = { High: "good", Medium: "", Lean: "warn" }, nTier = (t) => M.filter((r) => r.tier === t).length, loading = !S.bdSimDone && !M.length;
+    const tc = { High: "good", Medium: "", Lean: "warn", Estimate: "" }, nTier = (t) => M.filter((r) => r.tier === t).length, loading = !S.bdSimDone && !M.length;
     const mainHtml = `<p class="lead">Confidence judged at the <b>sportsbook's main line</b>: the line you would actually see (e.g. 22.5 points), not an easier alternative line. <b>High</b> = our chance 70%+, <b>Medium</b> 62-70%, <b>Lean</b> 55-62%.</p>
       <p class="small muted">Main lines are set close to even, so 70%+ there is rare and means much more than 95% at a line far below it. The book only chooses which line is tested: the chance is our own simulation, never the odds. Past record = how our graded main-line picks in the same tier did (last 21 days; small samples so far). Statistical analysis only, not betting advice.</p>
       <div class="statgrid" style="grid-template-columns:repeat(3,1fr)">${["High", "Medium", "Lean"].map((t) => `<div class="stat"><b>${nTier(t)}</b><span>${t}${tierRec.props[t] ? ` · props ${tierRec.props[t][0]}/${tierRec.props[t][1]} before` : ""}</span></div>`).join("")}</div>
+      ${M.some((r) => r.est) ? `<div class="note"><b>Some sportsbook lines are not posted yet.</b> For those games the board shows our winner and each player at the line a book would most likely post (his season average), only where our chance is 65% or more. They are marked "Estimate", get no confidence tier or past record, and switch to the real main line as soon as it appears, usually the day before the game.</div>` : ""}
       ${famBtns}
       <div class="bd-ctl">${gameSel}
         <div class="filters" role="group" aria-label="Sort"><button class="fbtn" type="button" data-sort="time" aria-pressed="${B.sort === "time"}">By tip-off</button><button class="fbtn" type="button" data-sort="p" aria-pressed="${B.sort === "p"}">By chance</button></div>
       </div>
       <div class="card"><div class="tw"><table class="bd"><thead><tr><th>Pick at the main line</th><th class="n">Ours</th><th class="n">Confidence<i>past record, same tier</i></th></tr></thead><tbody>
-        ${loading ? `<tr><td colspan="3" class="empty">Loading the main lines…</td></tr>` : rowsM.slice(0, B.shown).map((r) => `<tr><td><b>${esc(r.label)}</b><div class="small muted">${r.player ? `${abbr(r.player.t)}, ${f0(r.player.projMin)} min projected${r.median != null ? `, our median ${esc(r.median)}` : ""} · ` : ""}${r.book != null ? `book's fair chance ${pct(r.book)} · ` : ""}<a href="#/sim/${esc(r.game)}">${abbr(r.away)} at ${abbr(r.home)}</a> · ${esc(day(r.date))} ${esc(timePH(r.date))}</div></td>
-          <td class="n"><b>${pc1(r.q)}</b></td><td class="n"><span class="chip ${tc[r.tier]}">${r.tier}</span><br>${recCell(r)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">No main-line pick at 55%+ in this filter (the sportsbook lines usually post a day before).</td></tr>`}
+        ${loading ? `<tr><td colspan="3" class="empty">Loading the main lines…</td></tr>` : rowsM.slice(0, B.shown).map((r) => `<tr><td><b>${esc(r.label)}</b><div class="small muted">${r.player ? `${abbr(r.player.t)}, ${f0(r.player.projMin)} min projected${r.median != null ? `, our median ${esc(r.median)}` : ""} · ` : ""}${r.book != null ? `book's fair chance ${pct(r.book)} · ` : ""}${r.est ? `<span class="est-tag">${r.kind === "ml" ? "book line not posted" : `est. line, avg ${f1(r.estAvg)}`}</span> · ` : ""}<a href="#/sim/${esc(r.game)}">${abbr(r.away)} at ${abbr(r.home)}</a> · ${esc(day(r.date))} ${esc(timePH(r.date))}</div></td>
+          <td class="n"><b>${pc1(r.q)}</b></td><td class="n"><span class="chip ${tc[r.tier]}">${r.tier}</span><br>${recCell(r)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">No pick at 55%+ in this filter.</td></tr>`}
       </tbody></table></div>
       ${rowsM.length > B.shown ? `<button class="btn block" type="button" id="bd-more">Show ${Math.min(100, rowsM.length - B.shown)} more of ${rowsM.length - B.shown}</button>` : ""}
-      <p class="small muted" style="margin-top:10px">${rowsM.length} picks at 55%+. Players projected under 20 minutes, likely to sit, or with a projection far from their average and no named reason are left out. Player chances at main lines ran a few points high in past games; the past record column shows the real rate.</p></div>
+      <p class="small muted" style="margin-top:10px">${rowsM.length} picks at 55%+${rowsM.some((r) => r.est) ? ` (${rowsM.filter((r) => r.est).length} at an estimated line)` : ""}. Players projected under 20 minutes, likely to sit, or with a projection far from their average and no named reason are left out. Player chances at main lines ran a few points high in past games; the past record column shows the real rate.</p></div>
       <p class="small muted">Lines from the sportsbook feed, for choosing the line only. Generated ${esc(stamp(b.generated))}.</p>`;
     const cal = b.calibration || {};
     app.innerHTML = `${labBack}<h1>High-confidence board</h1>${modeBtns}${B.mode === "main" ? mainHtml : `
