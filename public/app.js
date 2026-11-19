@@ -3185,10 +3185,28 @@ function cmpCard(c, s) {
   </section>`;
 }
 
+// ---- MAIN-LINE CALIBRATION: our own graded main-line picks (mainline-log.json, last 21 days) say how far the real hit
+// rate sits from the chance we stated, per market. Each chance is pulled toward 50% by that much: k = (real - 50) / (stated - 50),
+// floored at 0 (no skill shown) and never above 1 (never boosted), mixed with k = 1 at the weight of 20 picks so a small sample
+// cannot swing it. Uses only our results against the line, never the sportsbook's odds.
+async function mlCal() {
+  if (S.mlCal) return S.mlCal;
+  const ML = await load("mainline-log.json").catch(() => null), acc = {};
+  const add = (k, x) => { if (!x || x.p == null || (x.status !== "hit" && x.status !== "miss")) return; const a = (acc[k] ||= { n: 0, hit: 0, ps: 0 }); a.n++; a.ps += x.p; if (x.status === "hit") a.hit++; };
+  for (const g of ML?.games || []) { add("winner", g.ml); add("spread", g.spread); add("total", g.total); for (const x of g.props || []) add(x.fam, x); }
+  const cal = {};
+  for (const [k, a] of Object.entries(acc)) { const claim = a.ps / a.n - 0.5, real = a.hit / a.n - 0.5, kObs = claim > 0.01 ? Math.max(0, Math.min(1, real / claim)) : 1; cal[k] = { k: (a.n * kObs + 20) / (a.n + 20), n: a.n, hit: a.hit, claim: a.ps / a.n }; }
+  return (S.mlCal = cal);
+}
+const mlAdj = (fam, q) => { const c = S.mlCal?.[fam]; return c ? 0.5 + (q - 0.5) * c.k : q; };
+const mlCalNote = () => { const c = S.mlCal || {}, W = { pts: "points", reb: "rebounds", ast: "assists", tpm: "threes", winner: "winners", spread: "spreads", total: "totals" };
+  const rows = Object.entries(W).filter(([k]) => c[k]).map(([k, w]) => `${w} ${c[k].hit}/${c[k].n} (we said ${Math.round(c[k].claim * 100)}%, kept ${Math.round(c[k].k * 100)}% of our lean)`);
+  return rows.length ? `Our main-line record so far: ${rows.join("; ")}.` : ""; };
+
 // ---- High-confidence board
 const FAM = { winner: "Winner", spread: "Spread", total: "Game total", teamTotal: "Team total", pts: "Points", reb: "Rebounds", ast: "Assists", tpm: "Threes" };
 async function vBoard() {
-  const [b, odds, mlog] = await Promise.all([load("board.json"), load("odds.json").catch(() => null), load("mainline-log.json").catch(() => null)]);
+  const [b, odds, mlog] = await Promise.all([load("board.json"), load("odds.json").catch(() => null), load("mainline-log.json").catch(() => null), mlCal()]);
   const picks = b.picks || [];
   const B = S.bd = S.bd || { g: "all", fam: "all", cmp: false, shown: 60, sort: "time" };
   B.mode ||= "main";
@@ -3198,8 +3216,8 @@ async function vBoard() {
   const ML_TIER = (q) => (q >= 0.7 ? "High" : q >= 0.62 ? "Medium" : "Lean");
   const ML_WORD = { pts: "points", reb: "rebounds", ast: "assists", tpm: "threes" };
   const tierRec = { props: {}, ml: {}, spread: {}, total: {} };
-  { const add = (o, x) => { if (!x || (x.status !== "hit" && x.status !== "miss") || x.p == null || x.p < 0.55) return; /* under 55% is a coin-flip and is not on this board */ const a = (o[ML_TIER(x.p)] ||= [0, 0]); a[1]++; if (x.status === "hit") a[0]++; };
-    for (const g of mlog?.games || []) { for (const x of g.props || []) add(tierRec.props, x); add(tierRec.ml, g.ml); add(tierRec.spread, g.spread); add(tierRec.total, g.total); } }
+  { const add = (o, x, fam) => { if (!x || (x.status !== "hit" && x.status !== "miss") || x.p == null) return; const q = mlAdj(fam, x.p); if (q < 0.55) return; /* tiers use the adjusted chance, as on the board */ const a = (o[ML_TIER(q)] ||= [0, 0]); a[1]++; if (x.status === "hit") a[0]++; };
+    for (const g of mlog?.games || []) { for (const x of g.props || []) add(tierRec.props, x, x.fam); add(tierRec.ml, g.ml, "winner"); add(tierRec.spread, g.spread, "spread"); add(tierRec.total, g.total, "total"); } }
   const sgn = (l) => `${l > 0 ? "+" : ""}${l}`;
   const mainRows = () => {
     const out = [];
@@ -3231,7 +3249,7 @@ async function vBoard() {
         out.push({ ...base, fam: x.stat, kind: "props", label: `${x.n} ${ov ? "over" : "under"} ${x.bookLine} ${ML_WORD[x.stat]}`, q: Math.max(x.ourProbOver, 1 - x.ourProbOver), median: x.ourMedian, player: { id: x.id, n: x.n, t: pl.side === 0 ? g.home : g.away, projMin: pl.proj?.min } });
       }
     }
-    for (const r of out) r.tier = r.est ? "Estimate" : ML_TIER(r.q); /* an estimated line never gets a confidence tier */
+    for (const r of out) { r.raw = r.q; r.q = mlAdj(r.fam, r.q); r.tier = r.est ? "Estimate" : ML_TIER(r.q); } /* an estimated line never gets a confidence tier */
     return out;
   };
   const recCell = (r) => {
@@ -3260,7 +3278,8 @@ async function vBoard() {
         <select class="field" id="bd-g"><option value="all">All games (${gl.length})</option>${gl.map((g) => `<option value="${esc(g.game)}"${B.g === g.game ? " selected" : ""}>${abbr(g.away)} at ${abbr(g.home)} · ${esc(day(g.date))} ${esc(time(g.date))}</option>`).join("")}</select>`;
     const tc = { High: "good", Medium: "", Lean: "warn", Estimate: "" }, nTier = (t) => M.filter((r) => r.tier === t).length, loading = !S.bdSimDone && !M.length;
     const mainHtml = `<p class="lead">Confidence judged at the <b>sportsbook's main line</b>: the line you would actually see (e.g. 22.5 points), not an easier alternative line. <b>High</b> = our chance 70%+, <b>Medium</b> 62-70%, <b>Lean</b> 55-62%.</p>
-      <p class="small muted">Main lines are set close to even, so 70%+ there is rare and means much more than 95% at a line far below it. The book only chooses which line is tested: the chance is our own simulation, never the odds. Past record = how our graded main-line picks in the same tier did (last 21 days; small samples so far). Statistical analysis only, not betting advice.</p>
+      <p class="small muted">Main lines are set close to even, so 70%+ there is rare and means much more than 95% at a line far below it. <b>Each chance is adjusted by our own record at main lines</b> (the simulation's figure is shown under it): where our past leans did not hold up, the chance is pulled toward 50%. The book only chooses which line is tested: the chance is our own simulation, never the odds. Past record = how our graded main-line picks in the same tier did (last 21 days; small samples so far). Statistical analysis only, not betting advice.</p>
+      ${mlCalNote() ? `<details class="more"><summary class="small">Our main-line record by market</summary><p class="small">${esc(mlCalNote())}</p></details>` : ""}
       <div class="statgrid" style="grid-template-columns:repeat(3,1fr)">${["High", "Medium", "Lean"].map((t) => `<div class="stat"><b>${nTier(t)}</b><span>${t}${tierRec.props[t] ? ` · props ${tierRec.props[t][0]}/${tierRec.props[t][1]} before` : ""}</span></div>`).join("")}</div>
       ${M.some((r) => r.est) ? `<div class="note"><b>Some sportsbook lines are not posted yet.</b> For those games the board shows our winner and each player at the line a book would most likely post (his season average), only where our chance is 65% or more. They are marked "Estimate", get no confidence tier or past record, and switch to the real main line as soon as it appears, usually the day before the game.</div>` : ""}
       ${famBtns}
@@ -3269,7 +3288,7 @@ async function vBoard() {
       </div>
       <div class="card"><div class="tw"><table class="bd"><thead><tr><th>Pick at the main line</th><th class="n">Ours</th><th class="n">Confidence<i>past record, same tier</i></th></tr></thead><tbody>
         ${loading ? `<tr><td colspan="3" class="empty">Loading the main lines…</td></tr>` : rowsM.slice(0, B.shown).map((r) => `<tr><td><b>${esc(r.label)}</b><div class="small muted">${r.player ? `${abbr(r.player.t)}, ${f0(r.player.projMin)} min projected${r.median != null ? `, our median ${esc(r.median)}` : ""} · ` : ""}${r.book != null ? `book's fair chance ${pct(r.book)} · ` : ""}${r.est ? `<span class="est-tag">${r.kind === "ml" ? "book line not posted" : `est. line, avg ${f1(r.estAvg)}`}</span> · ` : ""}<a href="#/sim/${esc(r.game)}">${abbr(r.away)} at ${abbr(r.home)}</a> · ${esc(day(r.date))} ${esc(timePH(r.date))}</div></td>
-          <td class="n"><b>${pc1(r.q)}</b></td><td class="n"><span class="chip ${tc[r.tier]}">${r.tier}</span><br>${recCell(r)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">No pick at 55%+ in this filter.</td></tr>`}
+          <td class="n"><b>${pc1(r.q)}</b>${Math.abs(r.raw - r.q) >= 0.005 ? `<i>sim ${pct(r.raw)}</i>` : ""}</td><td class="n"><span class="chip ${tc[r.tier]}">${r.tier}</span><br>${recCell(r)}</td></tr>`).join("") || `<tr><td colspan="3" class="empty">No pick at 55%+ in this filter.</td></tr>`}
       </tbody></table></div>
       ${rowsM.length > B.shown ? `<button class="btn block" type="button" id="bd-more">Show ${Math.min(100, rowsM.length - B.shown)} more of ${rowsM.length - B.shown}</button>` : ""}
       <p class="small muted" style="margin-top:10px">${rowsM.length} picks at 55%+${rowsM.some((r) => r.est) ? ` (${rowsM.filter((r) => r.est).length} at an estimated line)` : ""}. Players projected under 20 minutes, likely to sit, or with a projection far from their average and no named reason are left out. Player chances at main lines ran a few points high in past games; the past record column shows the real rate.</p></div>
@@ -3726,7 +3745,7 @@ async function vPicksLog() {
   clearInterval(S.pkLogTimer); if (liveRows.length) S.pkLogTimer = setInterval(() => { if (S.pkKind === "log" && /^#\/picks/.test(location.hash || "#/picks")) vPicksLog(); else clearInterval(S.pkLogTimer); }, 30000);
 }
 async function vPicks() {
-  const [board] = await Promise.all([load("board.json")]);
+  const [board] = await Promise.all([load("board.json"), mlCal()]);
   const days = [...new Set(board.picks.map((p) => dayKey(p.date)))].sort();
   S.pkDay = days.includes(S.pkDay) ? S.pkDay : days[0];
   S.pkKind = S.pkKind || "main"; S.pkBand = S.pkBand || "all";
@@ -3812,10 +3831,10 @@ const up = await load("upcoming.json").catch(() => []);
       if (gm.date && Date.parse(gm.date) < Date.now()) continue;
       const H = T(gm.home).abbr, A = T(gm.away).abbr;
       const base = { gid, home: gm.home, away: gm.away, date: gm.date };
-      if (c?.winner?.ourProb != null) { const ph = gm.pred.pHome, home = ph >= 0.5; out.push({ ...base, kind: "Moneyline", pick: `${home ? H : A} to win`, p: Math.max(ph, 1 - ph), book: home ? c.winner.bookProb : 1 - c.winner.bookProb, ours: `our margin ${home ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}${gm.pred.pHomeRaw != null ? `; ${Math.round((home ? gm.pred.pHomeRaw : 1 - gm.pred.pHomeRaw) * 100)}% before upset watch, ${Math.round(Math.max(ph, 1 - ph) * 100)}% after` : ""}` }); }
+      if (c?.winner?.ourProb != null) { const ph = gm.pred.pHome, home = ph >= 0.5; out.push({ ...base, kind: "Moneyline", pick: `${home ? H : A} to win`, p: mlAdj("winner", Math.max(ph, 1 - ph)), praw: Math.max(ph, 1 - ph), book: home ? c.winner.bookProb : 1 - c.winner.bookProb, ours: `our margin ${home ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}${gm.pred.pHomeRaw != null ? `; ${Math.round((home ? gm.pred.pHomeRaw : 1 - gm.pred.pHomeRaw) * 100)}% before upset watch, ${Math.round(Math.max(ph, 1 - ph) * 100)}% after` : ""}` }); }
       if (c?.spread?.ourProb != null) { const q = c.spread.ourProb, l = c.spread.bookLine, team = c.spread.team, other = team === H ? A : H; const takeTeam = q >= 0.5;
-        out.push({ ...base, kind: "Spread", pick: takeTeam ? `${team} ${l > 0 ? "+" : ""}${l}` : `${other} ${-l > 0 ? "+" : ""}${-l}`, p: Math.max(q, 1 - q), book: takeTeam ? c.spread.bookProb : 1 - c.spread.bookProb, ours: `our margin ${gm.pred.hs >= gm.pred.as ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}` }); }
-      if (c?.total?.ourProb != null) { const q = c.total.ourProb; out.push({ ...base, kind: "Total", pick: `${q >= 0.5 ? "Over" : "Under"} ${c.total.bookLine}`, p: Math.max(q, 1 - q), book: q >= 0.5 ? c.total.bookProb : 1 - c.total.bookProb, ours: `our total ${f1(gm.pred.hs + gm.pred.as)}` }); }
+        out.push({ ...base, kind: "Spread", pick: takeTeam ? `${team} ${l > 0 ? "+" : ""}${l}` : `${other} ${-l > 0 ? "+" : ""}${-l}`, p: mlAdj("spread", Math.max(q, 1 - q)), praw: Math.max(q, 1 - q), book: takeTeam ? c.spread.bookProb : 1 - c.spread.bookProb, ours: `our margin ${gm.pred.hs >= gm.pred.as ? H : A} by ${f1(Math.abs(gm.pred.hs - gm.pred.as))}` }); }
+      if (c?.total?.ourProb != null) { const q = c.total.ourProb; out.push({ ...base, kind: "Total", pick: `${q >= 0.5 ? "Over" : "Under"} ${c.total.bookLine}`, p: mlAdj("total", Math.max(q, 1 - q)), praw: Math.max(q, 1 - q), book: q >= 0.5 ? c.total.bookProb : 1 - c.total.bookProb, ours: `our total ${f1(gm.pred.hs + gm.pred.as)}` }); }
     }
     for (const x of out) { const ob = ODDS?.games?.[x.gid], gm2 = GAME[x.gid]; x.mgap = !ob || !gm2 ? null : x.kind === "Total" ? (Number.isFinite(ob.total) ? (gm2.pred.hs + gm2.pred.as) - ob.total : null) : Number.isFinite(ob.spreadHome) ? (gm2.pred.hs - gm2.pred.as) - -ob.spreadHome : null; /* totals compare totals, spreads and winners compare margins */ x.price = priceFor(x.gid, x.kind, x.pick, T(x.home).abbr); edgeOf(x); x.dec = decOf(x.price); Object.assign(x, robustOf(x)); x.gold = x.qual && x.dec != null && x.dec >= GOLD.minOdds && x.p >= GOLD.minP && !x.wrong && x.hold != null && x.hold >= GOLD.minHold && x.libAgainst <= x.libFor; }
     return out.sort((a, b) => b.p - a.p);
@@ -3980,9 +3999,9 @@ const up = await load("upcoming.json").catch(() => []);
             Object.assign(ref, { line: L, pOver: pO, src: "est" });
             if (Math.max(pO, 1 - pO) < 0.58) continue; // too close to call at his usual line
           }
-          const over = ref.pOver >= 0.5, p = Math.max(ref.pOver, 1 - ref.pOver);
+          const over = ref.pOver >= 0.5, praw = Math.max(ref.pOver, 1 - ref.pOver), p = mlAdj(fam, praw);
           const thr = (pl.thr?.[fam] || []).filter(([x]) => Math.abs(x - ref.line) <= (fam === "pts" || fam === "pra" ? 10 : 3)).slice(0, 4);
-          const x = { gid, pl, fam, word, line: ref.line, over, p, median: ref.median, mean: pl.dist?.[fam]?.[0], thr, src: ref.src, home: sim.home ?? GAME[gid]?.home, away: sim.away ?? GAME[gid]?.away, date: GAME[gid]?.date, estAvg };
+          const x = { gid, pl, fam, word, line: ref.line, over, p, praw, median: ref.median, mean: pl.dist?.[fam]?.[0], thr, src: ref.src, home: sim.home ?? GAME[gid]?.home, away: sim.away ?? GAME[gid]?.away, date: GAME[gid]?.date, estAvg };
           const po = PROPODDS[gid]?.get(`${pl.id}|${fam}`);
           if (po && po.line === ref.line) { x.price = over ? po.over : po.under; const bo = noVig(po.over, po.under); x.book = bo == null ? null : over ? bo : 1 - bo; x.bk = `Over ${po.line} ${decOdds(po.over)} · Under ${po.line} ${decOdds(po.under)}`; }
           x.dec = decOf(x.price); edgeOf(x);
@@ -4043,7 +4062,8 @@ const up = await load("upcoming.json").catch(() => []);
           <div class="pick-l"><b>${esc(x.pick)}</b> <span class="small muted">at the sportsbook main line</span></div>
           ${(() => { const gm3 = GAME[x.gid], ob = ODDS?.games?.[x.gid]; if (!gm3) return ""; const H3 = T(gm3.home).abbr, A3 = T(gm3.away).abbr, om = gm3.pred.hs - gm3.pred.as, ot = gm3.pred.hs + gm3.pred.as;
             const ours = x.kind === "Total" ? `total ${f1(ot)}` : `${om >= 0 ? H3 : A3} −${f1(Math.abs(om))}`;
-            const oursP = x.kind === "Moneyline" ? ` · ${esc(x.pick.replace(" to win", ""))} ${pct(x.p)} · fair odds ${(1 / x.p).toFixed(2)}` : ` · our side ${pct(x.p)} · fair odds ${(1 / x.p).toFixed(2)}`;
+            const rawT = x.praw != null && Math.abs(x.praw - x.p) >= 0.005 ? ` (simulation ${pct(x.praw)}, adjusted by our main-line record)` : "";
+            const oursP = x.kind === "Moneyline" ? ` · ${esc(x.pick.replace(" to win", ""))} ${pct(x.p)}${rawT} · fair odds ${(1 / x.p).toFixed(2)}` : ` · our side ${pct(x.p)}${rawT} · fair odds ${(1 / x.p).toFixed(2)}`;
             const main = !ob ? "not posted yet" : x.kind === "Total" ? `total ${ob.total} · over ${decOdds(ob.overOdds)} / under ${decOdds(ob.underOdds)}` : x.kind === "Spread" ? `${H3} ${ob.spreadHome > 0 ? "+" : ""}${ob.spreadHome} · ${decOdds(ob.spreadOddsHome)} / ${A3} ${decOdds(ob.spreadOddsAway)}` : `${H3} ${decOdds(ob.mlHome)} / ${A3} ${decOdds(ob.mlAway)} (line ${H3} ${ob.spreadHome > 0 ? "+" : ""}${ob.spreadHome})`;
             const gap = !ob ? null : x.kind === "Total" ? Math.abs(ot - ob.total) : Math.abs(om - -ob.spreadHome);
             return `<div class="ol-box"><div><span class="ol-k">Our line</span> <b>${esc(ours)}${oursP}</b></div><div class="ref"><span class="ol-k mkt">Main line</span> ${esc(main)}${ob?.fetched ? ` <span class="muted">(as of ${esc(new Date(ob.fetched).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" }))} PH)</span>` : ""}</div>${gap != null ? `<div class="small muted">Difference: ${f1(gap)} points. ${esc(discLabel(PTREC, x.kind === "Total" ? "total" : "spread", gap))}</div>` : ""}</div>`; })()}
@@ -4056,7 +4076,7 @@ const up = await load("upcoming.json").catch(() => []);
         const card = (x) => `<div class="card pick ml${x.gold ? " gold" : ""}" data-gs="p|${esc(x.gid)}|${esc(x.pl.id)}|${esc(x.fam)}">${x.gold ? `<div class="gold-tag">★ Worth a look: edge + odds ${esc(x.dec.toFixed(2))} + ${pct(x.p)} to hit</div>` : ""}<div class="pick-h">${avatar(x.pl.id, x.pl.n, { size: "sm" })}<span><b>${esc(x.pl.n)}</b><span class="small muted"> ${esc(T(x.pl.side === 0 ? x.home : x.away).abbr || "")} · ${esc(x.word)}</span></span><span class="pick-p">${pct(x.p)}</span></div>
           <span class="conf ${x.p >= 0.65 ? "nc" : ""}">${x.p >= 0.7 ? "strong lean" : x.p >= 0.62 ? "lean" : "slight lean"}</span>${meter(x.p)}
           <div class="pick-l"><b>${x.over ? "Over" : "Under"} ${esc(x.line)} ${esc(x.word)}</b> <span class="small ${x.src === "est" ? "est-tag" : "muted"}">${x.src === "est" ? `our pick at his average (${f1(x.estAvg)}: this season blended with last while this season is short) · bookmaker line not posted yet` : "sportsbook main line"}</span></div>
-          <div class="ol-box"><div><span class="ol-k">Our line</span> median ${esc(x.median ?? "-")} · ${x.over ? "over" : "under"} ${esc(x.line)} ${pct(x.p)} · fair odds ${(1 / x.p).toFixed(2)}</div>${x.bk ? `<div><span class="ol-k mkt">Main line</span> ${esc(x.bk)}</div>` : `<div><span class="ol-k mkt">Main line</span> not posted yet</div>`}</div>
+          <div class="ol-box"><div><span class="ol-k">Our line</span> median ${esc(x.median ?? "-")} · ${x.over ? "over" : "under"} ${esc(x.line)} ${pct(x.p)}${Math.abs(x.praw - x.p) >= 0.005 ? ` (simulation ${pct(x.praw)}, adjusted by our main-line record)` : ""} · fair odds ${(1 / x.p).toFixed(2)}</div>${x.bk ? `<div><span class="ol-k mkt">Main line</span> ${esc(x.bk)}</div>` : `<div><span class="ol-k mkt">Main line</span> not posted yet</div>`}</div>
           ${x.price != null ? `<div class="pick-alt"><span>odds ${esc(decOdds(x.price))}</span><span>book's fair chance ${pct(x.book)}</span><span class="${(x.gap ?? 0) >= 0.05 ? "up" : ""}">gap ${(x.gap > 0 ? "+" : "") + Math.round(x.gap * 100)}</span>${S.pkBlend && x.ev != null ? `<span class="${x.ev > 0 ? "up" : "down"}">EV ${x.ev > 0 ? "+" : ""}${(x.ev * 100).toFixed(1)}%</span>` : ""}${S.pkBlend && x.book != null && decOdds(x.price) !== "-" ? `<span class="blend-ev">market-blended EV ${(() => { const v = (0.3 * x.p + 0.7 * x.book) * Number(decOdds(x.price)) - 1; return (v > 0 ? "+" : "") + (v * 100).toFixed(1) + "%"; })()}</span>` : ""}</div>` : ""}
           ${x.hold != null ? `<div class="small">Scenario check: his average is on our side in <b>${pct(x.hold)}</b> of the game scripts (likelihood-weighted robustness check, not a probability)</div>` : ""}
           ${x.price != null ? `<div class="small ${x.qual ? "qual" : "muted"}">${x.wrong ? `⚠ Big difference: ${Math.round(Math.abs(x.gap) * 100)} percentage points from the bookmaker's chance. Check the latest news first.` : x.qual ? "✓ Meaningful difference (3-10 percentage points above the bookmaker)." : "No qualifying edge at this price."}</div>` : ""}
@@ -4069,7 +4089,7 @@ const up = await load("upcoming.json").catch(() => []);
           ${gml.length && !gml.some((x) => x.qual) ? `<div class="note"><b>No qualifying edge today.</b> On every game line our chance is within 5 points of the bookmaker's fair chance or the expected value is under +3%. A high chance alone is not an edge.</div>` : ""}
           ${gml.length ? gml.map(gcard).join("") : `<p class="empty">No sportsbook game lines for this day yet (they usually post a day or two before).</p>`}
           <h2 class="pk-sec">Player props</h2><p class="small muted">Prices are compared as odds: our fair odds (1 ÷ our chance) against the offered odds. The bookmaker is a reference and never changes our numbers. A difference of 10+ percentage points in chance is flagged as a big difference, never as an edge. Expected-value figures appear only with the "Show EV figures" switch. Player prop prices come from the same bookmaker's pre-game prop feed; the over/under order is checked against its milestone prices. Statistical comparison, not betting advice.</p>
-          <p class="small muted">Player props at the <b>sportsbook's main line</b> (the line you would actually see, e.g. 22.5 points), with our lean and our chance from 10,000 simulations. The book only sets which line is tested: our chance is our own model, never the odds. These sit between 55% and 75% because main lines are set close to even; that is normal. The chips show our chance at nearby lines.</p>
+          <p class="small muted">Player props at the <b>sportsbook's main line</b> (the line you would actually see, e.g. 22.5 points), with our lean and our chance from 10,000 simulations. The book only sets which line is tested: our chance is our own model, never the odds. These sit between 55% and 75% because main lines are set close to even; that is normal. Each chance is adjusted by how our past main-line picks in that stat really did, so stats where our leans have not held up sit closer to 50%. The chips show our chance at nearby lines.</p>${mlCalNote() ? `<details class="more"><summary class="small">Our main-line record by market</summary><p class="small">${esc(mlCalNote())}</p></details>` : ""}
           ${shown.length ? shown.map(card).join("") : `<p class="empty">No player picks for this day yet: games that have started are left out (open the game's Live tab instead). Our own main line for every player is on each game page (Players tab).</p>`}
           ${flaggedML.length ? `<details class="more"><summary>⚠ ${flaggedML.length} flagged props kept out (projection 30%+ from the season average with no named reason)</summary><ul class="plain small">${flaggedML.map((x) => `<li>${esc(x.pl.n)}: ${x.over ? "over" : "under"} ${esc(x.line)} ${esc(x.word)} · we project ${f1(x.dv.proj)} vs his average ${f1(x.dv.avg)} (${x.dv.dev > 0 ? "+" : ""}${Math.round(x.dv.dev * 100)}%)</li>`).join("")}</ul><p class="small muted">These may be right (a role change we have not named) or a data problem. Check the news before trusting them.</p></details>` : ""}
           ${ml.length > shown.length + flaggedML.length ? `<p class="small muted">${ml.length - shown.length - flaggedML.length} more lines are close to 50/50 and left out.</p>` : ""}`;
