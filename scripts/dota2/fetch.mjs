@@ -30,11 +30,11 @@ const sql = async (q) => { const j = await od("explorer?" + new URLSearchParams(
 const MF = path.join(D, "matches.json"), store = readJSON(MF, { matches: [] });
 const byId = new Map(store.matches.map((m) => [m.id, m]));
 const newest = store.matches.reduce((a, m) => Math.max(a, m.t), 0);
-const from = newest && store.obv === 1 ? newest - 3 * DAY : now - 400 * DAY; // obv: objectives added (Nov 2026); older files are read again once // re-read the last 3 days so late-parsed drafts fill in
+const from = newest && store.obv === 2 ? newest - 3 * DAY : now - 400 * DAY; // obv: objectives added (Nov 2026); older files are read again once // re-read the last 3 days so late-parsed drafts fill in
 const Q = (a, b) => `SELECT m.match_id, m.start_time, m.duration, m.radiant_win, m.radiant_team_id rt, m.dire_team_id dt, m.leagueid, m.series_id, m.series_type,
   (SELECT string_agg(CASE WHEN is_pick THEN 'p' ELSE 'b' END || team || ':' || hero_id, ',' ORDER BY ord) FROM picks_bans pb WHERE pb.match_id = m.match_id) d,
   (SELECT string_agg(pm.account_id || ':' || pm.hero_id || ':' || pm.player_slot || ':' || pm.kills || ':' || pm.deaths || ':' || pm.assists || ':' || pm.gold_per_min || ':' || pm.last_hits, ',') FROM player_matches pm WHERE pm.match_id = m.match_id) pl,
-  (SELECT string_agg(CASE WHEN o->>'type' = 'CHAT_MESSAGE_FIRSTBLOOD' THEN 'F' || CASE WHEN (o->>'player_slot')::int >= 128 THEN 1 ELSE 0 END WHEN o->>'type' = 'CHAT_MESSAGE_MINIBOSS_KILL' THEN 'T' || ((o->>'team')::int - 2) WHEN o->>'type' = 'CHAT_MESSAGE_ROSHAN_KILL' THEN 'R' || ((o->>'team')::int - 2) WHEN o->>'key' LIKE '%rax%' THEN 'X' || CASE WHEN o->>'key' LIKE '%goodguys%' THEN 1 ELSE 0 END WHEN o->>'key' LIKE '%tower%' THEN 'W' || CASE WHEN o->>'key' LIKE '%goodguys%' THEN 1 ELSE 0 END END || ':' || (o->>'time'), ',') FROM unnest(m.objectives) o WHERE o->>'type' IN ('CHAT_MESSAGE_FIRSTBLOOD', 'CHAT_MESSAGE_MINIBOSS_KILL', 'CHAT_MESSAGE_ROSHAN_KILL', 'building_kill')) ob
+  (SELECT string_agg(CASE WHEN o->>'type' = 'CHAT_MESSAGE_FIRSTBLOOD' THEN 'F' || CASE WHEN (o->>'player_slot')::int >= 128 THEN 1 ELSE 0 END WHEN o->>'type' = 'CHAT_MESSAGE_MINIBOSS_KILL' THEN 'T' || ((o->>'team')::int - 2) WHEN o->>'type' = 'CHAT_MESSAGE_ROSHAN_KILL' THEN 'R' || ((o->>'team')::int - 2) WHEN o->>'key' LIKE '%rax%' THEN 'X' || CASE WHEN o->>'key' LIKE '%goodguys%' THEN 1 ELSE 0 END WHEN o->>'key' LIKE '%tower%' THEN 'W' || CASE WHEN o->>'key' LIKE '%goodguys%' THEN 1 ELSE 0 END END || ':' || (o->>'time'), ',') FROM unnest(m.objectives) o WHERE o->>'type' IN ('CHAT_MESSAGE_FIRSTBLOOD', 'CHAT_MESSAGE_MINIBOSS_KILL', 'CHAT_MESSAGE_ROSHAN_KILL', 'building_kill')) ob, m.radiant_gold_adv[16] ga15, m.radiant_gold_adv[31] ga30, m.radiant_gold_adv[46] ga45
   FROM matches m JOIN leagues l USING(leagueid)
   WHERE m.start_time >= ${a} AND m.start_time < ${b} AND l.tier IN ('premium', 'professional') AND m.radiant_team_id IS NOT NULL AND m.dire_team_id IS NOT NULL AND m.radiant_team_id <> m.dire_team_id
   ORDER BY m.match_id`;
@@ -43,13 +43,13 @@ for (let a = from; a < now; a += 20 * DAY) {
   const rows = await sql(Q(a, Math.min(now + DAY, a + 20 * DAY))); windows++; if (!rows) continue;
   for (const r of rows) {
     if (r.radiant_win == null) continue;
-    const m = { id: +r.match_id, t: +r.start_time, dur: +r.duration, rw: r.radiant_win ? 1 : 0, r: +r.rt, d: +r.dt, lg: +r.leagueid, sid: +r.series_id || 0, st: +r.series_type || 0, dr: r.d || "", pl: r.pl || "", ob: r.ob || "" };
+    const m = { id: +r.match_id, t: +r.start_time, dur: +r.duration, rw: r.radiant_win ? 1 : 0, r: +r.rt, d: +r.dt, lg: +r.leagueid, sid: +r.series_id || 0, st: +r.series_type || 0, dr: r.d || "", pl: r.pl || "", ob: r.ob || "", ga: [r.ga15, r.ga30, r.ga45].map((x) => (x == null ? null : +x)) };
     if (!byId.has(m.id)) added++; byId.set(m.id, m);
   }
 }
 const cutoff = now - 420 * DAY;
 store.matches = [...byId.values()].filter((m) => m.t >= cutoff).sort((a, b) => a.t - b.t || a.id - b.id);
-store.obv = 1; store.fetched = new Date().toISOString(); store.source = "OpenDota (opendota.com) public explorer: professional and premium-tier leagues";
+store.obv = 2; store.fetched = new Date().toISOString(); store.source = "OpenDota (opendota.com) public explorer: professional and premium-tier leagues";
 writeJSON(MF, store);
 console.log(`Dota 2 matches: ${added} new over ${windows} windows, ${store.matches.length} on file (${store.matches.filter((m) => m.dr).length} with drafts)`);
 

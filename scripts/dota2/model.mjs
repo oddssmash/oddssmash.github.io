@@ -272,6 +272,42 @@ function readDraft(v) { const zz = v.map((x, j) => (x - FAVG[j][0]) / FAVG[j][1]
 console.log(`settings K ${P.K}, fade ${P.H} days, player blend ${P.w}, new team ${P.r0}, draft weight ${P.dw}${fzOk ? " (frozen)" : " (retuned)"}`);
 console.log(`series: Brier ${R.brier.toFixed(4)}, winners ${(R.hit * 100).toFixed(1)}% of ${R.n}; games: Brier ${R.gBrier.toFixed(4)}, with draft ${R.gBrierDraft.toFixed(4)} (${R.nGD} games); Radiant wins ${(R.side * 100).toFixed(1)}%`);
 
+// PHASE WINNERS: who leads net worth at 15 minutes (early: 0-15), 30 (mid: 15-30) and 45 (late: 30-45), and who wins games
+// that go past 45 minutes (super late). Each phase is its own logistic fit on the pre-game edge (ratings + side), the draft's
+// power curve, laning, carry power, push, teamfight, control and the hero/combo/counter edge; fitted on the first 70% of
+// drafted games by date and judged on the last 30%. Net worth leads from OpenDota (radiant_gold_adv).
+const PH_F = ["tempo", "laning", "scaling", "push", "teamfight", "control"].map((k) => FACTORS.findIndex(([x]) => x === k));
+const phX = (x) => [x.base, x.dl, ...PH_F.map((j) => x.fv[j])];
+function fitPhase(rows, yOf, lambda = 30) { const k = 2 + PH_F.length, w = new Array(k).fill(0), b0 = [0]; const sd = new Array(k).fill(1);
+  for (let j = 0; j < k; j++) { const v = rows.map((x) => phX(x)[j]), m = v.reduce((a, c) => a + c, 0) / v.length; sd[j] = Math.sqrt(v.reduce((a, c) => a + (c - m) ** 2, 0) / v.length) || 1; }
+  for (let it = 0; it < 600; it++) { const g = new Array(k).fill(0); let gb = 0; for (const x of rows) { const X = phX(x); let l = b0[0]; for (let j = 0; j < k; j++) l += w[j] * X[j] / sd[j]; const e = yOf(x) - lg(l); gb += e; for (let j = 0; j < k; j++) g[j] += e * X[j] / sd[j]; }
+    b0[0] += 2 * gb / rows.length; for (let j = 0; j < k; j++) w[j] += 2 * (g[j] - lambda * w[j]) / rows.length; }
+  return { b: b0[0], w: w.map((v, j) => v / sd[j]) }; }
+const phP = (M, x) => { const X = phX(x); let l = M.b; for (let j = 0; j < X.length; j++) l += M.w[j] * X[j]; return lg(l); };
+const PHASES = [["early", "Early game (0–15 min)", 0, "net worth lead at 15:00"], ["mid", "Mid game (15–30 min)", 1, "net worth lead at 30:00"], ["late", "Late game (30–45 min)", 2, "net worth lead at 45:00"], ["superLate", "Super late (45+ min)", 3, "winner of games that pass 45:00"]];
+const phRows = (i) => DG.filter((x) => (i < 3 ? x.g.ga?.[i] != null && x.g.ga[i] !== 0 : x.g.dur >= 45 * 60));
+const phY = (i) => (x) => (i < 3 ? (x.g.ga[i] > 0 ? 1 : 0) : x.g.rw);
+const PHM = {}, PHTEST = {};
+for (const [key, label, i, what] of PHASES) { const rows = phRows(i), cut = Math.floor(rows.length * 0.7), M = fitPhase(rows.slice(0, cut), phY(i)), test = rows.slice(cut), y = phY(i);
+  const hit = test.filter((x) => (phP(M, x) >= 0.5) === (y(x) === 1)).length, base = test.filter((x) => (lg(x.base) >= 0.5) === (y(x) === 1)).length;
+  PHTEST[key] = { label, what, n: test.length, hit, rate: r3(hit / Math.max(1, test.length)), baseRate: r3(base / Math.max(1, test.length)), brier: r3(test.reduce((a, x) => a + (phP(M, x) - y(x)) ** 2, 0) / Math.max(1, test.length)) };
+  PHM[key] = fitPhase(rows, phY(i)); }
+console.log("phases: " + Object.entries(PHTEST).map(([k, o]) => `${k} ${o.hit}/${o.n} (${o.rate}, ratings only ${o.baseRate})`).join(", "));
+// UPSET ALERTS: the rating underdog (under 45% before the draft) whose draft lifts it by 5+ points. Graded on held-out games.
+const UP_TEST = (() => { let n = 0, hit = 0, exp = 0; for (const x of DG.slice(dcut)) { for (const sd of [0, 1]) { const pre = sd === 0 ? lg(x.base) : 1 - lg(x.base), post = sd === 0 ? lg(x.base + draftPart(FM, x)) : 1 - lg(x.base + draftPart(FM, x)); if (pre < 0.45 && post - pre >= 0.05) { n++; exp += post; if ((x.g.rw === 1) === (sd === 0)) hit++; } } } return { n, hit, rate: r3(hit / Math.max(1, n)), expected: r3(exp / Math.max(1, n)) }; })();
+console.log(`upset alerts (held-out): ${UP_TEST.hit}/${UP_TEST.n} underdogs won (${UP_TEST.rate}; our draft-adjusted chance averaged ${UP_TEST.expected})`);
+// the biggest draft reasons behind a shift: each factor's contribution in logit for Radiant
+function drivers(x) { const labels = [...FACTORS.map(([, l]) => l), ...EXTRA.map(([, l]) => l), "Hero strength, combos and counters"], out = [];
+  for (let j = 0; j < NF + NX + 1; j++) { const c = DMODEL.w[j] * XV(x, j); if (Math.abs(c) >= 0.02) out.push({ f: labels[j], c: r3(c) }); } return out.sort((a, b) => Math.abs(b.c) - Math.abs(a.c)).slice(0, 5); }
+// full draft analysis for one game, Team A's view (aRad: A on Radiant)
+function gameAnalysis(rad, dire, base, aRad) {
+  const fr = draftVec(rad, DRf.tempo), fd = draftVec(dire, DRf.tempo), x = { base, dl: DRf.logitOf(rad, dire), fv: fr.map((v, i) => v - fd[i]), ex: extraVec(rad, dire, DRf.counterScore(rad, dire)) };
+  const o = (p) => r3(aRad ? p : 1 - p), pre = lg(base), post = lg(base + draftPart(DMODEL, x));
+  const phases = Object.fromEntries(PHASES.map(([k]) => [k, o(PHTEST[k].rate > PHTEST[k].baseRate ? phP(PHM[k], x) : pre)])); // a phase fit is used only where it beat the ratings on held-out games
+  const dv = drivers(x).map((d) => ({ f: d.f, c: aRad ? d.c : -d.c })), preA = o(pre), postA = o(post), dog = preA < 0.45 ? "a" : 1 - preA < 0.45 ? "b" : null;
+  const upset = dog && (dog === "a" ? postA - preA : preA - postA) >= 0.05 ? { team: dog, pre: dog === "a" ? preA : r3(1 - preA), post: dog === "a" ? postA : r3(1 - postA), why: dv.filter((d) => (dog === "a" ? d.c > 0 : d.c < 0)).slice(0, 3).map((d) => d.f) } : null;
+  return { preA, postA, phases, drivers: dv, upset, readA: readDraft(aRad ? fr : fd), readB: readDraft(aRad ? fd : fr) };
+}
 // CALIBRATION TEST: pull single-game chances toward 50% (logit x T), fitted on the first 70% of graded series by date and
 // judged on the last 30% (series Brier). Adopted only if it helps on the held-out part.
 const GR = R.log.filter((x) => x.warm && !x.s.draw), cut = Math.floor(GR.length * 0.7);
@@ -388,7 +424,7 @@ writeJSON(path.join(OUT, "results.json"), res);
 const gIndex = new Map(R.glog.map((x) => [x.g.id, x]));
 for (const x of R.log.slice(-400)) { const s = x.s;
   writeJSON(path.join(OUT, "series", `${s.key}.json`), { ...seriesRow(x), elo: [elo(x.ra), elo(x.rb)], games: s.games.map((g) => { const gl = gIndex.get(g.id), aSide = g.r === s.a ? 0 : 1, flip = (v) => (v == null ? null : r3(aSide === 0 ? v : 1 - v));
-    return { id: g.id, aSide: aSide === 0 ? "Radiant" : "Dire", obj: Object.fromEntries(Object.entries({ fb: "F", torm: "T", rosh: "R", tower: "W", rax: "X" }).filter(([, k]) => g.obj?.[k]).map(([n, k]) => [n, { a: (g.obj[k].side === 0) === (aSide === 0), min: Math.round(g.obj[k].t / 60) }])), winA: (g.rw ? g.r : g.d) === s.a, min: Math.round(g.dur / 60), pA: flip(gl?.p), pDraftA: flip(gl?.pd), draft: gl?.fv ? (() => { const part = draftPart(DMODEL, gl), pa0 = lg(part), ckR = checklist(g.pick[0], g.pick[1]), ckD = checklist(g.pick[1], g.pick[0]); return { pA: r3(aSide === 0 ? pa0 : 1 - pa0), readA: readDraft(aSide === 0 ? gl.fr : gl.fd), readB: readDraft(aSide === 0 ? gl.fd : gl.fr), ckA: aSide === 0 ? ckR : ckD, ckB: aSide === 0 ? ckD : ckR }; })() : null,
+    return { id: g.id, aSide: aSide === 0 ? "Radiant" : "Dire", obj: Object.fromEntries(Object.entries({ fb: "F", torm: "T", rosh: "R", tower: "W", rax: "X" }).filter(([, k]) => g.obj?.[k]).map(([n, k]) => [n, { a: (g.obj[k].side === 0) === (aSide === 0), min: Math.round(g.obj[k].t / 60) }])), winA: (g.rw ? g.r : g.d) === s.a, min: Math.round(g.dur / 60), pA: flip(gl?.p), pDraftA: flip(gl?.pd), an: gl?.fv ? gameAnalysis(g.pick[0], g.pick[1], gl.base, aSide === 0) : null, ga: (g.ga || []).map((v) => (v == null ? null : aSide === 0 ? v : -v)), draft: gl?.fv ? (() => { const part = draftPart(DMODEL, gl), pa0 = lg(part), ckR = checklist(g.pick[0], g.pick[1]), ckD = checklist(g.pick[1], g.pick[0]); return { pA: r3(aSide === 0 ? pa0 : 1 - pa0), readA: readDraft(aSide === 0 ? gl.fr : gl.fd), readB: readDraft(aSide === 0 ? gl.fd : gl.fr), ckA: aSide === 0 ? ckR : ckD, ckB: aSide === 0 ? ckD : ckR }; })() : null,
       pickA: g.pick[aSide], pickB: g.pick[1 - aSide], banA: g.ban[aSide], banB: g.ban[1 - aSide], order: g.order.map(([p, sd, h]) => [p, sd === aSide ? "a" : "b", h]),
       playersA: g.lines[aSide].map((l) => ({ id: l.acc, n: pname(l.acc), h: l.hero, k: l.k, d: l.d, a: l.a, gpm: l.gpm })), playersB: g.lines[1 - aSide].map((l) => ({ id: l.acc, n: pname(l.acc), h: l.hero, k: l.k, d: l.d, a: l.a, gpm: l.gpm })) }; }) }); }
 
@@ -519,12 +555,12 @@ function seriesState(Aid, Bid, start, bo, pg) {
   const sideL = logit(R.side), need = bo === 2 ? 2 : Math.ceil(bo / 2), out = []; let a = 0, b = 0;
   for (const g of games) { const aRad = g.r === Aid, gl = gIndex.get(g.id), pre = gl ? (aRad ? gl.p : 1 - gl.p) : cal(lg(logit(pg) + (aRad ? sideL : -sideL)));
     const draft = g.pick && g.pick[0].length === 5 ? cal(lg(logit(pre) + (aRad ? 1 : -1) * P.dw * DRf.logitOf(g.pick[0], g.pick[1]))) : null, aWon = (g.rw === 1) === aRad;
-    if (aWon) a++; else b++; out.push({ n: out.length + 1, id: g.id, status: "done", aSide: aRad ? "Radiant" : "Dire", pA: r3(pre), pDraftA: draft != null ? r3(draft) : null, aWon, min: Math.round((g.dur || 0) / 60), hit: (pre >= 0.5) === aWon, killsA: aRad ? g.kr : g.kd, killsB: aRad ? g.kd : g.kr, picksA: g.pick ? g.pick[aRad ? 0 : 1] : null, picksB: g.pick ? g.pick[aRad ? 1 : 0] : null }); }
+    if (aWon) a++; else b++; out.push({ n: out.length + 1, id: g.id, status: "done", aSide: aRad ? "Radiant" : "Dire", pA: r3(pre), pDraftA: draft != null ? r3(draft) : null, aWon, min: Math.round((g.dur || 0) / 60), hit: (pre >= 0.5) === aWon, an: g.pick && g.pick[0].length === 5 ? gameAnalysis(g.pick[0], g.pick[1], aRad ? logit(pre) : -logit(pre), aRad) : null, ga: (G.find((q) => q.id === g.id)?.ga || []).map((v) => (v == null ? null : aRad ? v : -v)), killsA: aRad ? g.kr : g.kd, killsB: aRad ? g.kd : g.kr, picksA: g.pick ? g.pick[aRad ? 0 : 1] : null, picksB: g.pick ? g.pick[aRad ? 1 : 0] : null }); }
   const done = bo === 2 ? a + b >= 2 : a >= need || b >= need;
   const lv = (LIVE.live || []).find((g) => pair(g.r, g.d) && !seen.has(g.id));
   if (lv && !done) { const aRad = lv.r === Aid, base = cal(lg(logit(pg) + (aRad ? sideL : -sideL))), drafted = lv.hr.length === 5 && lv.hd.length === 5;
     const draft = drafted ? cal(lg(logit(base) + (aRad ? 1 : -1) * P.dw * DRf.logitOf(lv.hr, lv.hd))) : null;
-    out.push({ n: out.length + 1, id: lv.id, status: "live", aSide: aRad ? "Radiant" : "Dire", pA: r3(base), pDraftA: draft != null ? r3(draft) : null, clock: Math.round(lv.t / 60), killsA: aRad ? lv.rk : lv.dk, killsB: aRad ? lv.dk : lv.rk, leadA: aRad ? lv.lead : -lv.lead, picksA: aRad ? lv.hr : lv.hd, picksB: aRad ? lv.hd : lv.hr }); }
+    out.push({ an: drafted ? gameAnalysis(lv.hr, lv.hd, aRad ? logit(base) : -logit(base), aRad) : null, n: out.length + 1, id: lv.id, status: "live", aSide: aRad ? "Radiant" : "Dire", pA: r3(base), pDraftA: draft != null ? r3(draft) : null, clock: Math.round(lv.t / 60), killsA: aRad ? lv.rk : lv.dk, killsB: aRad ? lv.dk : lv.rk, leadA: aRad ? lv.lead : -lv.lead, picksA: aRad ? lv.hr : lv.hd, picksB: aRad ? lv.hd : lv.hr }); }
   if (!done) { const maxG = bo === 2 ? 2 : bo; for (let n = out.length + 1; n <= Math.min(maxG, out.filter((x) => x.status === "done").length + (lv ? 2 : 1) + (bo >= 3 ? 1 : 0)) && n <= maxG; n++) out.push({ n, status: "next", pA: r3(pg) }); }
   return { score: [a, b], done, games: out, pSeriesNow: r3(done ? (a > b ? 1 : a === b ? 0.5 : 0) : remainP(pg, a, b, bo)), live: !!lv };
 }
@@ -551,6 +587,7 @@ for (const m of UP.matches) {
   upcoming.push(up);
   writeJSON(path.join(OUT, "matches", `${id}.json`), up);
   // pre-match record: keep overwriting until the match starts, then it stays frozen
+  up.formA = A ? (R.TR.get(+A.id)?.hist || []).slice(-25).map(([d, r]) => elo(r)) : []; up.formB = B ? (R.TR.get(+B.id)?.hist || []).slice(-25).map(([d, r]) => elo(r)) : [];
   up.markets = A && B ? nextMarkets(+A.id, +B.id, pg, m.a.name, m.b.name) : null; up.explain = explainMatch(up, A, B, pa, pb, up.markets);
   if (A && B) { up.series = seriesState(+A.id, +B.id, start, m.bo, pg); if (up.series.done && start < now - 3600) { upcoming.pop(); } else writeJSON(path.join(OUT, "matches", `${id}.json`), up); }
   // ESTIMATED MAIN LINES (no sportsbook feed for Dota 2 is open to us): series winner, map handicap and total maps saved
@@ -596,6 +633,7 @@ writeJSON(LN_F, LN);
 const preDone = Object.values(PRE.entries).filter((e) => e.result && !e.result.missing && !e.result.draw && e.known);
 accuracy.prematch = { n: preDone.length, hit: preDone.filter((e) => e.result.right).length, brier: preDone.length ? r3(preDone.reduce((a, e) => a + (e.p - (e.result.score[0] > e.result.score[1] ? 1 : 0)) ** 2, 0) / preDone.length) : null,
   list: Object.values(PRE.entries).filter((e) => e.result && !e.result.missing).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) };
+accuracy.phases = PHTEST; accuracy.upsets = UP_TEST;
 accuracy.kills = { test: KTEST, lines: LINE, pace: PB, sd: Object.fromEntries(Object.entries(SD).map(([k, v]) => [k, r1(v)])) };
 writeJSON(path.join(OUT, "accuracy.json"), accuracy);
 writeJSON(path.join(OUT, "upcoming.json"), upcoming.map(({ a, b, scenarios, h2h, ...m }) => ({ ...m, a: { name: a.name, short: a.short, id: a.id, logo: a.logo, elo: a.elo, rank: a.rank, form: a.form }, b: { name: b.name, short: b.short, id: b.id, logo: b.logo, elo: b.elo, rank: b.rank, form: b.form } })));
