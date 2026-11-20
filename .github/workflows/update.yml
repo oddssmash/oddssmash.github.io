@@ -85,8 +85,11 @@ jobs:
       # YouTube, Steam news). Like MLBB and FIBA, a hiccup here must not stop the rest of the site.
       - name: Dota 2 fetch and model
         continue-on-error: true
+        env:
+          ODDSPAPI_KEY: ${{ secrets.ODDSPAPI_KEY }}
         run: |
           node scripts/dota2/fetch.mjs
+          node scripts/dota2/odds.mjs
           node scripts/dota2/live.mjs
           node scripts/dota2/model.mjs
           node scripts/dota2/news.mjs
@@ -98,6 +101,13 @@ jobs:
           v="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
           node scripts/site.mjs "$v"
           grep -o 'app.js?v=[^"]*' site/nba/index.html
+
+      # The assembled site is cached so the quick deploy workflow can publish code changes on top of it in minutes.
+      - name: Cache the assembled site
+        uses: actions/cache/save@v4
+        with:
+          path: site
+          key: site-${{ github.run_id }}
 
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3

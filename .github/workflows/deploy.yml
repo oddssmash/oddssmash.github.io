@@ -1,0 +1,65 @@
+name: Quick deploy (code only)
+
+# A code change (app, styles, pages) goes live in a couple of minutes: the last full build's site is restored from the cache,
+# the new code is copied over it, and it is published. Data still refreshes with "Refresh data and publish" every 30 minutes.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "public/*.js"
+      - "public/*.css"
+      - "public/*.html"
+      - "public-fiba/*"
+      - "public-mlbb/*"
+      - "public-dota2/*"
+      - "web/home/**"
+      - "scripts/site-code.mjs"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages-quick
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Restore the last published site
+        id: site
+        uses: actions/cache/restore@v4
+        with:
+          path: site
+          key: site-none
+          restore-keys: site-
+      - name: Copy the new code over it
+        if: steps.site.outputs.cache-matched-key != ''
+        run: node scripts/site-code.mjs "${GITHUB_SHA::7}-q${GITHUB_RUN_NUMBER}"
+      - name: Stop when no published site is cached yet
+        if: steps.site.outputs.cache-matched-key == ''
+        run: |
+          echo "No cached site yet; the next full data run publishes this code."
+          exit 1
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

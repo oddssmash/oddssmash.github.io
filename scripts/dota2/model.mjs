@@ -730,3 +730,5 @@ const meta = { updated: new Date().toISOString(), players: playersOut.length, ga
   firstGame: G[0] ? new Date(G[0].t * 1000).toISOString() : null, params: P, calT: T, side: r3(R.side), leagues: [...new Set(upcoming.map((m) => m.tournament).filter(Boolean))] };
 writeJSON(path.join(OUT, "meta.json"), meta);
 console.log(`Dota 2 out: ${upcoming.length} upcoming, ${teamsOut.length} teams, ${playersOut.length} players, ${heroList.length} heroes; pre-match record ${accuracy.prematch.hit}/${accuracy.prematch.n}`);
+// sportsbook feed status (no key, only counts and quota) for the site
+{ const st = readJSON(path.join(D, "odds-status.json"), null); if (st) writeJSON(path.join(OUT, "odds-status.json"), st); }
