@@ -1133,6 +1133,31 @@ function playingCard(raw, g, outs) {
   </section>`;
 }
 
+// ---- PICKS EXPLAINED (game page): tap-to-open cards for the main-line picks, each reason with its number and source.
+// Sportsbook lines only choose which line is tested (they never feed the projection); chances are adjusted by our own
+// main-line record (mlCal) exactly as on the High-confidence board.
+async function nbaExplain(g, home, away) {
+  await mlCal(); const sim = await load(`sim/${g.id}.json`).catch(() => null), c = sim?.comparison, H = T(home.tid), A = T(away.tid), cal = S.mlCal || {};
+  const rec = (fam) => (cal[fam] ? `Our main-line record in this market: ${cal[fam].hit} of ${cal[fam].n} right (we had said ${Math.round(cal[fam].claim * 100)}% on average), so ${Math.round(cal[fam].k * 100)}% of the simulation's lean is kept.` : null);
+  const sched = (t, n) => { const s = t.sched || {}; return `${n}: ${s.rest ?? "-"} day(s) rest${s.b2b ? ", second night of a back-to-back" : ""}${s.threeIn4 ? ", 3 games in 4 nights" : ""}${s.roadStreak ? `, game ${s.roadStreak} of a road trip` : ""}${s.travel ? `, ${s.travel} miles travelled` : ""}; streak ${s.streak > 0 ? `W${s.streak}` : s.streak < 0 ? `L${-s.streak}` : "-"}.`; };
+  const style = (t, n) => (t.style ? `${n}: pace ${t.style.pace}, offence ${t.style.off}, defence ${t.style.def} (net ${t.style.net > 0 ? "+" : ""}${t.style.net})${t.style.tags?.length ? `; plays ${t.style.tags.slice(0, 3).join(", ").toLowerCase()}` : ""}.` : null);
+  const scen = (t, n) => (t.scen || []).filter((x) => Math.abs(x.w) >= 0.3).slice(0, 2).map((x) => `${n} ${x.k.toLowerCase()}: ${x.w > 0 ? "+" : ""}${x.w} points (${x.n} games).`);
+  const models = (g.models || []).map((m) => `${m.label}: ${m.margin > 0 ? H.abbr : A.abbr} by ${Math.abs(m.margin).toFixed(1)} (weight ${Math.round(m.weight * 100)}%).`);
+  const ctx = [sched(home, H.abbr), sched(away, A.abbr), style(home, H.abbr), style(away, A.abbr), ...scen(home, H.abbr), ...scen(away, A.abbr)].filter(Boolean);
+  const h2h = Array.isArray(g.h2h) && g.h2h.length ? [`Head-to-head this season and last: ${g.h2h.length} meeting(s) in our data.`] : [];
+  const risks = [...(g.upset?.flag ? [`Upset watch: ${(g.upset.reasons || []).join("; ")}`] : []), `Close game (within 5) ${pct(g.pred.close)}; blowout (15+) ${pct(g.pred.blowout)}.`, "Late injury news can move this; the projection follows the last posted line-ups."];
+  const cards = [];
+  if (c?.winner) { const ph = c.winner.ourProb, favH = ph >= 0.5, raw = Math.max(ph, 1 - ph), p = mlAdj("winner", raw); cards.push({ t: "Moneyline", pick: `${favH ? H.abbr : A.abbr} to win`, p, short: `Projected ${f1(g.pred.hs)}–${f1(g.pred.as)} for ${H.abbr}; the simulation says ${pct(raw)}.`, pts: [`Projected score ${H.abbr} ${f1(g.pred.hs)}, ${A.abbr} ${f1(g.pred.as)} at a pace of ${f1(g.pred.pace)}.`, ...models, ...ctx, ...h2h, rec("winner"), `${c.provider || "Sportsbook"} has ${favH ? H.abbr : A.abbr} at ${pct(favH ? c.winner.bookProb : 1 - c.winner.bookProb)} with its margin removed (for comparison only).`].filter(Boolean), risks }); }
+  if (c?.spread) { const q = c.spread.ourProb, take = q >= 0.5, raw = Math.max(q, 1 - q), p = mlAdj("spread", raw), other = c.spread.team === H.abbr ? A.abbr : H.abbr, ln = c.spread.bookLine, margin = g.pred.hs - g.pred.as;
+    cards.push({ t: "Spread (main line)", pick: take ? `${c.spread.team} ${ln > 0 ? "+" : ""}${ln}` : `${other} ${-ln > 0 ? "+" : ""}${-ln}`, p, short: `We project ${margin >= 0 ? H.abbr : A.abbr} by ${Math.abs(margin).toFixed(1)} against a line of ${c.spread.team} ${ln}.`, pts: [`Projected margin ${margin >= 0 ? H.abbr : A.abbr} by ${Math.abs(margin).toFixed(1)}; the line is ${c.spread.team} ${ln} (${c.provider || "sportsbook"}, ${dshortSafe(c.fetched)}).`, ...models.slice(0, 3), ...ctx.slice(0, 4), rec("spread")].filter(Boolean), risks: [...risks, "Spreads turn on garbage time and late fouling."] }); }
+  if (c?.total) { const q = c.total.ourProb, ov = q >= 0.5, raw = Math.max(q, 1 - q), p = mlAdj("total", raw), tot = g.pred.hs + g.pred.as;
+    cards.push({ t: "Total (main line)", pick: `${ov ? "Over" : "Under"} ${c.total.bookLine}`, p, short: `We project ${tot.toFixed(1)} points at a pace of ${f1(g.pred.pace)}; line ${c.total.bookLine}.`, pts: [`Projected total ${tot.toFixed(1)}: ${H.abbr} ${f1(g.pred.hs)} + ${A.abbr} ${f1(g.pred.as)}.`, `Matchup pace ${f1(g.pred.pace)} possessions.`, style(home, H.abbr), style(away, A.abbr), rec("total")].filter(Boolean), risks: ["Shooting variance: a hot or cold night from three swings totals by 10+ points.", "Overtime adds points."] }); }
+  for (const pr of (c?.props || []).map((x) => ({ ...x, q: Math.max(x.ourProbOver, 1 - x.ourProbOver) })).sort((a, b) => b.q - a.q).slice(0, 4)) { const fam = { pts: "pts", reb: "reb", ast: "ast", tpm: "tpm" }[pr.stat] || pr.stat, over = pr.ourProbOver >= 0.5, p = mlAdj(fam, pr.q);
+    cards.push({ t: `${FAM[fam] || pr.stat} prop`, pick: `${pr.n} ${over ? "over" : "under"} ${pr.bookLine}`, p, short: `Our median ${pr.ourMedian ?? "-"} against a line of ${pr.bookLine}.`, pts: [`Simulation median for ${pr.n}: ${pr.ourMedian ?? "-"} ${FAM[fam]?.toLowerCase() || pr.stat}; line ${pr.bookLine} (${c.provider || "sportsbook"}). The simulation says ${pct(pr.q)}.`, rec(fam), ...ctx.slice(0, 2)].filter(Boolean), risks: ["Minutes: foul trouble, blowouts or a late scratch change the volume.", "Player props carry more noise than game lines."] }); }
+  if (!cards.length) return "";
+  return `<section class="card" id="g-why"><h2>Our picks, explained</h2><p class="small muted">Main-line picks for this game. Tap one for the reasons and numbers. Sportsbook lines only choose which line is tested; they never feed our projection.</p>${cards.map((x) => `<details class="xp"><summary><span class="xp-t"><em>${esc(x.t)}</em><b>${esc(x.pick)}</b><span class="small muted">${esc(x.short)}</span></span><span class="xp-p"><b class="num">${pct(x.p)}</b><span class="small muted">fair ${(1 / x.p).toFixed(2)}</span></span><span class="xp-chev" aria-hidden="true">▾</span></summary><div class="xp-b"><h3 class="small">Why</h3><ul class="small">${x.pts.map((p) => `<li>${esc(p)}</li>`).join("")}</ul><h3 class="small">What could make it lose</h3><ul class="small">${x.risks.map((p) => `<li>${esc(p)}</li>`).join("")}</ul><p class="small muted">${x.p < 0.55 ? "Under 55%: a coin-flip lean. " : ""}Statistical analysis only, not betting advice.</p></div></details>`).join("")}</section>`;
+}
+const dshortSafe = (d) => { try { return new Date(d).toLocaleString("en-US", { timeZone: "Asia/Manila", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); } catch { return ""; } };
 async function vGame(id) {
   const raw = await load(`upcoming/${id}.json`);
   const outs = outsFor(id);
@@ -1143,6 +1168,7 @@ async function vGame(id) {
   const [home, away] = [g.teams.find((t) => t.isHome), g.teams.find((t) => !t.isHome)];
   const ph = g.pred.pHome, fav = ph >= 0.5 ? home : away, favP = Math.max(ph, 1 - ph);
   const shares = g.models.reduce((s, m) => s + m.weight, 0) || 1;
+  nbaExplain(g, home, away).then((html) => { if (!html) return; const t0 = Date.now(), put = () => { if (S.curGame !== g) return; const h = app.querySelector(".hero2"); if (h && !document.getElementById("g-why")) h.insertAdjacentHTML("afterend", html); else if (!h && Date.now() - t0 < 4000) setTimeout(put, 150); }; put(); }).catch(() => {});
   app.innerHTML = `<div class="gbar"><a class="gbar-b" href="#/games" aria-label="Back to games">‹ Back</a><b>${esc(T(away.tid).abbr)} @ ${esc(T(home.tid).abbr)}</b><span></span></div>
     <h1 class="vh">${esc(T(away.tid).name)} at ${esc(T(home.tid).name)}: projection</h1>
     <div class="card hero hero2">

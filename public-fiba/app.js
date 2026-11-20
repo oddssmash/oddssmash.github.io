@@ -104,8 +104,27 @@ function fibaMC(g, L) {
     <p class="small muted">From the live score (updates about every 10 minutes) and our projection. Statistical simulation, not betting advice; no sportsbook data is used.</p></section>`;
 }
 // ---------------------------------------------------------------- one game
+// ---- PICKS EXPLAINED (game page): tap-to-open cards for this game's picks, each reason with its number and source.
+// Display only: the chances are exactly the model's published ones (nothing here changes a probability).
+async function fibaExplain(g) {
+  const all = (await load("picks.json").catch(() => ({ picks: [] }))).picks.filter((x) => x.gid === g.id), acc = await load("accuracy.json").catch(() => null), A = g.a, B = g.b, p = g.proj;
+  if (!all.length) return "";
+  const recs = [`${A.name}: ${A.w}-${A.l} in ${A.n} games in our data (offence ${A.off > 0 ? "+" : ""}${A.off}, defence ${A.def > 0 ? "+" : ""}${A.def} vs average); ${B.name}: ${B.w}-${B.l} in ${B.n} (offence ${B.off > 0 ? "+" : ""}${B.off}, defence ${B.def > 0 ? "+" : ""}${B.def}). FIBA box scores.`];
+  const ha = (i, t) => { const h = g.ha?.[i]; if (!h) return null; const r = (x) => `${x[0]}-${x[1]}`; return `${t.name} at home ${r(h.home)}, away ${r(h.away)}${h.neutral[0] + h.neutral[1] ? `, neutral ${r(h.neutral)}` : ""}.`; };
+  const roster = [0, 1].map((i) => { const t = i ? B : A; return g.announced?.[i] ? `${t.name}: ${g.rosterSource?.[i] || "official roster posted by FIBA"}.` : `${t.name}: roster from their last game; the final 12 is not posted yet.`; });
+  const proj = `Projected score ${A.name} ${p.a.toFixed(1)}, ${B.name} ${p.b.toFixed(1)} at a pace of ${p.pace.toFixed(1)} possessions; 8 in 10 simulated games land ${A.code} ${Math.round(p.lo[0])}-${Math.round(p.hi[0])}, ${B.code} ${Math.round(p.lo[1])}-${Math.round(p.hi[1])} (10,000 simulations).`;
+  const risks = [`Close game (5 or less) ${pct(p.close)}; overtime ${pct(p.ot)}.`, ...(/low/i.test(g.confidence || "") ? [`Confidence: ${g.confidence}.`] : []), ...(!g.announced?.[0] || !g.announced?.[1] ? ["A final roster is not posted yet; national-team call-ups change a lot between windows."] : [])];
+  const T0 = { winner: "Moneyline", total: "Game total", spread: "Spread", prop: "Player line" };
+  const cards = all.map((x) => { const base = { t: T0[x.kind] || x.kind, pick: x.pick, p: x.p };
+    if (x.kind === "winner") return { ...base, short: `${p.pA >= 0.5 ? A.name : B.name} by ${Math.abs(p.a - p.b).toFixed(1)} in our projection.`, pts: [proj, ...g.why, ...recs, ha(0, A), ha(1, B), ...roster].filter(Boolean), risks };
+    if (x.kind === "total") return { ...base, short: `We project ${(p.a + p.b).toFixed(1)} points against our line of ${p.total}.`, pts: [proj, `Our total line ${p.total}; chance of going over ${pct(p.over)}.`, ...recs].filter(Boolean), risks: ["Shooting variance and foul-heavy endings swing totals.", ...risks.slice(1)] };
+    if (x.kind === "spread") return { ...base, short: `Projected margin ${Math.abs(p.a - p.b).toFixed(1)}.`, pts: [proj, ...g.why.slice(0, 3)], risks };
+    const pl = g.players.find((q) => x.pick.startsWith(q.n));
+    return { ...base, short: x.why ? `${x.why.charAt(0).toUpperCase()}${x.why.slice(1)}.` : "", pts: [x.why ? `Our projection: ${x.why} (FIBA box scores).` : null, pl ? `${pl.n}: ${pl.min.toFixed(1)} projected minutes; ${pl.gp} games in our data averaging ${pl.avgPts} points in ${pl.avgMin} minutes.` : null, `The line is set at his average (${x.avg}), so the pick is the side our projection favours: ${x.proj} projected.`, proj].filter(Boolean), risks: ["Minutes and role can change with the final roster.", "Single-game player scoring is noisy."] }; });
+  return `<div class="card" id="g-why"><h2>Our picks, explained</h2><p class="small muted">Tap a pick for the reasons and numbers behind it. Our own lines from the simulation; no sportsbook data.</p>${cards.map((c) => `<details class="xp"><summary><span class="xp-t"><em>${esc(c.t)}</em><b>${esc(c.pick)}</b><span class="small muted">${esc(c.short)}</span></span><span class="xp-p"><b class="num">${pct(c.p)}</b><span class="small muted">fair ${(1 / c.p).toFixed(2)}</span></span><span class="xp-chev" aria-hidden="true">▾</span></summary><div class="xp-b"><h3 class="small">Why</h3><ul class="small">${c.pts.map((q) => `<li>${esc(q)}</li>`).join("")}</ul><h3 class="small">What could make it lose</h3><ul class="small">${c.risks.map((q) => `<li>${esc(q)}</li>`).join("")}</ul><p class="small muted">Statistical analysis only, not betting advice.</p></div></details>`).join("")}</div>`;
+}
 async function vGame(id) {
-  const [g] = await Promise.all([load(`games/${id}.json`), liveData()]);
+  const [g] = await Promise.all([load(`games/${id}.json`), liveData()]); const whyHtml = await fibaExplain(g).catch(() => "");
   const L = liveOf(id), LW = L && L.live ? liveWin(g.proj.a - g.proj.b, g.proj.sd, L) : null;
   if (Math.abs(Date.parse(g.date) - Date.now()) < 3.5 * 3600000) startLive(() => vGame(id));
   const A = g.a, B = g.b, p = g.proj, fa = p.pA >= 0.5, fav = fa ? A : B;
@@ -122,7 +141,7 @@ async function vGame(id) {
       <div class="gc-bar"><span style="flex:${p.pA};background:${fa ? "var(--accent)" : "var(--line-2)"}"></span><span style="flex:${1 - p.pA};background:${!fa ? "var(--accent)" : "var(--line-2)"}"></span></div>
       <div class="small"><span class="chip">Close game (5 or less) ${pct(p.close)}</span> <span class="chip">Blowout (20+) ${pct(p.blowout)}</span> <span class="chip">Overtime ${pct(p.ot)}</span> <span class="chip">Confidence: ${esc(g.confidence)}</span></div>
       <p class="small muted" style="margin-top:8px">Likely range (8 in 10 simulated games): ${esc(A.code)} ${f0(p.lo[0])}-${f0(p.hi[0])}, ${esc(B.code)} ${f0(p.lo[1])}-${f0(p.hi[1])}. Pace ${f1(p.pace)} possessions.</p></div>
-    <div class="card"><h2>Why</h2><ul class="dots">${g.why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>
+    ${whyHtml}<div class="card"><h2>Why</h2><ul class="dots">${g.why.map((w) => `<li>${esc(w)}</li>`).join("")}</ul>
       <p class="small muted">Ratings (points per 100 possessions vs average, adjusted for opponents): ${esc(A.code)} offence ${sg(A.off)}, defence ${sg(A.def)} · ${esc(B.code)} offence ${sg(B.off)}, defence ${sg(B.def)}.</p></div>
     <div class="card"><h2>Our lines</h2><table class="ft"><tbody>
       <tr><td>Winner</td><td><b>${esc(fav.name)} ${pct(Math.max(p.pA, 1 - p.pA))}</b></td><td class="muted">fair odds ${dec(Math.max(p.pA, 1 - p.pA))}</td></tr>
