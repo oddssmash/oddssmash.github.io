@@ -172,14 +172,19 @@ function makeDraft(tau = 120 * DAY) {
   // direct counters (checklist 1B.8): for each enemy hero, +2 if we have a hard counter (edge 0.3+ in logit), +1 for a soft one (0.15+)
   const counterScore = (A, B) => { const sc = (X, Y) => Y.reduce((t, y) => { let best = 0; for (const x of X) { const v = peek(VS, `${x}>${y}`); best = Math.max(best, logit(shr(v.w, v.n, 30))); } return t + (best >= 0.3 ? 2 : best >= 0.15 ? 1 : 0); }, 0); return sc(A, B) - sc(B, A); };
   const tempo = (x) => { const a = peek(SH, x), b = peek(LO, x); return 4 * (shr(a.w, a.n, 16) - shr(b.w, b.n, 16)); };
-  return { logitOf, learn, H, PR, VS, SH, LO, peek, tempo, counterScore, setClock: (t) => (clock = t) };
+  // PATCH RESET: at each new patch older hero results count less (x0.7 for every hero, pair and matchup); heroes the newest
+  // patch changed get pulled harder (5+ change lines: x0.35, 1-4: x0.55), so post-patch games take over quickly.
+  const patchShift = (changed = {}) => { const f0 = 0.7; for (const M of [H, SH, LO]) for (const [k, x] of M) { const c = changed[k] || 0, f = c >= 5 ? 0.35 : c >= 1 ? 0.55 : f0; x.n *= f; x.w *= f; x.b *= f; }
+    for (const M of [PR, VS]) for (const [k, x] of M) { const ids = k.split(/[->]/).map(Number), c = Math.max(...ids.map((i) => changed[i] || 0)), f = c >= 5 ? 0.35 : c >= 1 ? 0.55 : f0; x.n *= f; x.w *= f; x.b *= f; } };
+  return { patchShift, logitOf, learn, H, PR, VS, SH, LO, peek, tempo, counterScore, setClock: (t) => (clock = t) };
 }
 
 // ---------------------------------------------------------------- replay (team + player ratings, side edge, draft check)
+const PATCH_T = PATCHES.map((p) => ({ t: Date.parse(p.date) / 1000, changed: p.patch === PNOTES?.patch ? PNOTES.heroes : {} }));
 const WARM = 8; // games a team needs on record before its series are graded
 function replay(P, record = false) {
   const TR = new Map(), PRt = new Map(), DR = makeDraft(), log = [], glog = [];
-  let side = { n: 40, w: 20.8 }; // Radiant wins, prior 52%
+  const PQ = PATCH_T.filter((p) => p.t > (G[0]?.t || 0)).map((p) => ({ ...p })); let side = { n: 40, w: 20.8 }; // Radiant wins, prior 52%
   const team = (id, t) => { let x = TR.get(id); if (!x) TR.set(id, (x = { r: P.r0, n: 0, last: t, lineup: null, hist: [] })); const f = Math.exp(-(t - x.last) / (P.H * DAY)); x.r = P.r0 + (x.r - P.r0) * f; x.last = t; return x; };
   const player = (acc, t) => { let x = PRt.get(acc); if (!x) PRt.set(acc, (x = { r: P.r0, n: 0, last: t })); const f = Math.exp(-(t - x.last) / (P.H * DAY)); x.r = P.r0 + (x.r - P.r0) * f; x.last = t; return x; };
   const strength = (T, accs, t) => { if (!P.w || !accs || accs.length !== 5) return T.r; const pr = accs.reduce((a, acc) => a + player(acc, t).r, 0) / 5; return (1 - P.w) * T.r + P.w * pr; };
@@ -204,6 +209,7 @@ function replay(P, record = false) {
       if (P.w) { for (const acc of accR) { const x = player(acc, g.t); x.r += P.K * (1 + 2 / (1 + x.n / 10)) * err; x.n++; } for (const acc of accD) { const x = player(acc, g.t); x.r -= P.K * (1 + 2 / (1 + x.n / 10)) * err; x.n++; } }
       if (accR.length === 5) R.lineup = accR; if (accD.length === 5) Dd.lineup = accD;
       if (record) { R.hist.push([g.t, r3(R.r)]); Dd.hist.push([g.t, r3(Dd.r)]); }
+      while (PQ.length && g.t >= PQ[0].t) { const pq = PQ.shift(); DR.patchShift(pq.changed); }
       side.n++; side.w += y; DR.learn(g);
     }
   }
@@ -413,9 +419,119 @@ function findTeam(o) {
 const PRE_F = path.join(D, "pretip.json"), PRE = readJSON(PRE_F, { entries: {} });
 const sid = (s) => String(s).replace(/[^A-Za-z0-9]+/g, "_");
 const h2h = (a, b) => series.filter((s) => s.complete && ((s.a === a && s.b === b) || (s.a === b && s.b === a))).slice(-6).reverse().map((s) => ({ date: new Date(s.t * 1000).toISOString(), league: leagueName(s.league), score: s.a === a ? s.score : [s.score[1], s.score[0]], id: s.key }));
+// KILLS AND DURATION (per game): each team's pace, learned game by game from earlier games only: kills it scores, kills it
+// gives up and how long its games last (moving averages pulled toward the pro average), plus the rating gap for the kill
+// handicap. Lines are TYPICAL MAIN LINES (no sportsbook feed is open to us): total kills and duration at the pro median of
+// the last 60 days (x.5), each team's kills at half the total, and the kill handicap from the rating gap at average pace.
+// Fitted on the first 70% of games by date and judged on the last 30%.
+const kOf = (g, s) => g.lines[s].reduce((a, l) => a + (l.k || 0), 0);
+const KG = G.filter((g) => g.lines[0].length === 5 && g.lines[1].length === 5 && g.dur > 600);
+const Phi = (z) => 0.5 * (1 + Math.tanh(0.7978845608 * (z + 0.044715 * z ** 3)));
+function paceReplay(alpha, k0, record) {
+  const T = new Map(), glob = { k: 26, d: 38 * 60 }, rows = [];
+  const tm = (id) => T.get(id) || T.set(id, { kf: glob.k / 2, ka: glob.k / 2, d: glob.d, n: 0 }).get(id);
+  for (const g of KG) { const A = tm(g.r), B = tm(g.d), wA = A.n / (A.n + k0), wB = B.n / (B.n + k0), half = glob.k / 2;
+    const eA = half + wA * (A.kf - half) / 2 + wB * (B.ka - half) / 2, eB = half + wB * (B.kf - half) / 2 + wA * (A.ka - half) / 2, eD = glob.d + (wA * (A.d - glob.d) + wB * (B.d - glob.d)) / 2;
+    const ka = kOf(g, 0), kb = kOf(g, 1); if (record) rows.push({ g, eA, eB, eD, ka, kb, d: g.dur });
+    for (const [X, kf, ka2] of [[A, ka, kb], [B, kb, ka]]) { X.kf += alpha * (kf - X.kf); X.ka += alpha * (ka2 - X.ka); X.d += alpha * (g.dur - X.d); X.n++; }
+    glob.k += 0.01 * (ka + kb - glob.k); glob.d += 0.01 * (g.dur - glob.d); }
+  return { T, glob, rows };
+}
+let PB = null; { const cutK = Math.floor(KG.length * 0.7);
+  for (const alpha of [0.08, 0.15, 0.25]) for (const k0 of [3, 8, 20]) { const r = paceReplay(alpha, k0, true).rows.slice(0, cutK); const mse = r.reduce((a, x) => a + (x.eA + x.eB - x.ka - x.kb) ** 2 + ((x.eD - x.d) / 60) ** 2, 0) / r.length; if (!PB || mse < PB.mse) PB = { alpha, k0, mse }; } }
+const PACE = paceReplay(PB.alpha, PB.k0, true), PR_ = PACE.rows, cutK = Math.floor(PR_.length * 0.7);
+// rating effect on the kill margin: margin = b * pre-game logit (Radiant view), fitted on the first 70%
+const plog = (g) => { const x = gIndex.get(g.id); return x ? logit(Math.min(0.99, Math.max(0.01, x.p))) : 0; };
+const KB = (() => { let sxy = 0, sxx = 0; for (const x of PR_.slice(0, cutK)) { const l = plog(x.g); sxy += l * (x.ka - x.kb - (x.eA - x.eB)); sxx += l * l; } return sxx ? sxy / sxx : 0; })();
+const sdOf = (f) => Math.sqrt(PR_.slice(0, cutK).reduce((a, x) => a + f(x) ** 2, 0) / Math.max(1, cutK));
+const SD = { tot: sdOf((x) => x.eA + x.eB - x.ka - x.kb), team: sdOf((x) => x.eA - x.ka), mar: sdOf((x) => x.eA - x.eB + KB * plog(x.g) - (x.ka - x.kb)), dur: sdOf((x) => (x.eD - x.d) / 60) };
+const recentK = KG.filter((g) => g.t > now - 60 * DAY), med = (arr) => { const a = [...arr].sort((x, y) => x - y); return a.length ? a[Math.floor(a.length / 2)] : 0; };
+const LINE = { tot: Math.floor(med(recentK.map((g) => kOf(g, 0) + kOf(g, 1)))) + 0.5, dur: Math.floor(med(recentK.map((g) => g.dur / 60))) + 0.5 }; LINE.team = Math.floor(LINE.tot / 2) + 0.5;
+// one game's markets, Team A's view: expected kills each, total, margin and minutes, and our chance at each typical line
+function gameMarkets(eA, eB, eD, lA, nameA, nameB) {
+  const mar = eA - eB + KB * lA, hcLine = Math.floor(Math.abs(KB * lA)) + 0.5, favA = lA >= 0, P = (mu, line, sd) => 1 - Phi((line - mu) / sd);
+  const pTot = P(eA + eB, LINE.tot, SD.tot), pA = P(eA, LINE.team, SD.team), pB = P(eB, LINE.team, SD.team), pD = P(eD / 60, LINE.dur, SD.dur), pH = favA ? P(mar, hcLine, SD.mar) : 1 - P(mar, -hcLine, SD.mar);
+  const ou = (p, line, what) => ({ pick: `${p >= 0.5 ? "Over" : "Under"} ${line} ${what}`, over: p >= 0.5, line, p: r3(Math.max(p, 1 - p)) });
+  return { exp: { killsA: r1(eA), killsB: r1(eB), total: r1(eA + eB), margin: r1(mar), minutes: r1(eD / 60) },
+    totalKills: ou(pTot, LINE.tot, "total kills"), killsA: { ...ou(pA, LINE.team, `${nameA} kills`), team: "a" }, killsB: { ...ou(pB, LINE.team, `${nameB} kills`), team: "b" },
+    killHcap: { pick: pH >= 0.5 ? `${favA ? nameA : nameB} -${hcLine} kills` : `${favA ? nameB : nameA} +${hcLine} kills`, fav: favA ? "a" : "b", line: hcLine, takeFav: pH >= 0.5, p: r3(Math.max(pH, 1 - pH)) },
+    duration: ou(pD, LINE.dur, "minutes") };
+}
+// held-out test per market at the typical lines
+const KTEST = (() => { const out = {}; const add = (k, p, won) => { const o = (out[k] ||= { n: 0, hit: 0, b: 0, picks: 0, pickHit: 0 }); o.n++; if (won) o.hit++; o.b += (p - (won ? 1 : 0)) ** 2; if (p >= 0.55) { o.picks++; if (won) o.pickHit++; } };
+  for (const x of PR_.slice(cutK)) { const l = plog(x.g), M = gameMarkets(x.eA, x.eB, x.eD, l, "A", "B"), tot = x.ka + x.kb, mar = x.ka - x.kb, mins = x.d / 60;
+    add("totalKills", M.totalKills.p, M.totalKills.over === tot > LINE.tot); add("teamKills", M.killsA.p, M.killsA.over === x.ka > LINE.team); add("teamKills", M.killsB.p, M.killsB.over === x.kb > LINE.team);
+    const favMar = M.killHcap.fav === "a" ? mar : -mar; add("killHcap", M.killHcap.p, M.killHcap.takeFav === favMar > M.killHcap.line); add("duration", M.duration.p, M.duration.over === mins > LINE.dur); }
+  for (const o of Object.values(out)) { o.rate = r3(o.hit / o.n); o.brier = r3(o.b / o.n); o.pickRate = o.picks ? r3(o.pickHit / o.picks) : null; delete o.b; } return out; })();
+console.log(`kills/duration: pace ${PB.alpha}/${PB.k0}, lines total ${LINE.tot} team ${LINE.team} dur ${LINE.dur}, margin b ${KB.toFixed(2)}; held-out ${Object.entries(KTEST).map(([k, o]) => `${k} ${o.pickHit}/${o.picks} picks (${o.pickRate})`).join(", ")}`);
+const nextMarkets = (Aid, Bid, pg, nameA, nameB) => { const A = PACE.T.get(Aid), B = PACE.T.get(Bid); if (!A || !B) return null; const glob = PACE.glob, half = glob.k / 2, wA = A.n / (A.n + PB.k0), wB = B.n / (B.n + PB.k0);
+  const eA = half + wA * (A.kf - half) / 2 + wB * (B.ka - half) / 2, eB = half + wB * (B.kf - half) / 2 + wA * (A.ka - half) / 2, eD = glob.d + (wA * (A.d - glob.d) + wB * (B.d - glob.d)) / 2; return gameMarkets(eA, eB, eD, logit(Math.min(0.99, Math.max(0.01, pg))), nameA, nameB); };
+// PICK EXPLANATIONS: for every pick on a match page, the reasons with their numbers and where each number comes from.
+// Only facts our data supports; anything uncertain is labelled as such. Rebuilt every run (and so between games).
+const pctS = (x) => `${Math.round(x * 100)}%`;
+function usualFive(id) { const gs = G.filter((g) => g.team.includes(id)).slice(-15), cnt = {}; for (const g of gs) for (const l of g.lines[g.team.indexOf(id)]) cnt[l.acc] = (cnt[l.acc] || 0) + 1; return Object.entries(cnt).sort((a, b) => b[1] - a[1]).slice(0, 5).map(([a]) => +a); }
+function standIns(id) { const T = R.TR.get(id); if (!T?.lineup) return []; const usual = new Set(usualFive(id)); return T.lineup.filter((a) => !usual.has(a)).map((a) => pname(a) || `player ${a}`); }
+const bucketHit = (p) => { const b = accuracy.buckets.find((x) => Math.max(p, 1 - p) >= x.lo && Math.max(p, 1 - p) < x.hi); return b && b.n ? `When we have said ${Math.round(b.lo * 100)}–${Math.round(b.hi * 100)}% before, it happened ${pctS(b.real)} of the time (${b.n} past series, walk-forward back-test).` : null; };
+function explainMatch(up, A, B, pa, pb, mk) {
+  const an = up.a.name, bn = up.b.name, fav = up.pSeries >= 0.5 ? "a" : "b", F = fav === "a" ? an : bn, U = fav === "a" ? bn : an, FS = fav === "a" ? up.a : up.b, US = fav === "a" ? up.b : up.a, fp = fav === "a" ? pa : pb, upf = fav === "a" ? pb : pa;
+  const base = [];
+  if (FS.elo && US.elo) base.push(`Rating ${F} ${FS.elo} (#${FS.rank ?? "-"}) against ${U} ${US.elo} (#${US.rank ?? "-"}): ratings come from each of the five players' results in every pro game of the last 400 days (OpenDota).`);
+  if (FS.form || US.form) base.push(`Last five series: ${F} ${FS.form || "-"}, ${U} ${US.form || "-"} (W win, L loss, D draw).`);
+  for (const [t, T0] of [[an, A], [bn, B]]) { const si = T0 ? standIns(+T0.id) : []; if (si.length) base.push(`${t} fielded ${si.join(", ")} last game, not one of their usual five (last 15 games): ratings follow the players who played, so this is already in the chance, but a stand-in adds uncertainty.`); }
+  if (up.h2h.length) { const w = up.h2h.filter((x) => (fav === "a" ? x.score[0] > x.score[1] : x.score[1] > x.score[0])).length; base.push(`Head-to-head: ${F} won ${w} of the last ${up.h2h.length} meetings (last 400 days).`); }
+  const risks = [];
+  if (!up.known) risks.push("A team has fewer than 8 games in our data, so its rating is a starting guess.");
+  if (fp?.signature && fp.signature.effect > 0.05) risks.push(`${F} are ${fp.signature.with[0]}-${fp.signature.with[1] - fp.signature.with[0]} with ${hname(fp.signature.hero)} and ${fp.signature.without[0]}-${fp.signature.without[1] - fp.signature.without[0]} without it (last 200 days): a ban on it hurts them.`);
+  if (patchGames < 300) risks.push(`Patch ${latestPatch?.patch} is new (${patchGames} pro games so far): hero strengths are still settling.`);
+  if (Math.abs(up.pSeries - 0.5) < 0.1) risks.push("Close to a coin flip: under 60%, so we do not count it as a pick.");
+  const draftPts = [];
+  for (const [t, L] of [[an, up.likelyA], [bn, up.likelyB]]) if (L) draftPts.push(`${t}'s five most-played heroes read as "${L.plan}"${L.strengths.length ? `, strong in ${L.strengths.join(", ").toLowerCase()}` : ""}${L.weak.length ? `, weak in ${L.weak.join(", ").toLowerCase()}` : ""} (hero traits from pro games, OpenDota and Valve). A guide to style, not the real draft.`);
+  for (const [t, p0] of [[an, pa], [bn, pb]]) if (p0?.comfort?.length) { const blink = p0.comfort.filter((c) => TAG[c.h]?.blink != null).map((c) => `${hname(c.h)} (~${TAG[c.h].blink} min)`), bkb = p0.comfort.filter((c) => TAG[c.h]?.bkb != null).map((c) => `${hname(c.h)} (~${TAG[c.h].bkb} min)`);
+    if (blink.length || bkb.length) draftPts.push(`${t} item timings on their comfort heroes (median pro purchase, OpenDota): ${blink.length ? `Blink ${blink.slice(0, 3).join(", ")}` : ""}${blink.length && bkb.length ? "; " : ""}${bkb.length ? `BKB ${bkb.slice(0, 3).join(", ")}` : ""}.`); }
+  const objPts = []; for (const [t, p0] of [[an, pa], [bn, pb]]) { const o = p0?.obj; if (o && o.torm[1]) objPts.push(`${t} in their last ${p0.games} games: first tower ${pctS(o.tower[0] / Math.max(1, o.tower[1]))}, first Tormentor ${pctS(o.torm[0] / Math.max(1, o.torm[1]))}, first Roshan ${pctS(o.rosh[0] / Math.max(1, o.rosh[1]))}, first blood ${pctS(o.fb[0] / Math.max(1, o.fb[1]))}. Across pro games the team taking the first Roshan wins about three in four.`); }
+  const E = {}, line = (s0, p, label) => ({ title: label, pick: s0.pick, p: s0.p, fair: (1 / s0.p).toFixed(2) });
+  E.ml = { title: "Series winner", pick: `${F} to win the series`, p: r3(Math.max(up.pSeries, 1 - up.pSeries)), short: `${F} rate higher on the five players' results${FS.form ? ` and come in ${FS.form}` : ""}.`, points: [...base, ...draftPts, ...objPts, bucketHit(up.pSeries)].filter(Boolean), risks };
+  const sc = up.scores, games = (k) => k.split("-").reduce((x, y) => +x + +y, 0);
+  if (up.bo === 3 || up.bo === 5) { const sweep = fav === "a" ? (up.bo === 3 ? sc["2-0"] : sc["3-0"] + sc["3-1"]) : (up.bo === 3 ? sc["0-2"] : sc["0-3"] + sc["1-3"]);
+    E.hcap = { title: "Map handicap", pick: sweep >= 0.5 ? `${F} -1.5 maps` : `${U} +1.5 maps`, p: r3(Math.max(sweep, 1 - sweep)), short: `${F} win ${pctS(Math.max(up.pGame, 1 - up.pGame))} of single games in our model; ${up.bo === 3 ? "a 2-0" : "winning by 2+"} needs it ${up.bo === 3 ? "twice in a row" : "often"}.`, points: [`Single-game chance ${F} ${pctS(Math.max(up.pGame, 1 - up.pGame))} on a neutral side; the exact-score split comes from the best-of math.`, `Most likely score: ${Object.entries(sc).sort((a, b) => b[1] - a[1])[0][0]} (${pctS(Object.entries(sc).sort((a, b) => b[1] - a[1])[0][1])}).`, ...base.slice(0, 2)], risks: [...risks, "Map handicaps lose to a single upset game."] };
+    const tl = up.bo === 3 ? 2.5 : 4.5, over = Object.entries(sc).reduce((x, [k, v]) => x + (games(k) > tl ? v : 0), 0);
+    E.total = { title: "Total maps", pick: `${over >= 0.5 ? "Over" : "Under"} ${tl} maps`, p: r3(Math.max(over, 1 - over)), short: over >= 0.5 ? "The teams are close enough that a deciding map is likely." : `${F} are favoured enough that the series often ends early.`, points: [`About ${up.expMaps} maps expected.`, `Single-game chance ${pctS(Math.max(up.pGame, 1 - up.pGame))} for ${F}: the closer to 50%, the more maps.`], risks: ["Day-to-day form swings make sweeps more common than the plain math says."] }; }
+  if (mk) { const pA = A && PACE.T.get(+A.id), pB = B && PACE.T.get(+B.id), paceTxt = `${an} average ${r1(pA?.kf ?? 0)} kills for and ${r1(pA?.ka ?? 0)} against, games about ${r1((pA?.d ?? 0) / 60)} min; ${bn} ${r1(pB?.kf ?? 0)} for, ${r1(pB?.ka ?? 0)} against, about ${r1((pB?.d ?? 0) / 60)} min (recent games weighted more, OpenDota).`;
+    const kt = (k) => KTEST[k] && KTEST[k].picks ? `Tested on ${KTEST[k].n.toLocaleString("en-US")} newer games: ${KTEST[k].pickHit} of ${KTEST[k].picks} picks at 55%+ were right (${pctS(KTEST[k].pickRate)}).` : null;
+    const tempo = [up.likelyA, up.likelyB].map((L, i) => (L ? `${i ? bn : an} lean ${L.z.tempo > 0.3 ? "early" : L.z.tempo < -0.3 ? "late" : "neither early nor late"} on their comfort heroes (power curve from pro results)` : null)).filter(Boolean).join("; ");
+    E.totalKills = { title: "Total kills", pick: mk.totalKills.pick, p: mk.totalKills.p, short: `We expect about ${mk.exp.total} kills against a typical line of ${LINE.tot}.`, points: [paceTxt, `Projection: ${an} ${mk.exp.killsA}, ${bn} ${mk.exp.killsB} kills.`, tempo ? `${tempo}.` : null, `Typical line ${LINE.tot}: the median total in pro games of the last 60 days.`, kt("totalKills")].filter(Boolean), risks: ["Kill totals swing a lot game to game (spread about ±" + Math.round(SD.tot) + " kills)."] };
+    E.killsA = { title: `${an} kills`, pick: mk.killsA.pick, p: mk.killsA.p, short: `${an} projected ${mk.exp.killsA} kills against a typical team line of ${LINE.team}.`, points: [paceTxt, kt("teamKills")].filter(Boolean), risks: ["One-sided games inflate the winner's kills."] };
+    E.killsB = { title: `${bn} kills`, pick: mk.killsB.pick, p: mk.killsB.p, short: `${bn} projected ${mk.exp.killsB} kills against a typical team line of ${LINE.team}.`, points: [paceTxt, kt("teamKills")].filter(Boolean), risks: ["One-sided games inflate the winner's kills."] };
+    E.killHcap = { title: "Kill handicap", pick: mk.killHcap.pick, p: mk.killHcap.p, short: `Projected kill margin ${mk.exp.margin > 0 ? an : bn} +${Math.abs(mk.exp.margin)}; line ${mk.killHcap.line}.`, points: [`The line is set from the rating gap at average pace (each logit point of pre-game edge is worth about ${Math.abs(KB).toFixed(1)} kills in pro games).`, paceTxt, kt("killHcap")].filter(Boolean), risks: ["Comebacks and throw games flip kill margins."] };
+    E.duration = { title: "Game duration", pick: mk.duration.pick, p: mk.duration.p, short: `We expect about ${mk.exp.minutes} min against a typical line of ${LINE.dur}.`, points: [paceTxt, tempo ? `${tempo}.` : null, `Typical line ${LINE.dur} min: the median pro game of the last 60 days.`, kt("duration")].filter(Boolean), risks: ["Lopsided games end early; close ones run long."] }; }
+  return E;
+}
+// LIVE SERIES: games already played in a scheduled series (from our match file and OpenDota's latest results), the game
+// being played now (OpenDota live), the score, each game's pre-game chance and result, and the series chance from the score.
+const LIVE = readJSON(path.join(ROOT, "live", "dota2.json"), { live: [], recent: [] });
+const remainP = (p, a, b, bo) => { if (bo === 2) { const left = 2 - a - b; if (left <= 0) return a > b ? 1 : a === b ? 0.5 : 0; if (left === 1) return a === 1 ? p + (1 - p) * 0.5 : p * 0.5; return p * p + p * (1 - p); }
+  const need = Math.ceil(bo / 2); if (a >= need) return 1; if (b >= need) return 0; return p * remainP(p, a + 1, b, bo) + (1 - p) * remainP(p, a, b + 1, bo); };
+function seriesState(Aid, Bid, start, bo, pg) {
+  const pair = (r, d) => (r === Aid && d === Bid) || (r === Bid && d === Aid), seen = new Set(), games = [];
+  for (const g of G) if (pair(g.r, g.d) && g.t >= start - 7200 && g.t <= start + 36000) { seen.add(g.id); games.push({ id: g.id, t: g.t, r: g.r, rw: g.rw, dur: g.dur, pick: g.pick, kr: kOf(g, 0), kd: kOf(g, 1), src: "match" }); }
+  for (const m of LIVE.recent || []) if (!seen.has(m.id) && pair(m.r, m.d) && m.start >= start - 7200 && m.start <= start + 36000) { seen.add(m.id); games.push({ id: m.id, t: m.start, r: m.r, rw: m.rw, dur: m.dur, pick: null, kr: m.rk ?? null, kd: m.dk ?? null, src: "recent" }); }
+  games.sort((a, b) => a.t - b.t);
+  const sideL = logit(R.side), need = bo === 2 ? 2 : Math.ceil(bo / 2), out = []; let a = 0, b = 0;
+  for (const g of games) { const aRad = g.r === Aid, gl = gIndex.get(g.id), pre = gl ? (aRad ? gl.p : 1 - gl.p) : cal(lg(logit(pg) + (aRad ? sideL : -sideL)));
+    const draft = g.pick && g.pick[0].length === 5 ? cal(lg(logit(pre) + (aRad ? 1 : -1) * P.dw * DRf.logitOf(g.pick[0], g.pick[1]))) : null, aWon = (g.rw === 1) === aRad;
+    if (aWon) a++; else b++; out.push({ n: out.length + 1, id: g.id, status: "done", aSide: aRad ? "Radiant" : "Dire", pA: r3(pre), pDraftA: draft != null ? r3(draft) : null, aWon, min: Math.round((g.dur || 0) / 60), hit: (pre >= 0.5) === aWon, killsA: aRad ? g.kr : g.kd, killsB: aRad ? g.kd : g.kr, picksA: g.pick ? g.pick[aRad ? 0 : 1] : null, picksB: g.pick ? g.pick[aRad ? 1 : 0] : null }); }
+  const done = bo === 2 ? a + b >= 2 : a >= need || b >= need;
+  const lv = (LIVE.live || []).find((g) => pair(g.r, g.d) && !seen.has(g.id));
+  if (lv && !done) { const aRad = lv.r === Aid, base = cal(lg(logit(pg) + (aRad ? sideL : -sideL))), drafted = lv.hr.length === 5 && lv.hd.length === 5;
+    const draft = drafted ? cal(lg(logit(base) + (aRad ? 1 : -1) * P.dw * DRf.logitOf(lv.hr, lv.hd))) : null;
+    out.push({ n: out.length + 1, id: lv.id, status: "live", aSide: aRad ? "Radiant" : "Dire", pA: r3(base), pDraftA: draft != null ? r3(draft) : null, clock: Math.round(lv.t / 60), killsA: aRad ? lv.rk : lv.dk, killsB: aRad ? lv.dk : lv.rk, leadA: aRad ? lv.lead : -lv.lead, picksA: aRad ? lv.hr : lv.hd, picksB: aRad ? lv.hd : lv.hr }); }
+  if (!done) { const maxG = bo === 2 ? 2 : bo; for (let n = out.length + 1; n <= Math.min(maxG, out.filter((x) => x.status === "done").length + (lv ? 2 : 1) + (bo >= 3 ? 1 : 0)) && n <= maxG; n++) out.push({ n, status: "next", pA: r3(pg) }); }
+  return { score: [a, b], done, games: out, pSeriesNow: r3(done ? (a > b ? 1 : a === b ? 0.5 : 0) : remainP(pg, a, b, bo)), live: !!lv };
+}
+const LN_F = path.join(D, "lines.json"), LN = readJSON(LN_F, { matches: {} });
 const upcoming = [];
 for (const m of UP.matches) {
-  const start = Date.parse(m.date) / 1000; if (start < now - 4 * 3600) continue; // started more than 4 hours ago: the result arrives through OpenDota
+  const start = Date.parse(m.date) / 1000; if (start < now - 10 * 3600) continue; // started more than 4 hours ago: the result arrives through OpenDota
   const A = findTeam(m.a), B = findTeam(m.b), ta = A && R.TR.get(+A.id), tb = B && R.TR.get(+B.id);
   const ra = A ? lineupRating(+A.id) ?? P.r0 : P.r0, rb = B ? lineupRating(+B.id) ?? P.r0 : P.r0, pg = cal(lg(ra - rb)), sp = seriesP(pg, m.bo);
   const id = sid(`${m.date.slice(0, 16)}_${m.a.name}_${m.b.name}`), known = (ta?.n || 0) >= WARM && (tb?.n || 0) >= WARM;
@@ -435,6 +551,26 @@ for (const m of UP.matches) {
   upcoming.push(up);
   writeJSON(path.join(OUT, "matches", `${id}.json`), up);
   // pre-match record: keep overwriting until the match starts, then it stays frozen
+  up.markets = A && B ? nextMarkets(+A.id, +B.id, pg, m.a.name, m.b.name) : null; up.explain = explainMatch(up, A, B, pa, pb, up.markets);
+  if (A && B) { up.series = seriesState(+A.id, +B.id, start, m.bo, pg); if (up.series.done && start < now - 3600) { upcoming.pop(); } else writeJSON(path.join(OUT, "matches", `${id}.json`), up); }
+  // ESTIMATED MAIN LINES (no sportsbook feed for Dota 2 is open to us): series winner, map handicap and total maps saved
+  // until the series starts, and a game-winner pick for each game saved until that game starts. Graded from the results.
+  if (A && B) { const L = (LN.matches[id] ||= { id, date: m.date, tournament: m.tournament, a: m.a.name, b: m.b.name, bo: m.bo, picks: {}, games: {} }); const st0 = up.series || { score: [0, 0], games: [] };
+    if (!up.started && !st0.games.some((g) => g.status !== "next")) { const fav = up.pSeries >= 0.5 ? "a" : "b", fn = fav === "a" ? m.a.name : m.b.name, pf = (x) => (fav === "a" ? x : 1 - x), sc = up.scores, games = (k) => k.split("-").reduce((x, y) => +x + +y, 0);
+      L.picks.ml = { pick: `${fn} to win the series`, side: fav, p: r3(Math.min(0.9, pf(up.pSeries))) };
+      if (m.bo === 3) L.picks.hcap = { pick: `${fn} -1.5 maps`, side: fav, line: -1.5, p: r3(fav === "a" ? sc["2-0"] : sc["0-2"]) };
+      if (m.bo === 5) L.picks.hcap = { pick: `${fn} -1.5 maps`, side: fav, line: -1.5, p: r3(fav === "a" ? sc["3-0"] + sc["3-1"] : sc["0-3"] + sc["1-3"]) };
+      if (m.bo === 2) L.picks.hcap = { pick: `${fn} +0.5 maps (no loss)`, side: fav, line: 0.5, p: r3(fav === "a" ? sc["2-0"] + sc["1-1"] : sc["0-2"] + sc["1-1"]) };
+      const tl = m.bo === 3 ? 2.5 : m.bo === 5 ? 4.5 : null; if (tl) { const over = Object.entries(sc).reduce((x, [k, v]) => x + (games(k) > tl ? v : 0), 0); L.picks.total = { pick: `${over >= 0.5 ? "Over" : "Under"} ${tl} maps`, over: over >= 0.5, line: tl, p: r3(Math.max(over, 1 - over)) }; }
+      L.savedAt = new Date().toISOString(); }
+    for (const g of st0.games) if (g.status === "next" && !L.games[g.n]) { /* the next game to start gets a saved pick; later games wait */ if (g.n === (st0.games.filter((x) => x.status !== "next").length + 1)) L.games[g.n] = { pick: `${g.pA >= 0.5 ? m.a.name : m.b.name} to win game ${g.n}`, side: g.pA >= 0.5 ? "a" : "b", p: r3(Math.max(g.pA, 1 - g.pA)), savedAt: new Date().toISOString(), markets: up.markets ? { totalKills: up.markets.totalKills, killsA: up.markets.killsA, killsB: up.markets.killsB, killHcap: up.markets.killHcap, duration: up.markets.duration } : null }; }
+      else if (g.status === "next" && L.games[g.n] && !L.games[g.n].result && g.n === (st0.games.filter((x) => x.status !== "next").length + 1)) Object.assign(L.games[g.n], { pick: `${g.pA >= 0.5 ? m.a.name : m.b.name} to win game ${g.n}`, side: g.pA >= 0.5 ? "a" : "b", p: r3(Math.max(g.pA, 1 - g.pA)), savedAt: new Date().toISOString() });
+    for (const g of st0.games) if (g.status === "done" && L.games[g.n] && !L.games[g.n].result) L.games[g.n].result = { won: (L.games[g.n].side === "a") === g.aWon };
+    for (const g of st0.games) { const M = L.games[g.n]?.markets; if (g.status !== "done" || !M || g.killsA == null || M.graded) continue; const tot = g.killsA + g.killsB, mar = g.killsA - g.killsB, gr = (x, won) => { if (x) x.result = { won }; };
+      gr(M.totalKills, M.totalKills && M.totalKills.over === tot > M.totalKills.line); gr(M.killsA, M.killsA && M.killsA.over === g.killsA > M.killsA.line); gr(M.killsB, M.killsB && M.killsB.over === g.killsB > M.killsB.line);
+      if (M.killHcap) { const fm = M.killHcap.fav === "a" ? mar : -mar; gr(M.killHcap, M.killHcap.takeFav === fm > M.killHcap.line); } if (M.duration && g.min) gr(M.duration, M.duration.over === g.min > M.duration.line); M.graded = true; }
+    L.score = st0.score; L.live = !!up.series?.live; L.started = up.started || st0.games.some((g) => g.status !== "next");
+    if (up.series?.done) L.final = st0.score; }
   if (!up.started && A && B) PRE.entries[id] = { id, date: m.date, tournament: m.tournament, stage: m.stage, bo: m.bo, a: m.a.name, b: m.b.name, aId: +A.id, bId: +B.id, p: up.pSeries, known, frozenAt: new Date().toISOString(), result: PRE.entries[id]?.result || null };
 }
 upcoming.sort((a, b) => Date.parse(a.date) - Date.parse(b.date));
@@ -444,9 +580,23 @@ for (const e of Object.values(PRE.entries)) { if (e.result) continue; const t0 =
   if (s) { const sc = s.a === e.aId ? s.score : [s.score[1], s.score[0]]; e.result = { score: sc, series: s.key, draw: sc[0] === sc[1], right: sc[0] === sc[1] ? null : (e.p >= 0.5) === (sc[0] > sc[1]) }; }
   else if (t0 < now - 3 * DAY) e.result = { missing: true }; }
 writeJSON(PRE_F, PRE);
+// final scores also come from the saved-before-start ledger (series that dropped off the schedule)
+for (const L of Object.values(LN.matches)) { const e = PRE.entries[L.id]; if (!L.final && e?.result?.score) L.final = e.result.score;
+  if (L.final) { const [x, y] = L.final, favWon = (sd) => (sd === "a" ? x > y : y > x), tot = x + y, P0 = L.picks;
+    if (P0.ml && !P0.ml.result) P0.ml.result = { won: x === y ? null : favWon(P0.ml.side) };
+    if (P0.hcap && !P0.hcap.result) { const m0 = P0.hcap.side === "a" ? x - y : y - x; P0.hcap.result = { won: P0.hcap.line < 0 ? m0 >= 2 : m0 >= 0 }; }
+    if (P0.total && !P0.total.result) P0.total.result = { won: P0.total.over ? tot > P0.total.line : tot < P0.total.line }; } }
+for (const [k, L] of Object.entries(LN.matches)) if (Date.parse(L.date) < Date.now() - 40 * 86400000) delete LN.matches[k];
+writeJSON(LN_F, LN);
+{ const rows = Object.values(LN.matches).filter((L) => Object.keys(L.picks).length || Object.keys(L.games).length), rec = {};
+  for (const L of rows) { for (const [k, x] of [...Object.entries(L.picks), ...Object.entries(L.games).map(([n, x]) => ["game", x]), ...Object.values(L.games).flatMap((x) => Object.entries(x.markets || {}).map(([mk, y]) => [mk === "killsA" || mk === "killsB" ? "teamKills" : mk, y]))]) { if (!x) continue; if (!x.result || x.result.won == null) continue; const r = (rec[k] ||= { n: 0, hit: 0, strong: [0, 0] }); r.n++; if (x.result.won) r.hit++; if (x.p >= 0.6) { r.strong[1]++; if (x.result.won) r.strong[0]++; } } }
+  const pack = (L) => ({ id: L.id, date: L.date, tournament: L.tournament, a: L.a, b: L.b, bo: L.bo, score: L.score || null, final: L.final || null, live: !!L.live, picks: L.picks, games: L.games });
+  writeJSON(path.join(OUT, "lines.json"), { note: "Estimated main lines: there is no sportsbook feed for Dota 2 that its terms let us read, so these are standard main lines (series winner, -1.5 maps, total maps 2.5 / 4.5, each game's winner) priced by our model. Saved before the series or game starts and never changed after.",
+    record: rec, upcoming: rows.filter((L) => !L.started && !L.final).sort((a, b) => a.date.localeCompare(b.date)).map(pack), ongoing: rows.filter((L) => L.started && !L.final).sort((a, b) => a.date.localeCompare(b.date)).map(pack), history: rows.filter((L) => L.final).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 150).map(pack) }); }
 const preDone = Object.values(PRE.entries).filter((e) => e.result && !e.result.missing && !e.result.draw && e.known);
 accuracy.prematch = { n: preDone.length, hit: preDone.filter((e) => e.result.right).length, brier: preDone.length ? r3(preDone.reduce((a, e) => a + (e.p - (e.result.score[0] > e.result.score[1] ? 1 : 0)) ** 2, 0) / preDone.length) : null,
   list: Object.values(PRE.entries).filter((e) => e.result && !e.result.missing).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) };
+accuracy.kills = { test: KTEST, lines: LINE, pace: PB, sd: Object.fromEntries(Object.entries(SD).map(([k, v]) => [k, r1(v)])) };
 writeJSON(path.join(OUT, "accuracy.json"), accuracy);
 writeJSON(path.join(OUT, "upcoming.json"), upcoming.map(({ a, b, scenarios, h2h, ...m }) => ({ ...m, a: { name: a.name, short: a.short, id: a.id, logo: a.logo, elo: a.elo, rank: a.rank, form: a.form }, b: { name: b.name, short: b.short, id: b.id, logo: b.logo, elo: b.elo, rank: b.rank, form: b.form } })));
 

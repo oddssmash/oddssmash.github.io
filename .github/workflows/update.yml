@@ -87,6 +87,7 @@ jobs:
         continue-on-error: true
         run: |
           node scripts/dota2/fetch.mjs
+          node scripts/dota2/live.mjs
           node scripts/dota2/model.mjs
           node scripts/dota2/news.mjs
 
