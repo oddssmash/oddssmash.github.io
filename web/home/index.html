@@ -57,6 +57,7 @@
       <a class="lg" href="nba/"><b>NBA</b><span class="sub">Every game, player props, live predictions, Scout, simulations and the accuracy record.</span><span class="nx" id="nx-nba"></span><span class="go">Open NBA ›</span></a>
       <a class="lg" href="fiba/"><b>FIBA</b><span class="sub">World Cup qualifiers, continental cups and FIBA club competitions: projections, players, zones and results.</span><span class="nx" id="nx-fiba"></span><span class="go">Open FIBA ›</span></a>
       <a class="lg" href="mlbb/"><b>MLBB</b><span class="sub">MPL and international MLBB esports: series predictions, drafts, meta heroes, combos, counters and scenarios.</span><span class="nx" id="nx-mlbb"></span><span class="go">Open MLBB ›</span></a>
+      <a class="lg" href="dota2/"><b>DOTA 2</b><span class="sub">Pro Dota 2: series predictions, a Captains Mode draft lab with draft reads, meta heroes, combos, counters and scenarios.</span><span class="nx" id="nx-dota2"></span><span class="go">Open Dota 2 ›</span></a>
     </div>
     <p class="foot">Statistical projections for analysis and entertainment. Not betting advice. Sportsbook odds and lines never feed the projections. Times are Philippine time (Asia/Manila).</p>
   </main>
@@ -66,6 +67,7 @@
     const when = (d) => new Date(d).toLocaleString("en-US", { timeZone: "Asia/Manila", weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
     fetch("nba/data/upcoming.json").then((r) => r.json()).then((u) => { const f = u.filter((g) => Date.parse(g.date) > Date.now()).sort((a, b) => a.date.localeCompare(b.date)); if (f.length) document.getElementById("nx-nba").textContent = `Next tip-off: ${when(f[0].date)} PH · ${f.length} upcoming games`; }).catch(() => {});
     fetch("mlbb/data/meta.json").then((r) => r.json()).then((m) => { document.getElementById("nx-mlbb").textContent = m.upcoming ? `${m.upcoming} upcoming matches` : `${m.series} series graded · next: MCT SEA and M8`; }).catch(() => {});
+    fetch("dota2/data/meta.json").then((r) => r.json()).then((m) => { document.getElementById("nx-dota2").textContent = `${m.upcoming} upcoming matches · ${m.graded.toLocaleString()} series graded`; }).catch(() => {});
     fetch("fiba/data/upcoming.json").then((r) => r.json()).then((u) => { const f = (u.games || u).filter((g) => Date.parse(g.date) > Date.now()); if (f.length) document.getElementById("nx-fiba").textContent = `Next tip-off: ${when(f[0].date)} PH · ${f.length} upcoming games`; }).catch(() => {});
   </script>
 </body>

@@ -11,5 +11,6 @@ progress-shots/
 site/
 public-fiba/data/
 public-mlbb/data/
+public-dota2/data/
 live/
 data/mlbb/draft-order.json

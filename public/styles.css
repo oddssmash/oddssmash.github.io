@@ -1199,3 +1199,4 @@ a.card .ml-cs { margin-top: 8px; }
 .pb-ln { position: absolute; left: 0; right: 0; height: 0; border-top: 2px dashed var(--ink, #ccc); opacity: .7; z-index: 1; margin-bottom: 16px; }
 .pb-b { flex: 1; position: relative; border-radius: 4px 4px 0 0; min-width: 0; } .pb-b.o { background: #2e9e5b; } .pb-b.u { background: #c94b4b; } .pb-b.p { background: #8a8a8a; }
 .pb-b b { position: absolute; top: -16px; left: 0; right: 0; text-align: center; font-size: 10px; } .pb-b i { position: absolute; bottom: -16px; left: 0; right: 0; text-align: center; font-size: 8px; font-style: normal; opacity: .7; overflow: hidden; }
+@media (max-width: 440px) { .lg-switch a { padding: 0 6px; font-size: 12px; min-height: 32px; } .lg-switch { gap: 0; } .top .brand img.brand-full { height: 34px; width: auto; } .top { gap: 6px; } }

@@ -80,6 +80,16 @@ jobs:
           node scripts/mlbb/model.mjs
           node scripts/mlbb/images.mjs
 
+      # Dota 2 section: pro matches with drafts and player lines from OpenDota (open API and SQL explorer), the schedule
+      # from Liquipedia (one page render), Valve patch notes, then the walk-forward model and headlines (Google News, Reddit,
+      # YouTube, Steam news). Like MLBB and FIBA, a hiccup here must not stop the rest of the site.
+      - name: Dota 2 fetch and model
+        continue-on-error: true
+        run: |
+          node scripts/dota2/fetch.mjs
+          node scripts/dota2/model.mjs
+          node scripts/dota2/news.mjs
+
       # One site: homepage at the root, NBA under /nba/, FIBA under /fiba/. The version tag makes phones
       # load the new code right after a deploy.
       - name: Assemble the site
