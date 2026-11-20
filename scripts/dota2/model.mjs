@@ -53,6 +53,63 @@ function z(k, t) { const x = t?.[k]; return x == null ? 0 : Math.max(-3, Math.mi
 const HVEC = {}; for (const h of Object.values(HEROES)) { const t = TRAITS[h.id] || {}, r = Object.fromEntries(["Carry", "Disabler", "Initiator", "Nuker", "Pusher", "Escape", "Durable", "Support"].map((x) => [x, h.roles.includes(x) ? 1 : 0])); HVEC[h.id] = FACTORS.map(([, , f]) => (f ? Math.round(f(t, r) * 1000) / 1000 : 0)); }
 const NF = FACTORS.length;
 const draftVec = (side, tempoOf) => { const v = new Array(NF).fill(0); for (const h of side) { const x = HVEC[h]; if (x) for (let i = 0; i < NF - 1; i++) v[i] += x[i]; v[NF - 1] += tempoOf ? tempoOf(h) : 0; } return v; };
+// CHECKLIST TAGS (the user's Dota 2 factor checklist, sections 1 and 1B): what each hero can do, read from Valve's official
+// hero data (role levels, base stats, each ability's text, damage type, whether it pierces spell immunity) and item timings
+// from pro purchase logs. Used for protection coverage, red flags, BKB-piercing control and item timing in every draft.
+const VALVE = readJSON(path.join(D, "herodata.json"), { heroes: {} }).heroes, ITEMT = readJSON(path.join(D, "itemtimings.json"), { heroes: {} }).heroes;
+const RX = { hard: /\bstun|\bhex|\bsleep|taunt|\bfear|cyclone|petrif|suppress|lifts? |knock(s|ed)? (back|up|into)|\bpull|vortex|chronosphere|black hole|\bduel\b|\bdoom\b|imprison|frozen|freezes|stasis/i, soft: /\bslow|\broot|silence|disarm|ensnare|leash|\bbreak\b|blind/i,
+  save: /invulnerab|banish|untargetable|cannot die|prevent\w* .*death|relocat|disruption|swap|astral|false promise|shallow grave|cold embrace|guardian angel|purif/i, dispel: /dispel|purge|removes? (most )?(negative|debuffs)/i, heal: /\bheal|restor\w* .*health|regenerat/i,
+  antiheal: /reduc\w* .*(heal|regenerat|restoration)|healing reduction/i, units: /illusion|summon|spawn|clone|wolves|spiderling|golem|eidolon|familiar|treant|zombie|serpent ward|plague ward|skeleton|undying|minion/i,
+  detect: /true sight|reveal\w* .*invisib|detect\w* .*invisib/i, invis: /invisib/i, aoe: /nearby|\barea\b|radius|around|all enemies|\bwave\b|in a line|\bcone\b|circle/i, manaburn: /burn\w* .*mana|mana break|drain\w* .*mana|mana void/i };
+const TAG = {};
+for (const h of Object.values(HEROES)) { const v = VALVE[h.id] || { ab: [], roles: [] }, R0 = v.roles || [], t = { carry: (R0[0] || 0) >= 2, support: (R0[1] || 0) >= 2, escape: (R0[6] || 0) >= 2, durable: (R0[5] || 0) >= 2 || ((v.armor || 0) >= 5 && (v.hp || 0) >= 700), initiator: (R0[8] || 0) >= 2, pusher: (R0[7] || 0) >= 2, ranged: (v.range || 150) >= 400, hard: 0, soft: 0, bkbcc: 0, save: 0, dispel: 0, heal: 0, antiheal: 0, units: 0, detect: 0, invis: 0, aoe: 0, magic: 0, phys: 0, manaburn: 0, channelUlt: 0 };
+  for (const a of v.ab || []) { const d = a.d || "", enemy = a.team === 2 || a.team === 3 || a.team === 0, ally = a.team === 1 || a.team === 3;
+    const isHard = enemy && RX.hard.test(d), isSoft = enemy && !isHard && RX.soft.test(d);
+    if (isHard) t.hard++; if (isSoft) t.soft++; if ((isHard || isSoft) && a.imm === 3) t.bkbcc++;
+    if (RX.save.test(d) && (ally || /ally|allied|friendly/i.test(d))) t.save++; if (RX.dispel.test(d) && (ally || /ally|allied|friendly/i.test(d))) t.dispel++;
+    if (RX.heal.test(d) && (ally || /ally|allied|friendly/i.test(d)) && !RX.antiheal.test(d)) t.heal++; if (RX.antiheal.test(d)) t.antiheal++;
+    if (RX.units.test(d)) t.units++; if (RX.detect.test(d)) t.detect++; else if (RX.invis.test(d) && !/enem/i.test(d.split("invisib")[0].slice(-30))) t.invis++;
+    if (a.dmg && enemy && RX.aoe.test(d)) t.aoe++; if (a.dmg === 2) t.magic++; if (a.dmg === 1) t.phys++; if (RX.manaburn.test(d)) t.manaburn++; if (a.ult && a.ch) t.channelUlt++; }
+  const it = ITEMT[h.id] || {}, games = TRAITS[h.id]?.n || 0, share = (k) => (games ? Math.min(1, (it[k]?.n || 0) / games) : 0);
+  t.blink = share("blink") >= 0.3 ? it.blink.min : null; t.bkb = share("black_king_bar") >= 0.4 ? it.black_king_bar.min : null; t.sb = share("invis_sword") + share("silver_edge") >= 0.3 ? (it.invis_sword?.min ?? it.silver_edge?.min) : null;
+  t.mana = (VALVE[h.id]?.attr === 2) || (t.magic >= 3);
+  TAG[h.id] = t; }
+// hero lists from the user's factor checklist (1B.4): these heroes always count for that tool, whatever the keyword reading says
+const LIST = { save: ["Oracle", "Dazzle", "Abaddon", "Io", "Winter Wyvern", "Shadow Demon", "Omniknight", "Vengeful Spirit", "Earth Spirit", "Chen"], dispel: ["Oracle", "Abaddon", "Legion Commander", "Omniknight"],
+  heal: ["Witch Doctor", "Dazzle", "Warlock", "Treant Protector", "Chen", "Omniknight", "Necrophos", "Io", "Oracle"], peel: ["Lion", "Shadow Shaman", "Treant Protector", "Jakiro", "Disruptor"], zone: ["Disruptor", "Mars", "Dark Seer", "Faceless Void"],
+  escape: ["Anti-Mage", "Puck", "Weaver", "Slark", "Queen of Pain"], antiheal: ["Ancient Apparition", "Axe", "Doom", "Pugna", "Spirit Breaker"] };
+const byName = Object.fromEntries(Object.values(HEROES).map((h) => [h.name, h.id]));
+for (const [k, names] of Object.entries(LIST)) for (const n of names) { const t = TAG[byName[n]]; if (!t) continue; if (k === "escape") t.escape = true; else if (k === "peel") t.hard = Math.max(t.hard, 2); else if (k === "zone") t.zone = 1; else t[k] = Math.max(t[k] || 0, 1); }
+const CATS = [["save", "Saves"], ["dispel", "Dispels for allies"], ["heal", "Healing"], ["peel", "Peel (disables)"], ["escape", "Escapes"]];
+// one side against the other: protection coverage (0-3 per category), red flags and counts
+function checklist(side, enemy) {
+  const T = side.map((h) => TAG[h] || {}), E = enemy.map((h) => TAG[h] || {}), sum = (A, k) => A.reduce((a, t) => a + (typeof t[k] === "boolean" ? (t[k] ? 1 : 0) : t[k] ? (typeof t[k] === "number" && k !== "blink" && k !== "bkb" && k !== "sb" ? t[k] : 1) : 0), 0);
+  const cov = { save: Math.min(3, sum(T, "save")), dispel: Math.min(3, sum(T, "dispel")), heal: Math.min(3, sum(T, "heal")), peel: Math.min(3, Math.floor(T.filter((t) => t.support).reduce((a, t) => a + t.hard, 0) / 1.5)), escape: Math.min(3, sum(T, "escape")) };
+  const hard = sum(T, "hard"), enemyHard = sum(E, "hard"), enemyCarries = sum(E, "carry"), enemyBkb = E.filter((t) => t.bkb != null).length;
+  const carryIdx = T.findIndex((t) => t.carry), flags = [];
+  const F = (on, text) => { if (on) flags.push(text); };
+  F(carryIdx >= 0 && !T[carryIdx].escape && cov.save === 0, "Carry has no escape and no save on the team");
+  F(cov.dispel === 0 && enemyHard + sum(E, "soft") >= 6, "No dispel against a heavy disable lineup");
+  F(sum(T, "bkbcc") === 0 && enemyBkb >= 2, "No control that goes through BKB against BKB carries");
+  F(sum(T, "aoe") <= 1 && sum(E, "units") >= 2, "Little area damage against illusions or summons");
+  F(sum(T, "aoe") <= 1 && sum(E, "pusher") >= 2, "Little wave clear against a push lineup");
+  F(hard <= 1, hard === 0 ? "No stun or hard disable at all" : "Only one hard disable");
+  F(sum(T, "durable") === 0, "No frontline: everyone is squishy");
+  F(sum(T, "initiator") === 0, "No initiator");
+  F(sum(T, "detect") === 0 && sum(E, "invis") >= 1, "No detection against invisible heroes");
+  F(sum(T, "heal") === 0 && sum(E, "heal") >= 2, "No healing against a sustain lineup");
+  F(sum(T, "antiheal") === 0 && sum(E, "heal") >= 3, "No anti-heal against a heavy healing lineup");
+  F(sum(T, "carry") >= 3, "Greedy: three or more carries");
+  F(sum(T, "channelUlt") >= 1 && enemyHard >= 5, "Relies on a channelled ultimate against lots of stuns");
+  F(T.filter((t) => t.mana).length >= 3 && sum(E, "manaburn") >= 1, "Mana-hungry heroes against mana burn");
+  F(T.every((t) => t.magic >= t.phys) || T.every((t) => t.phys > t.magic), "One damage type across the team");
+  F(sum(T, "escape") === 0 && enemy.length === 5 && E.filter((t) => t.escape).length >= 3, "No mobility against an elusive lineup");
+  const blinks = T.filter((t) => t.blink != null).map((t) => t.blink).sort((a, b) => a - b);
+  return { cov, covTotal: Object.values(cov).reduce((a, b) => a + b, 0), flags, hard, soft: sum(T, "soft"), bkbcc: sum(T, "bkbcc"), blinks: blinks.length, blinkMin: blinks[0] ?? null, bkbCores: T.filter((t) => t.bkb != null).length, sb: T.filter((t) => t.sb != null).length };
+}
+const EXTRA = [["coverage", "Ally protection coverage"], ["redflags", "Red flags (fewer is better)"], ["counters", "Direct counters on the enemy"], ["bkbcc", "Control through BKB"], ["blink", "Blink initiators"]];
+const NX = EXTRA.length;
+const extraVec = (A, B, cs) => { const a = checklist(A, B), b = checklist(B, A); return [a.covTotal - b.covTotal, a.flags.length - b.flags.length, cs, a.bkbcc - b.bkbcc, a.blinks - b.blinks]; };
 
 const tname = (id) => TEAMS[id]?.name || `Team ${id}`;
 const hname = (id) => HEROES[id]?.name || `Hero ${id}`;
@@ -64,6 +121,7 @@ for (const g of G) {
   for (const x of g.pl ? g.pl.split(",") : []) { const [acc, hero, slot, k, d, a, gpm, lh] = x.split(":").map(Number); g.lines[slot >= 128 ? 1 : 0].push({ acc, hero, k, d, a, gpm, lh }); }
   if (g.pick[0].length !== 5) { g.pick = [g.lines[0].map((l) => l.hero), g.lines[1].map((l) => l.hero)]; } // drafts not parsed: heroes from the player lines
   g.team = [g.r, g.d];
+  g.obj = {}; for (const x of g.ob ? g.ob.split(",") : []) { const [k, t] = x.split(":"), type = k[0], side = +k[1]; if (!(type in g.obj)) g.obj[type] = { side, t: +t }; if (type === "T" || type === "R") g.obj[type + "n"] = (g.obj[type + "n"] || [0, 0]), g.obj[type + "n"][side]++; }
 }
 // ---------------------------------------------------------------- series
 const BO = { 0: 1, 1: 3, 2: 5, 3: 2 };
@@ -111,8 +169,10 @@ function makeDraft(tau = 120 * DAY) {
     for (const s of [0, 1]) for (const x of g.ban[s]) get(H, x).b++;
     if (g.dur < 30 * 60 || g.dur >= 40 * 60) { const M = g.dur < 30 * 60 ? SH : LO; for (const [side, won] of [[R, rw], [Dd, 1 - rw]]) for (const x of side) { const s = get(M, x); s.n++; s.w += won; } }
   }
+  // direct counters (checklist 1B.8): for each enemy hero, +2 if we have a hard counter (edge 0.3+ in logit), +1 for a soft one (0.15+)
+  const counterScore = (A, B) => { const sc = (X, Y) => Y.reduce((t, y) => { let best = 0; for (const x of X) { const v = peek(VS, `${x}>${y}`); best = Math.max(best, logit(shr(v.w, v.n, 30))); } return t + (best >= 0.3 ? 2 : best >= 0.15 ? 1 : 0); }, 0); return sc(A, B) - sc(B, A); };
   const tempo = (x) => { const a = peek(SH, x), b = peek(LO, x); return 4 * (shr(a.w, a.n, 16) - shr(b.w, b.n, 16)); };
-  return { logitOf, learn, H, PR, VS, SH, LO, peek, tempo, setClock: (t) => (clock = t) };
+  return { logitOf, learn, H, PR, VS, SH, LO, peek, tempo, counterScore, setClock: (t) => (clock = t) };
 }
 
 // ---------------------------------------------------------------- replay (team + player ratings, side edge, draft check)
@@ -136,7 +196,7 @@ function replay(P, record = false) {
       const sideL = logit(side.w / side.n), base = strength(R, accR.length === 5 ? accR : R.lineup, g.t) - strength(Dd, accD.length === 5 ? accD : Dd.lineup, g.t) + sideL;
       const p = lg(base), y = g.rw, wm = R.n >= WARM && Dd.n >= WARM;
       if (wm) { bG += (p - y) ** 2; nG++; }
-      if (wm && g.pick[0].length === 5 && g.pick[1].length === 5) { const pd = lg(base + P.dw * DR.logitOf(g.pick[0], g.pick[1])); bGD += (pd - y) ** 2; nGD++; if (record) { const fr = draftVec(g.pick[0], DR.tempo), fd = draftVec(g.pick[1], DR.tempo); glog.push({ g, p, pd, base, dl: DR.logitOf(g.pick[0], g.pick[1]), fv: fr.map((x, i) => x - fd[i]), fr, fd }); } }
+      if (wm && g.pick[0].length === 5 && g.pick[1].length === 5) { const pd = lg(base + P.dw * DR.logitOf(g.pick[0], g.pick[1])); bGD += (pd - y) ** 2; nGD++; if (record) { const fr = draftVec(g.pick[0], DR.tempo), fd = draftVec(g.pick[1], DR.tempo); glog.push({ g, p, pd, base, dl: DR.logitOf(g.pick[0], g.pick[1]), fv: fr.map((x, i) => x - fd[i]), ex: extraVec(g.pick[0], g.pick[1], DR.counterScore(g.pick[0], g.pick[1])), fr, fd }); } }
       else if (record) glog.push({ g, p, pd: null });
       // learn
       const err = y - p, kR = P.K * (1 + 2 / (1 + R.n / 10)), kD = P.K * (1 + 2 / (1 + Dd.n / 10));
@@ -170,26 +230,27 @@ const R = replay(P, true);
 // with the rating and side as a fixed offset. Ridge-penalised, fitted on the first 70% of drafted games by date and judged on
 // the last 30%. Adopted for draft calls only if it beats the plain draft layer on games it never saw.
 const DG = R.glog.filter((x) => x.fv), dcut = Math.floor(DG.length * 0.7);
-function fitLogit(rows, lambda = 50) { const k = NF + 1, w = new Array(k).fill(0), sd = new Array(k).fill(1);
-  for (let j = 0; j < k; j++) { const v = rows.map((x) => (j < NF ? x.fv[j] : x.dl)), m = v.reduce((a, b) => a + b, 0) / v.length; sd[j] = Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length) || 1; }
-  const X = (x, j) => (j < NF ? x.fv[j] : x.dl) / sd[j];
+const XV = (x, j) => (j < NF ? x.fv[j] : j < NF + NX ? x.ex[j - NF] : x.dl);
+function fitLogit(rows, lambda = 50) { const k = NF + NX + 1, w = new Array(k).fill(0), sd = new Array(k).fill(1);
+  for (let j = 0; j < k; j++) { const v = rows.map((x) => XV(x, j)), m = v.reduce((a, b) => a + b, 0) / v.length; sd[j] = Math.sqrt(v.reduce((a, b) => a + (b - m) ** 2, 0) / v.length) || 1; }
+  const X = (x, j) => XV(x, j) / sd[j];
   for (let it = 0; it < 800; it++) { const g = new Array(k).fill(0), hdiag = new Array(k).fill(lambda);
     for (const x of rows) { let l = x.base; for (let j = 0; j < k; j++) l += w[j] * X(x, j); const p = lg(l), e = x.g.rw - p; for (let j = 0; j < k; j++) { g[j] += e * X(x, j); hdiag[j] += p * (1 - p) * X(x, j) ** 2; } }
     for (let j = 0; j < k; j++) w[j] += 2 * (g[j] - lambda * w[j]) / rows.length; }
   const hd = new Array(k).fill(lambda); for (const x of rows) { let l = x.base; for (let j = 0; j < k; j++) l += w[j] * X(x, j); const p = lg(l); for (let j = 0; j < k; j++) hd[j] += p * (1 - p) * X(x, j) ** 2; }
   return { w: w.map((v, j) => v / sd[j]), se: hd.map((h, j) => 1 / Math.sqrt(h) / sd[j]) }; }
-const draftPart = (M, fv, dl) => { let l = 0; for (let j = 0; j < NF; j++) l += M.w[j] * fv[j]; return l + M.w[NF] * dl; };
+const draftPart = (M, x) => { let l = 0; for (let j = 0; j < NF + NX + 1; j++) l += M.w[j] * XV(x, j); return l; };
 const FM = fitLogit(DG.slice(0, dcut)), test = DG.slice(dcut);
 const brierOn = (rows, f) => rows.reduce((a, x) => a + (f(x) - x.g.rw) ** 2, 0) / Math.max(1, rows.length);
-const fBase = brierOn(test, (x) => lg(x.base)), fPlain = brierOn(test, (x) => lg(x.base + P.dw * x.dl)), fFull = brierOn(test, (x) => lg(x.base + draftPart(FM, x.fv, x.dl)));
+const fBase = brierOn(test, (x) => lg(x.base)), fPlain = brierOn(test, (x) => lg(x.base + P.dw * x.dl)), fFull = brierOn(test, (x) => lg(x.base + draftPart(FM, x)));
 const FM_ALL = fitLogit(DG), useFactors = fFull < fPlain;
-const PLAIN = { w: [...new Array(NF).fill(0), P.dw], se: new Array(NF + 1).fill(0) };
+const PLAIN = { w: [...new Array(NF + NX).fill(0), P.dw], se: new Array(NF + NX + 1).fill(0) };
 const DMODEL = useFactors ? FM_ALL : PLAIN;
 // draft winner record on the held-out games (out of sample for the fitted weights)
-const dwRec = (rows, M) => { const r = rows.filter((x) => Math.abs(draftPart(M, x.fv, x.dl)) > 0.05); return { n: r.length, hit: r.filter((x) => (draftPart(M, x.fv, x.dl) > 0) === (x.g.rw === 1)).length }; };
+const dwRec = (rows, M) => { const r = rows.filter((x) => Math.abs(draftPart(M, x)) > 0.05); return { n: r.length, hit: r.filter((x) => (draftPart(M, x) > 0) === (x.g.rw === 1)).length }; };
 const DRAFT_EVAL = { games: DG.length, train: dcut, test: test.length, brier: { ratings: +fBase.toFixed(4), plainDraft: +fPlain.toFixed(4), factors: +fFull.toFixed(4) }, adopted: useFactors,
   winner: dwRec(test, FM), winnerPlain: dwRec(test, PLAIN),
-  weights: FACTORS.map(([k, label], j) => ({ k, label, w: +FM_ALL.w[j].toFixed(4), se: +FM_ALL.se[j].toFixed(4), z: +(FM_ALL.w[j] / FM_ALL.se[j]).toFixed(2) })).concat([{ k: "heroes", label: "Hero strength, combos and counters", w: +FM_ALL.w[NF].toFixed(4), se: +FM_ALL.se[NF].toFixed(4), z: +(FM_ALL.w[NF] / FM_ALL.se[NF]).toFixed(2) }]) };
+  weights: [...FACTORS, ...EXTRA, ["heroes", "Hero strength, combos and counters (results)"]].map(([k, label], j) => ({ k, label, w: +FM_ALL.w[j].toFixed(4), se: +FM_ALL.se[j].toFixed(4), z: +(FM_ALL.w[j] / FM_ALL.se[j]).toFixed(2) })) };
 console.log(`draft factors: held-out Brier ratings ${fBase.toFixed(4)}, + plain draft ${fPlain.toFixed(4)}, + factors ${fFull.toFixed(4)} (${useFactors ? "adopted" : "not adopted"}); draft winner ${DRAFT_EVAL.winner.hit}/${DRAFT_EVAL.winner.n} (plain ${DRAFT_EVAL.winnerPlain.hit}/${DRAFT_EVAL.winnerPlain.n})`);
 console.log(DRAFT_EVAL.weights.map((x) => `${x.k} ${x.w} (z ${x.z})`).join(", "));
 // plain-English read of one draft: strengths, weaknesses and gameplan, from factor values against the average pro draft
@@ -253,7 +314,7 @@ const heroList = Object.values(HEROES).map((h) => {
 }).sort((a, b) => b.rec.pres - a.rec.pres);
 writeJSON(path.join(OUT, "heroes.json"), heroList);
 // Draft lab tables: each hero's shrunk strength, and pairs / counters with at least 4 recent-weighted games
-const dl = { heroes: {}, pairs: {}, vs: {}, dw: P.dw, side: r3(logit(R.side)), factors: FACTORS.map(([k, l]) => [k, l]), hvec: HVEC, favg: FAVG.map(([m, sd]) => [r3(m), r3(sd)]), weights: DMODEL.w.map(r3), adopted: useFactors, tempo: Object.fromEntries(Object.keys(HEROES).map((id) => [id, r3(DRf.tempo(+id))])), eval: DRAFT_EVAL };
+const dl = { heroes: {}, pairs: {}, vs: {}, dw: P.dw, side: r3(logit(R.side)), factors: FACTORS.map(([k, l]) => [k, l]), hvec: HVEC, favg: FAVG.map(([m, sd]) => [r3(m), r3(sd)]), weights: DMODEL.w.map(r3), nx: NX, extra: EXTRA, tags: TAG, cats: CATS, adopted: useFactors, tempo: Object.fromEntries(Object.keys(HEROES).map((id) => [id, r3(DRf.tempo(+id))])), eval: DRAFT_EVAL };
 for (const h of heroList) { const s = DRf.peek(DRf.H, h.id); dl.heroes[h.id] = r3(logit(shr(s.w, s.n, 20))); }
 for (const [k] of DRf.PR) { const s = DRf.peek(DRf.PR, k); if (s.n >= 4) dl.pairs[k] = r3(logit(shr(s.w, s.n, 30))); }
 for (const [k] of DRf.VS) { const s = DRf.peek(DRf.VS, k); if (s.n >= 4) dl.vs[k] = r3(logit(shr(s.w, s.n, 30))); }
@@ -289,7 +350,9 @@ function profile(id) {
   if (sig && sig.n >= 5) { const all = G.filter((g) => g.team.includes(id) && g.t > now - 200 * DAY), w = [0, 0], wo = [0, 0];
     for (const g of all) { const s = g.team.indexOf(id), won = s === 0 ? g.rw : 1 - g.rw, x = g.pick[s].includes(sig.h) ? w : wo; x[0] += won; x[1]++; }
     signature = { hero: sig.h, with: w, without: wo, effect: r3(shr(w[0], w[1]) - shr(wo[0], wo[1])), banned: bansVs[sig.h] || 0 }; }
-  return { games: use.length, comfort, bansBy: top(bansBy), bansVs: top(bansVs), radiant: rad, dire, short, long, avgMin: use.length ? Math.round(dur / use.length / 60) : null, signature };
+  const ob = { fb: [0, 0], torm: [0, 0], rosh: [0, 0], tower: [0, 0], hg: [0, 0], fbMin: [] }; for (const g of use) { const sd = g.team.indexOf(id), won = sd === 0 ? g.rw : 1 - g.rw, o = g.obj || {}; for (const [k, key] of [["F", "fb"], ["T", "torm"], ["R", "rosh"], ["W", "tower"]]) if (o[k]) { ob[key][1]++; if (o[k].side === sd) ob[key][0]++; } if (o.F && o.F.side === sd) ob.fbMin.push(o.F.t); if (o.X && o.X.side !== sd) { ob.hg[1]++; ob.hg[0] += won; } }
+  ob.fbMin = ob.fbMin.length ? Math.round(ob.fbMin.sort((a, b) => a - b)[Math.floor(ob.fbMin.length / 2)] / 6) / 10 : null;
+  return { obj: ob, games: use.length, comfort, bansBy: top(bansBy), bansVs: top(bansVs), radiant: rad, dire, short, long, avgMin: use.length ? Math.round(dur / use.length / 60) : null, signature };
 }
 function rosterOf(id) {
   const T = R.TR.get(id); if (!T?.lineup) return [];
@@ -319,7 +382,7 @@ writeJSON(path.join(OUT, "results.json"), res);
 const gIndex = new Map(R.glog.map((x) => [x.g.id, x]));
 for (const x of R.log.slice(-400)) { const s = x.s;
   writeJSON(path.join(OUT, "series", `${s.key}.json`), { ...seriesRow(x), elo: [elo(x.ra), elo(x.rb)], games: s.games.map((g) => { const gl = gIndex.get(g.id), aSide = g.r === s.a ? 0 : 1, flip = (v) => (v == null ? null : r3(aSide === 0 ? v : 1 - v));
-    return { id: g.id, aSide: aSide === 0 ? "Radiant" : "Dire", winA: (g.rw ? g.r : g.d) === s.a, min: Math.round(g.dur / 60), pA: flip(gl?.p), pDraftA: flip(gl?.pd), draft: gl?.fv ? (() => { const part = draftPart(DMODEL, gl.fv, gl.dl), pa0 = lg(part); return { pA: r3(aSide === 0 ? pa0 : 1 - pa0), readA: readDraft(aSide === 0 ? gl.fr : gl.fd), readB: readDraft(aSide === 0 ? gl.fd : gl.fr) }; })() : null,
+    return { id: g.id, aSide: aSide === 0 ? "Radiant" : "Dire", obj: Object.fromEntries(Object.entries({ fb: "F", torm: "T", rosh: "R", tower: "W", rax: "X" }).filter(([, k]) => g.obj?.[k]).map(([n, k]) => [n, { a: (g.obj[k].side === 0) === (aSide === 0), min: Math.round(g.obj[k].t / 60) }])), winA: (g.rw ? g.r : g.d) === s.a, min: Math.round(g.dur / 60), pA: flip(gl?.p), pDraftA: flip(gl?.pd), draft: gl?.fv ? (() => { const part = draftPart(DMODEL, gl), pa0 = lg(part), ckR = checklist(g.pick[0], g.pick[1]), ckD = checklist(g.pick[1], g.pick[0]); return { pA: r3(aSide === 0 ? pa0 : 1 - pa0), readA: readDraft(aSide === 0 ? gl.fr : gl.fd), readB: readDraft(aSide === 0 ? gl.fd : gl.fr), ckA: aSide === 0 ? ckR : ckD, ckB: aSide === 0 ? ckD : ckR }; })() : null,
       pickA: g.pick[aSide], pickB: g.pick[1 - aSide], banA: g.ban[aSide], banB: g.ban[1 - aSide], order: g.order.map(([p, sd, h]) => [p, sd === aSide ? "a" : "b", h]),
       playersA: g.lines[aSide].map((l) => ({ id: l.acc, n: pname(l.acc), h: l.hero, k: l.k, d: l.d, a: l.a, gpm: l.gpm })), playersB: g.lines[1 - aSide].map((l) => ({ id: l.acc, n: pname(l.acc), h: l.hero, k: l.k, d: l.d, a: l.a, gpm: l.gpm })) }; }) }); }
 
@@ -450,6 +513,8 @@ for (const h of heroList.filter((h) => h.rec.pick >= 40).sort((a, b) => a.rec.wr
   for (const x of pr.slice(0, 3)) { const [a, b] = x.k.split("-").map(Number); rule("Combos", `${hname(a)} with ${hname(b)} on the same side: ${pct0(x.w / x.n)} won (about ${Math.round(x.n)} recent-weighted games).`, Math.round(x.w), Math.round(x.n), { h: a, h2: b }); } }
 { const vs = []; for (const [k] of DRf.VS) { const s = DRf.peek(DRf.VS, k); if (s.n >= 25) vs.push({ k, n: s.n, w: s.w }); } vs.sort((a, b) => b.w / b.n - a.w / a.n);
   for (const x of vs.slice(0, 3)) { const [a, b] = x.k.split(">").map(Number); rule("Counters", `${hname(a)} against ${hname(b)}: ${pct0(x.w / x.n)} won (about ${Math.round(x.n)} recent-weighted games).`, Math.round(x.w), Math.round(x.n), { h: a, h2: b }); } }
+for (const [k, label] of [["F", "first blood"], ["W", "the first tower"], ["T", "the first Tormentor"], ["R", "the first Roshan"], ["X", "the first barracks"]]) { let n = 0, w = 0; for (const g of G12) { const o = g.obj?.[k]; if (!o) continue; n++; if ((o.side === 0) === (g.rw === 1)) w++; } if (n >= 60) rule("Objectives", `The team that takes ${label} wins ${pct0(w / n)} of games.`, w, n); }
+{ let n = 0, w = 0; for (const g of G12) { const x = g.obj?.X; if (!x) continue; n++; if ((x.side === 0) !== (g.rw === 1)) w++; } if (n >= 60) rule("High ground", `A team that loses the first barracks still wins ${pct0(w / n)} of the time: high-ground defence and comebacks.`, w, n); }
 function pct0(x) { return `${Math.round((x || 0) * 100)}%`; }
 writeJSON(path.join(OUT, "playbook.json"), { rules, note: "Solid: at least 60 games and about 2 standard errors from 50%. Lean: a pattern worth watching, not proven." });
 

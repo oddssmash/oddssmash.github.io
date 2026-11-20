@@ -30,10 +30,11 @@ const sql = async (q) => { const j = await od("explorer?" + new URLSearchParams(
 const MF = path.join(D, "matches.json"), store = readJSON(MF, { matches: [] });
 const byId = new Map(store.matches.map((m) => [m.id, m]));
 const newest = store.matches.reduce((a, m) => Math.max(a, m.t), 0);
-const from = newest ? newest - 3 * DAY : now - 400 * DAY; // re-read the last 3 days so late-parsed drafts fill in
+const from = newest && store.obv === 1 ? newest - 3 * DAY : now - 400 * DAY; // obv: objectives added (Nov 2026); older files are read again once // re-read the last 3 days so late-parsed drafts fill in
 const Q = (a, b) => `SELECT m.match_id, m.start_time, m.duration, m.radiant_win, m.radiant_team_id rt, m.dire_team_id dt, m.leagueid, m.series_id, m.series_type,
   (SELECT string_agg(CASE WHEN is_pick THEN 'p' ELSE 'b' END || team || ':' || hero_id, ',' ORDER BY ord) FROM picks_bans pb WHERE pb.match_id = m.match_id) d,
-  (SELECT string_agg(pm.account_id || ':' || pm.hero_id || ':' || pm.player_slot || ':' || pm.kills || ':' || pm.deaths || ':' || pm.assists || ':' || pm.gold_per_min || ':' || pm.last_hits, ',') FROM player_matches pm WHERE pm.match_id = m.match_id) pl
+  (SELECT string_agg(pm.account_id || ':' || pm.hero_id || ':' || pm.player_slot || ':' || pm.kills || ':' || pm.deaths || ':' || pm.assists || ':' || pm.gold_per_min || ':' || pm.last_hits, ',') FROM player_matches pm WHERE pm.match_id = m.match_id) pl,
+  (SELECT string_agg(CASE WHEN o->>'type' = 'CHAT_MESSAGE_FIRSTBLOOD' THEN 'F' || CASE WHEN (o->>'player_slot')::int >= 128 THEN 1 ELSE 0 END WHEN o->>'type' = 'CHAT_MESSAGE_MINIBOSS_KILL' THEN 'T' || ((o->>'team')::int - 2) WHEN o->>'type' = 'CHAT_MESSAGE_ROSHAN_KILL' THEN 'R' || ((o->>'team')::int - 2) WHEN o->>'key' LIKE '%rax%' THEN 'X' || CASE WHEN o->>'key' LIKE '%goodguys%' THEN 1 ELSE 0 END WHEN o->>'key' LIKE '%tower%' THEN 'W' || CASE WHEN o->>'key' LIKE '%goodguys%' THEN 1 ELSE 0 END END || ':' || (o->>'time'), ',') FROM unnest(m.objectives) o WHERE o->>'type' IN ('CHAT_MESSAGE_FIRSTBLOOD', 'CHAT_MESSAGE_MINIBOSS_KILL', 'CHAT_MESSAGE_ROSHAN_KILL', 'building_kill')) ob
   FROM matches m JOIN leagues l USING(leagueid)
   WHERE m.start_time >= ${a} AND m.start_time < ${b} AND l.tier IN ('premium', 'professional') AND m.radiant_team_id IS NOT NULL AND m.dire_team_id IS NOT NULL AND m.radiant_team_id <> m.dire_team_id
   ORDER BY m.match_id`;
@@ -42,13 +43,13 @@ for (let a = from; a < now; a += 20 * DAY) {
   const rows = await sql(Q(a, Math.min(now + DAY, a + 20 * DAY))); windows++; if (!rows) continue;
   for (const r of rows) {
     if (r.radiant_win == null) continue;
-    const m = { id: +r.match_id, t: +r.start_time, dur: +r.duration, rw: r.radiant_win ? 1 : 0, r: +r.rt, d: +r.dt, lg: +r.leagueid, sid: +r.series_id || 0, st: +r.series_type || 0, dr: r.d || "", pl: r.pl || "" };
+    const m = { id: +r.match_id, t: +r.start_time, dur: +r.duration, rw: r.radiant_win ? 1 : 0, r: +r.rt, d: +r.dt, lg: +r.leagueid, sid: +r.series_id || 0, st: +r.series_type || 0, dr: r.d || "", pl: r.pl || "", ob: r.ob || "" };
     if (!byId.has(m.id)) added++; byId.set(m.id, m);
   }
 }
 const cutoff = now - 420 * DAY;
 store.matches = [...byId.values()].filter((m) => m.t >= cutoff).sort((a, b) => a.t - b.t || a.id - b.id);
-store.fetched = new Date().toISOString(); store.source = "OpenDota (opendota.com) public explorer: professional and premium-tier leagues";
+store.obv = 1; store.fetched = new Date().toISOString(); store.source = "OpenDota (opendota.com) public explorer: professional and premium-tier leagues";
 writeJSON(MF, store);
 console.log(`Dota 2 matches: ${added} new over ${windows} windows, ${store.matches.length} on file (${store.matches.filter((m) => m.dr).length} with drafts)`);
 
@@ -93,6 +94,25 @@ if (Array.isArray(hs)) writeJSON(path.join(D, "herostats.json"), { fetched: new 
       avg(pm.obs_placed) obs, avg(pm.hero_healing) heal, avg(pm.gold_per_min) gpm, avg(pm.deaths) d, avg(pm.gold_t[11]) g10, avg(pm.lh_t[11]) lh10, avg(CASE WHEN pm.is_roaming THEN 1 ELSE 0 END) roam, avg(m.duration) dur
       FROM player_matches pm JOIN matches m USING(match_id) JOIN leagues l USING(leagueid) WHERE m.start_time > ${now - 120 * DAY} AND l.tier IN ('premium', 'professional') GROUP BY pm.hero_id`);
     if (rows?.length) { writeJSON(TF, { fetched: new Date().toISOString(), source: "OpenDota explorer: pro games, last 120 days, per-hero averages", heroes: Object.fromEntries(rows.map((r) => [r.hero_id, Object.fromEntries(Object.entries(r).filter(([k]) => k !== "hero_id").map(([k, v]) => [k, v == null ? null : Math.round(+v * 1000) / 1000]))])) }); console.log(`hero traits: ${rows.length} heroes`); }
+  } }
+// item timings from pro purchase logs (last 120 days): how often each hero buys Blink Dagger, Black King Bar, Shadow Blade
+// and Silver Edge, and the median minute. Refetched every 2 days.
+{ const IF = path.join(D, "itemtimings.json"), old = readJSON(IF, null);
+  if (!old || Date.now() - Date.parse(old.fetched) > 2 * 86400000) {
+    const rows = await sql(`SELECT pm.hero_id, e->>'key' k, percentile_cont(0.5) WITHIN GROUP (ORDER BY (e->>'time')::int) t, count(DISTINCT pm.match_id) n FROM player_matches pm JOIN matches m USING(match_id) JOIN leagues l USING(leagueid), unnest(pm.purchase_log) e
+      WHERE m.start_time > ${now - 120 * DAY} AND l.tier IN ('premium', 'professional') AND e->>'key' IN ('blink', 'black_king_bar', 'invis_sword', 'silver_edge', 'ultimate_scepter', 'aghanims_shard') GROUP BY 1, 2`);
+    if (rows?.length) { const out = {}; for (const r of rows) (out[r.hero_id] ||= {})[r.k] = { min: Math.round(+r.t / 6) / 10, n: +r.n }; writeJSON(IF, { fetched: new Date().toISOString(), source: "OpenDota explorer: pro purchase logs, last 120 days", heroes: out }); console.log(`item timings: ${Object.keys(out).length} heroes`); }
+  } }
+// Valve's official hero data (dota2.com datafeed): base stats, role levels and every ability's text, damage type, whether it
+// goes through spell immunity (BKB) and whether it can be dispelled. One hero a second, refetched weekly or on a new patch.
+{ const VF = path.join(D, "herodata.json"), old = readJSON(VF, null), H0 = readJSON(path.join(D, "heroes.json"), { heroes: {} }).heroes, lastPatch = readJSON(path.join(D, "patches.json"), { patches: [] }).patches.at(-1)?.patch;
+  if (!old || old.patch !== lastPatch || Date.now() - Date.parse(old.fetched) > 7 * 86400000) {
+    const out = {};
+    for (const id of Object.keys(H0)) { await sleep(700);
+      try { const j = await (await fetch(`https://www.dota2.com/datafeed/herodata?language=english&hero_id=${id}`, { headers: UA })).json(), h = j?.result?.data?.heroes?.[0]; if (!h) continue;
+        out[id] = { attr: h.primary_attr, range: h.attack_range, armor: h.armor, mr: h.magic_resistance, ms: h.movement_speed, hp: h.max_health, roles: h.role_levels, complexity: h.complexity,
+          ab: (h.abilities || []).filter((a) => a.name_loc).map((a) => ({ n: a.name_loc, d: String(a.desc_loc || "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").slice(0, 400), imm: a.immunity, dis: a.dispellable, dmg: a.damage, team: a.target_team, ch: (a.channel_times || []).some((x) => x > 0) ? 1 : 0, ult: a.type === 1 ? 1 : 0, innate: a.ability_is_innate ? 1 : 0 })) }; } catch { /* skip one hero */ } }
+    if (Object.keys(out).length > 100) { writeJSON(VF, { fetched: new Date().toISOString(), patch: lastPatch, source: "Valve dota2.com hero data", heroes: out }); console.log(`Valve hero data: ${Object.keys(out).length} heroes`); }
   } }
 try { const r = await fetch("https://www.dota2.com/datafeed/patchnoteslist?language=english", { headers: UA }); if (r.ok) { const j = await r.json(); const ps = (j.patches || []).filter((p) => p.patch_timestamp > now - 500 * DAY).map((p) => ({ patch: p.patch_number, date: new Date(p.patch_timestamp * 1000).toISOString() }));
   writeJSON(path.join(D, "patches.json"), { fetched: new Date().toISOString(), source: "Valve (dota2.com patch list)", patches: ps }); console.log(`patches: latest ${ps.at(-1)?.patch} (${ps.at(-1)?.date?.slice(0, 10)})`);
