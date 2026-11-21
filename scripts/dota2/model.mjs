@@ -186,6 +186,30 @@ const WARM = 8;
 const overlap = (a, b) => (a && b ? a.filter((x) => b.includes(x)).length : 0);
 const chemOf = (T, accs) => (T.lineup && overlap(accs, T.lineup) >= 4 ? T.chem || 0 : 0);
 const standOf = (T, accs) => (accs || []).filter((a) => (T.pc?.get(a) || 0) < 5).length; // games a team needs on record before its series are graded
+// ORB EFFECT (anti-synergy between teammates, the user's Dota term): two levels.
+//  Player level: each player's playstyle, learned game by game from earlier games only. In every game a player's position is
+//  read from farm order (most gold a minute = Pos 1 ... least = Pos 5). Style = how far the player's fight involvement
+//  ((kills + deaths) a minute) and kill participation sit above or below the average for that position, in standard
+//  deviations, recent games counting more. Positive = aggressive, negative = passive / safe. A five's orb score is the
+//  average style gap across the pairs that must play together: Pos 1 with Pos 5 (safe lane), Pos 2 with Pos 4 (mid and
+//  roamer), Pos 3 with Pos 4 (offlane). Players with under 10 games are left out rather than guessed.
+//  Hero level: allied heroes that pull in different directions: more than two farm-hungry heroes (late-game farm trait above
+//  +0.8) and a split power curve (early heroes and late heroes on one side: the smaller of the two pulls).
+const ORB_PAIRS = [[1, 5, "carry", "hard support"], [2, 4, "mid", "soft support"], [3, 4, "offlane", "soft support"]];
+const PERMS = (() => { const out = [], go = (a, rest) => { if (!rest.length) out.push(a); for (let i = 0; i < rest.length; i++) go([...a, rest[i]], [...rest.slice(0, i), ...rest.slice(i + 1)]); }; go([], [0, 1, 2, 3, 4]); return out; })();
+function orbOf(STY, accs) {
+  if (!accs || accs.length !== 5) return null; const P = accs.map((a) => STY.get(a)), cnt = P.map((p) => p?.rc || [0, 0, 0, 0, 0]);
+  let best = null; for (const pm of PERMS) { const v = pm.reduce((t, r, i) => t + cnt[i][r], 0); if (!best || v > best.v) best = { v, pm }; } // usual positions, one player per position
+  const pos = best.pm.map((r) => r + 1), at = (p) => pos.indexOf(p), pairs = [];
+  for (const [p1, p2, l1, l2] of ORB_PAIRS) { const i = at(p1), j = at(p2), a = P[i], b = P[j]; if (!a || !b || a.n < 10 || b.n < 10) continue; pairs.push({ a: accs[i], b: accs[j], pa: p1, pb: p2, la: l1, lb: l2, sa: r3(a.st), sb: r3(b.st), gap: r3(Math.abs(a.st - b.st)) }); }
+  return { score: pairs.length ? pairs.reduce((t, x) => t + x.gap, 0) / pairs.length : null, pairs, pos: Object.fromEntries(accs.map((a, i) => [a, pos[i]])) };
+}
+function heroOrb(side, tempoOf) {
+  if (!side || side.length !== 5) return null; const SC = FACTORS.findIndex(([k]) => k === "scaling");
+  const greedy = side.filter((h) => (HVEC[h]?.[SC] || 0) > 0.8), extra = Math.max(0, greedy.length - 2), tp = side.map((h) => (tempoOf ? tempoOf(h) : 0));
+  const early = tp.reduce((t, x) => t + Math.max(0, x), 0), late = tp.reduce((t, x) => t + Math.max(0, -x), 0), clash = Math.min(early, late);
+  return { score: extra + clash, greedy, extra, clash: r3(clash), early: side.filter((h, i) => tp[i] > 0.25), late: side.filter((h, i) => tp[i] < -0.25) };
+}
 function replay(P, record = false) {
   const TR = new Map(), PRt = new Map(), DR = makeDraft(), log = [], glog = [];
   const PQ = PATCH_T.filter((p) => p.t > (G[0]?.t || 0)).map((p) => ({ ...p })); let side = { n: 40, w: 20.8 }; // Radiant wins, prior 52%
@@ -193,6 +217,7 @@ function replay(P, record = false) {
   const player = (acc, t) => { let x = PRt.get(acc); if (!x) PRt.set(acc, (x = { r: P.r0, n: 0, last: t })); const f = Math.exp(-(t - x.last) / (P.H * DAY)); x.r = P.r0 + (x.r - P.r0) * f; x.last = t; return x; };
   const strength = (T, accs, t) => { if (!P.w || !accs || accs.length !== 5) return T.r; const pr = accs.reduce((a, acc) => a + player(acc, t).r, 0) / 5; return (1 - P.w) * T.r + P.w * pr; };
   let bS = 0, nS = 0, bG = 0, nG = 0, bGD = 0, nGD = 0, hit = 0; const LG = [];
+  const STY = new Map(), RM = [0, 1, 2, 3, 4].map(() => ({ a: [0.3, 0.02], k: [0.55, 0.02] })); // per position: [mean, variance] of fight involvement and kill participation
   for (const s of series) {
     const A = team(s.a, s.t), B = team(s.b, s.t), warm = A.n >= WARM && B.n >= WARM;
     const sa = strength(A, A.lineup, s.t), sb = strength(B, B.lineup, s.t), pg = lg(sa - sb), sp = seriesP(pg, s.bo);
@@ -204,7 +229,9 @@ function replay(P, record = false) {
       const R = team(g.r, g.t), Dd = team(g.d, g.t), accR = g.lines[0].map((l) => l.acc), accD = g.lines[1].map((l) => l.acc);
       const sideL = logit(side.w / side.n), base = strength(R, accR.length === 5 ? accR : R.lineup, g.t) - strength(Dd, accD.length === 5 ? accD : Dd.lineup, g.t) + sideL;
       const p = lg(base), y = g.rw, wm = R.n >= WARM && Dd.n >= WARM;
-      if (record && wm && accR.length === 5 && accD.length === 5) { const cR = chemOf(R, accR), cD = chemOf(Dd, accD), sR = standOf(R, accR), sD = standOf(Dd, accD); LG.push({ base, y, t: g.t, f: [Math.log1p(cR) - Math.log1p(cD), sR - sD] }); }
+      if (record && wm && accR.length === 5 && accD.length === 5) { const cR = chemOf(R, accR), cD = chemOf(Dd, accD), sR = standOf(R, accR), sD = standOf(Dd, accD), oR = orbOf(STY, accR), oD = orbOf(STY, accD);
+        const hR = g.pick[0].length === 5 && g.pick[1].length === 5 ? heroOrb(g.pick[0], DR.tempo) : null, hD = hR ? heroOrb(g.pick[1], DR.tempo) : null;
+        LG.push({ base, y, t: g.t, f: [Math.log1p(cR) - Math.log1p(cD), sR - sD], o: oR?.score != null && oD?.score != null ? oR.score - oD.score : null, xd: hR ? base + P.dw * DR.logitOf(g.pick[0], g.pick[1]) : null, ho: hR ? hR.score - hD.score : null }); }
       if (wm) { bG += (p - y) ** 2; nG++; }
       if (wm && g.pick[0].length === 5 && g.pick[1].length === 5) { const pd = lg(base + P.dw * DR.logitOf(g.pick[0], g.pick[1])); bGD += (pd - y) ** 2; nGD++; if (record) { const fr = draftVec(g.pick[0], DR.tempo), fd = draftVec(g.pick[1], DR.tempo); glog.push({ g, p, pd, base, dl: DR.logitOf(g.pick[0], g.pick[1]), fv: fr.map((x, i) => x - fd[i]), ex: extraVec(g.pick[0], g.pick[1], DR.counterScore(g.pick[0], g.pick[1])), fr, fd }); } }
       else if (record) glog.push({ g, p, pd: null });
@@ -214,12 +241,17 @@ function replay(P, record = false) {
       if (P.w) { for (const acc of accR) { const x = player(acc, g.t); x.r += P.K * (1 + 2 / (1 + x.n / 10)) * err; x.n++; } for (const acc of accD) { const x = player(acc, g.t); x.r -= P.K * (1 + 2 / (1 + x.n / 10)) * err; x.n++; } }
       for (const [T, accs] of [[R, accR], [Dd, accD]]) { if (accs.length !== 5) continue; T.chem = T.lineup && overlap(accs, T.lineup) >= 4 ? (T.chem || 0) + 1 : 1; T.pc ||= new Map(); for (const a of accs) T.pc.set(a, (T.pc.get(a) || 0) + 1); }
       if (accR.length === 5) R.lineup = accR; if (accD.length === 5) Dd.lineup = accD;
+      if (g.dur > 600) for (const L of g.lines) { if (L.length !== 5) continue; const tk = Math.max(1, L.reduce((t, l) => t + l.k, 0)), mins = g.dur / 60; // update playstyles after the game
+        [...L].sort((x, y) => y.gpm - x.gpm).forEach((l, r) => { const fa = (l.k + l.d) / mins, kp = (l.k + l.a) / tk, M = RM[r];
+          const za = (fa - M.a[0]) / Math.sqrt(M.a[1]), zk = (kp - M.k[0]) / Math.sqrt(M.k[1]), st0 = Math.max(-3, Math.min(3, 0.5 * za + 0.5 * zk));
+          for (const [key, v] of [["a", fa], ["k", kp]]) { const d0 = v - M[key][0]; M[key][0] += 0.002 * d0; M[key][1] = 0.998 * M[key][1] + 0.002 * d0 * d0; }
+          let x = STY.get(l.acc); if (!x) STY.set(l.acc, (x = { n: 0, st: 0, rc: [0, 0, 0, 0, 0] })); const al = Math.max(0.06, 1 / (x.n + 1)); x.st += al * (st0 - x.st); x.n++; x.rc = x.rc.map((c, i) => c * 0.97 + (i === r ? 1 : 0)); }); }
       if (record) { R.hist.push([g.t, r3(R.r)]); Dd.hist.push([g.t, r3(Dd.r)]); }
       while (PQ.length && g.t >= PQ[0].t) { const pq = PQ.shift(); DR.patchShift(pq.changed); }
       side.n++; side.w += y; DR.learn(g);
     }
   }
-  return { LG, TR, PRt, DR, log, glog, side: side.w / side.n, brier: bS / Math.max(1, nS), n: nS, hit: hit / Math.max(1, nS), gBrier: bG / Math.max(1, nG), gBrierDraft: bGD / Math.max(1, nGD), nGD, strength };
+  return { STY, LG, TR, PRt, DR, log, glog, side: side.w / side.n, brier: bS / Math.max(1, nS), n: nS, hit: hit / Math.max(1, nS), gBrier: bG / Math.max(1, nG), gBrierDraft: bGD / Math.max(1, nGD), nGD, strength };
 }
 
 // SETTINGS FREEZE: the grid search runs once a week (or with RETUNE=1); in between, the saved settings are reused, so a
@@ -322,6 +354,26 @@ const LINEUP = (() => { const rows = R.LG, cut = Math.floor(rows.length * 0.7), 
   const br = (ww) => te.reduce((a, x) => a + (lg(x.base + ww[0] * x.f[0] + ww[1] * x.f[1]) - x.y) ** 2, 0) / Math.max(1, te.length), b0 = br([0, 0]), b1 = br(w);
   return { w: w.map((v) => Math.round(v * 1000) / 1000), adopted: b1 < b0, brierBase: Math.round(b0 * 10000) / 10000, brierLineup: Math.round(b1 * 10000) / 10000, test: te.length, train: tr.length }; })();
 console.log(`lineup test: chemistry w ${LINEUP.w[0]}, stand-ins w ${LINEUP.w[1]}; held-out Brier ${LINEUP.brierBase} -> ${LINEUP.brierLineup} (${LINEUP.adopted ? "adopted" : "not adopted"}, ${LINEUP.test} games)`);
+// ORB EFFECT TESTS: each level is a one-factor logistic fit on top of what the model already has (player level on top of
+// ratings + side + adopted lineup factors; hero level on top of ratings + side + the hero-strength/combo/counter draft score),
+// fitted on the first 70% of games by date and judged on the last 30%. Adopted only if more clash means a lower chance (the
+// direction the idea says) and it lowers the held-out Brier score.
+const fit1 = (rows) => { const cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), te = rows.slice(cut); let w = 0;
+  for (let it = 0; it < 500; it++) { let g = 0; for (const x of tr) g += (x.y - lg(x.b + w * x.f)) * x.f; w += (2 * (g - 5 * w)) / Math.max(1, tr.length); }
+  const br = (ww) => te.reduce((a, x) => a + (lg(x.b + ww * x.f) - x.y) ** 2, 0) / Math.max(1, te.length), b0 = br(0), b1 = br(w);
+  return { w: r3(w), adopted: w < 0 && b1 < b0 && te.length >= 200, sign: w < 0 ? "more clash, lower chance (as expected)" : "more clash went with slightly more wins (opposite of the idea)", brierBase: Math.round(b0 * 10000) / 10000, brierOrb: Math.round(b1 * 10000) / 10000, test: te.length, train: tr.length }; };
+const luL = (x) => (LINEUP.adopted ? LINEUP.w[0] * x.f[0] + LINEUP.w[1] * x.f[1] : 0);
+const ORB = { player: fit1(R.LG.filter((x) => x.o != null).map((x) => ({ b: x.base + luL(x), f: x.o, y: x.y }))), hero: fit1(R.LG.filter((x) => x.ho != null).map((x) => ({ b: x.xd + luL(x), f: x.ho, y: x.y }))) };
+{ const sc = []; for (const [id, T0] of R.TR) if (T0.lineup && T0.last > now - 120 * DAY) { const o = orbOf(R.STY, T0.lineup); if (o?.score != null) sc.push(o.score); } sc.sort((a, b) => a - b); ORB.typical = sc.length ? r3(sc[Math.floor(sc.length / 2)]) : null; ORB.teams = sc.length; }
+console.log(`orb effect: players w ${ORB.player.w} Brier ${ORB.player.brierBase} -> ${ORB.player.brierOrb} (${ORB.player.adopted ? "adopted" : "not adopted"}, ${ORB.player.test}); heroes w ${ORB.hero.w} Brier ${ORB.hero.brierBase} -> ${ORB.hero.brierOrb} (${ORB.hero.adopted ? "adopted" : "not adopted"}, ${ORB.hero.test}); typical team gap ${ORB.typical}`);
+// style words: top quarter of active pro players (10+ games, played in the last 120 days) = aggressive, bottom quarter = passive
+const STQ = (() => { const v = []; for (const [acc, x] of R.STY) { const p = R.PRt.get(acc); if (x.n >= 10 && p && p.last > now - 120 * DAY) v.push(x.st); } v.sort((a, b) => a - b); return v.length >= 40 ? [v[Math.floor(v.length * 0.25)], v[Math.floor(v.length * 0.75)]] : [-0.5, 0.5]; })();
+ORB.quartiles = STQ.map(r3);
+const styleWord = (x) => (x >= STQ[1] ? "aggressive" : x <= STQ[0] ? "passive, safe" : "balanced");
+// one team's orb read for the pages: the pairs, their styles and the clash that stands out most
+function orbRead(id) { const T0 = R.TR.get(id); if (!T0?.lineup) return null; const o = orbOf(R.STY, T0.lineup); if (!o) return null;
+  const pairs = o.pairs.map((x) => ({ ...x, na: pname(x.a) || `player ${x.a}`, nb: pname(x.b) || `player ${x.b}`, wa: styleWord(x.sa), wb: styleWord(x.sb) })), worst = [...pairs].sort((a, b) => b.gap - a.gap)[0] || null;
+  return { score: o.score == null ? null : r3(o.score), pairs, worst, missing: 3 - pairs.length }; }
 // CALIBRATION TEST: pull single-game chances toward 50% (logit x T), fitted on the first 70% of graded series by date and
 // judged on the last 30% (series Brier). Adopted only if it helps on the held-out part.
 const GR = R.log.filter((x) => x.warm && !x.s.draw), cut = Math.floor(GR.length * 0.7);
@@ -528,6 +580,8 @@ function explainMatch(up, A, B, pa, pb, mk) {
   if (FS.elo && US.elo) base.push(`Rating ${F} ${FS.elo} (#${FS.rank ?? "-"}) against ${U} ${US.elo} (#${US.rank ?? "-"}): ratings come from each of the five players' results in every pro game of the last 400 days (OpenDota).`);
   if (FS.form || US.form) base.push(`Last five series: ${F} ${FS.form || "-"}, ${U} ${US.form || "-"} (W win, L loss, D draw).`);
   { const L0 = up.lineup; if (L0?.a && L0?.b) base.push(`Lineup chemistry: ${an} have played ${L0.a.chem} game(s) in a row with (at least four of) their current five, ${bn} ${L0.b.chem}.${L0.a.fresh.length || L0.b.fresh.length ? ` New to the team (under 5 games): ${[...L0.a.fresh.map((x) => `${x} (${an})`), ...L0.b.fresh.map((x) => `${x} (${bn})`)].join(", ")}.` : ""} Tested on ${L0.test.test.toLocaleString("en-US")} newer games, chemistry and stand-ins ${L0.adopted ? `helped a little (Brier ${L0.test.brierBase} to ${L0.test.brierLineup}), so they are in the chance: they move this series ${L0.shiftPts > 0 ? "+" : ""}${L0.shiftPts} points for ${an}` : "did not help, so they are shown but not used"}. Player ratings already follow the five who play.`); }
+  { const O = up.lineup?.orb; if (O) { const one = (t, o) => { if (!o) return `${t}: no lineup in our data`; if (!o.pairs.length) return `${t}: not enough games per player to read styles (under 10 each)`; const w = o.worst; return `${t} biggest gap: ${w.na} (Pos ${w.pa} ${w.la}, ${w.wa}) with ${w.nb} (Pos ${w.pb} ${w.lb}, ${w.wb}), gap ${w.gap}; team average gap ${o.score}${o.missing ? ` (${o.missing} pair(s) not readable)` : ""}`; };
+      const T = O.test.player; base.push(`Orb effect (playstyle clash between teammates): ${one(an, O.a)}; ${one(bn, O.b)}. Typical pro team: ${O.typical}. Style = fight involvement and kill participation against others at the same position, in past pro games (aggressive = top quarter of active pros, passive = bottom quarter). Tested on ${T.test.toLocaleString("en-US")} newer games: ${T.adopted ? `it helped (Brier ${T.brierBase} to ${T.brierOrb}), so it is in the chance and moves this series ${O.shiftPts >= 0 ? "+" : ""}${O.shiftPts} points toward ${an}.` : `${T.w >= 0 ? "more clash went with slightly more wins, the opposite of the idea" : "it did not improve the predictions"} (Brier ${T.brierBase} vs ${T.brierOrb}), so it is shown but not counted (0 points).`}`); } }
   for (const [t, T0] of [[an, A], [bn, B]]) { const si = T0 ? standIns(+T0.id) : []; if (si.length) base.push(`${t} fielded ${si.join(", ")} last game, not one of their usual five (last 15 games): ratings follow the players who played, so this is already in the chance, but a stand-in adds uncertainty.`); }
   if (up.h2h.length) { const w = up.h2h.filter((x) => (fav === "a" ? x.score[0] > x.score[1] : x.score[1] > x.score[0])).length; base.push(`Head-to-head: ${F} won ${w} of the last ${up.h2h.length} meetings (last 400 days).`); }
   const risks = [];
@@ -603,9 +657,11 @@ for (const m of UP.matches) {
   const A = findTeam(m.a), B = findTeam(m.b), ta = A && R.TR.get(+A.id), tb = B && R.TR.get(+B.id);
   // lineup factors: chemistry (games in a row with the current five) and new players, from each team's last game
   const TA0 = A && R.TR.get(+A.id), TB0 = B && R.TR.get(+B.id), lu = (T0) => (T0?.lineup ? { chem: T0.chem || 0, fresh: T0.lineup.filter((a) => (T0.pc?.get(a) || 0) < 5).map((a) => pname(a) || `player ${a}`) } : null), LA = lu(TA0), LB = lu(TB0);
-  const lineupL = LINEUP.adopted && LA && LB ? LINEUP.w[0] * (Math.log1p(LA.chem) - Math.log1p(LB.chem)) + LINEUP.w[1] * (LA.fresh.length - LB.fresh.length) : 0;
+  const lineupL0 = LINEUP.adopted && LA && LB ? LINEUP.w[0] * (Math.log1p(LA.chem) - Math.log1p(LB.chem)) + LINEUP.w[1] * (LA.fresh.length - LB.fresh.length) : 0;
+  const OA = A ? orbRead(+A.id) : null, OB = B ? orbRead(+B.id) : null, orbL = ORB.player.adopted && OA?.score != null && OB?.score != null ? ORB.player.w * (OA.score - OB.score) : 0, lineupL = lineupL0 + orbL;
   const ra = A ? lineupRating(+A.id) ?? P.r0 : P.r0, rb = B ? lineupRating(+B.id) ?? P.r0 : P.r0, pg = cal(lg(ra - rb + lineupL)), sp = seriesP(pg, m.bo);
-  const lineupInfo = { a: LA, b: LB, shiftPts: r1((headline(seriesP(pg, m.bo)) - headline(seriesP(cal(lg(ra - rb)), m.bo))) * 100), adopted: LINEUP.adopted, test: LINEUP };
+  const orbInfo = { a: OA, b: OB, typical: ORB.typical, test: ORB, shiftPts: orbL ? r1((headline(seriesP(cal(lg(ra - rb + lineupL)), m.bo)) - headline(seriesP(cal(lg(ra - rb + lineupL0)), m.bo))) * 100) : 0 };
+  const lineupInfo = { orb: orbInfo, a: LA, b: LB, shiftPts: r1((headline(seriesP(pg, m.bo)) - headline(seriesP(cal(lg(ra - rb)), m.bo))) * 100), adopted: LINEUP.adopted, test: LINEUP };
   const id = sid(`${m.date.slice(0, 16)}_${m.a.name}_${m.b.name}`), known = (ta?.n || 0) >= WARM && (tb?.n || 0) >= WARM;
   const side = (id2) => id2 ? profile(+id2) : null, pa = side(A?.id), pb = side(B?.id);
   const scen = [];
@@ -677,7 +733,8 @@ writeJSON(LN_F, LN);
 const preDone = Object.values(PRE.entries).filter((e) => e.result && !e.result.missing && !e.result.draw && e.known);
 accuracy.prematch = { n: preDone.length, hit: preDone.filter((e) => e.result.right).length, brier: preDone.length ? r3(preDone.reduce((a, e) => a + (e.p - (e.result.score[0] > e.result.score[1] ? 1 : 0)) ** 2, 0) / preDone.length) : null,
   list: Object.values(PRE.entries).filter((e) => e.result && !e.result.missing).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) };
-accuracy.lineup = LINEUP; accuracy.phases = PHTEST; accuracy.upsets = UP_TEST;
+accuracy.lineup = LINEUP; accuracy.orb = { player: ORB.player, hero: ORB.hero, typical: ORB.typical, quartiles: ORB.quartiles };
+dl.orb = { player: ORB.player, hero: ORB.hero, typical: ORB.typical, quartiles: ORB.quartiles, teams: Object.fromEntries(active.map(([id]) => [id, orbRead(id)]).filter(([, o]) => o && o.pairs.length)) }; writeJSON(path.join(OUT, "draft.json"), dl); accuracy.phases = PHTEST; accuracy.upsets = UP_TEST;
 accuracy.kills = { test: KTEST, lines: LINE, pace: PB, sd: Object.fromEntries(Object.entries(SD).map(([k, v]) => [k, r1(v)])) };
 writeJSON(path.join(OUT, "accuracy.json"), accuracy);
 writeJSON(path.join(OUT, "upcoming.json"), upcoming.map(({ a, b, scenarios, h2h, ...m }) => ({ ...m, a: { name: a.name, short: a.short, id: a.id, logo: a.logo, elo: a.elo, rank: a.rank, form: a.form }, b: { name: b.name, short: b.short, id: b.id, logo: b.logo, elo: b.elo, rank: b.rank, form: b.form } })));

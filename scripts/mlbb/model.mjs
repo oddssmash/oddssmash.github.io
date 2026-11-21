@@ -569,7 +569,39 @@ writeJSON(path.join(OUT, "teams.json"), teamsOut.map(({ profile, matches, ...t }
 for (const p of playersOut) writeJSON(path.join(OUT, "players", `${p.id}.json`), p);
 writeJSON(path.join(OUT, "players.json"), playersOut.map(({ pool, ...p }) => ({ ...p, top: pool.slice(0, 3) })));
 // draft tables for the Draft lab (client-side): hero strength, combos and counters with 3+ games
-writeJSON(path.join(OUT, "draft.json"), { traits: TR, avgLineup, shortLong: Object.fromEntries(HERO.filter((h) => h.shortLong).map((h) => [h.id, h.shortLong])), patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release } : null, wd: P.wd, scale: { hero: 0.2, syn: 0.1, cnt: 0.04 }, heroes: Object.fromEntries([...D.H].map(([k, v]) => [k, [r1(v.n), r1(v.w)]])), pairs: Object.fromEntries([...D.PAIR].filter(([, v]) => v.n >= 3).map(([k, v]) => [k, [r1(v.n), r1(v.w)]])), vs: Object.fromEntries([...D.VS].filter(([, v]) => v.n >= 3).map(([k, v]) => [k, [r1(v.n), r1(v.w)]])) });
+// ORB EFFECT (anti-synergy between teammates, the user's term from Dota). Two levels.
+//  Hero level: more than two farm-hungry heroes (damage + late-game traits 1.4 or more: marksmen and farming assassins) and a
+//  split power curve (early and late heroes on one side: the smaller of the two pulls). Tested on our games: a one-factor
+//  logistic on top of the full pre-game logit (ratings + draft layer), fitted on the first 70% of games by date, judged on the
+//  last 30%, adopted only if more clash means a lower chance (the idea's direction) and it lowers the held-out Brier. The early/late traits use each hero's whole record, so the test is
+//  slightly generous to the idea.
+//  Player level: Season 18 per-player numbers (MLBBHub, MPL ID/PH/MY) for the five listed starters: fight involvement
+//  (kills + deaths a game) and kill participation against other players in the same lane, in standard deviations
+//  (+ aggressive, - passive). Pairs: Gold with Roam, Jungle with Roam, Mid with Jungle. Season averages include the games
+//  they would predict and we have no game-by-game lineups, so this level cannot be tested fairly: shown, never counted.
+const heroOrbM = (hs) => { if (!hs || hs.length !== 5 || !hs.every(Boolean)) return null; const t = hs.map((h) => TR[h] || {}), greedy = hs.filter((h, i) => (t[i].dmg || 0) + (t[i].late || 0) >= 1.4);
+  const early = t.reduce((a, x) => a + (x.early || 0), 0), late = t.reduce((a, x) => a + (x.late || 0), 0);
+  return { score: Math.max(0, greedy.length - 2) + Math.min(early, late), greedy, clash: r3(Math.min(early, late)), early: hs.filter((h, i) => (t[i].early || 0) >= 0.3), late: hs.filter((h, i) => (t[i].late || 0) >= 0.6) }; };
+const ORBM = (() => { const rows = []; for (const x of ALLG) { if (!x.warm) continue; const a = heroOrbM(x.g.h1), b = heroOrbM(x.g.h2); if (a && b) rows.push({ b: x.base, f: a.score - b.score, y: x.y }); }
+  const cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), te = rows.slice(cut); let w = 0;
+  for (let it = 0; it < 500; it++) { let g = 0; for (const x of tr) g += (x.y - lg(x.b + w * x.f)) * x.f; w += (2 * (g - 5 * w)) / Math.max(1, tr.length); }
+  const br = (ww) => te.reduce((a, x) => a + (lg(x.b + ww * x.f) - x.y) ** 2, 0) / Math.max(1, te.length), b0 = br(0), b1 = br(w);
+  return { hero: { w: r3(w), adopted: w < 0 && b1 < b0 && te.length >= 200, sign: w < 0 ? "more clash, lower chance (as expected)" : "more clash went with slightly more wins (opposite of the idea)", brierBase: Math.round(b0 * 10000) / 10000, brierOrb: Math.round(b1 * 10000) / 10000, test: te.length, train: tr.length }, player: { tested: false } }; })();
+console.log(`orb effect (heroes): w ${ORBM.hero.w}, held-out Brier ${ORBM.hero.brierBase} -> ${ORBM.hero.brierOrb} (${ORBM.hero.adopted ? "adopted" : "not adopted"}, ${ORBM.hero.test} games)`);
+const ORB_LANES = ["EXP", "Jungle", "Mid", "Gold", "Roam"], ORB_PAIRS_M = [["Gold", "Roam"], ["Jungle", "Roam"], ["Mid", "Jungle"]];
+const fiveOf = (team, page) => { const out = {}; for (const x of rosterFor(team, page)) if (ROLEI[x.role] != null && !out[x.role]) out[x.role] = x.player; return Object.keys(out).length === 5 ? out : null; };
+const LASTPAGE = new Map(); for (const m of done) { LASTPAGE.set(m.a, m.page); LASTPAGE.set(m.b, m.page); }
+const ORB_NORM = (() => { const acc = Object.fromEntries(ORB_LANES.map((l) => [l, []])); for (const [t, pg] of LASTPAGE) { const f = fiveOf(t, pg); if (!f) continue; for (const l of ORB_LANES) { const p = s18Of(f[l], t); if (p && p.games >= 8) acc[l].push([p.kills + p.deaths, p.kp]); } }
+  const ms = (v) => { const m = v.reduce((a, x) => a + x, 0) / Math.max(1, v.length), sd = Math.sqrt(v.reduce((a, x) => a + (x - m) ** 2, 0) / Math.max(1, v.length)) || 1; return [m, sd]; };
+  return Object.fromEntries(ORB_LANES.map((l) => [l, { n: acc[l].length, a: ms(acc[l].map((x) => x[0])), k: ms(acc[l].map((x) => x[1])) }])); })();
+const styleWordM = (x) => (x >= 0.5 ? "aggressive" : x <= -0.5 ? "passive, safe" : "balanced");
+function orbM(team, page) { const f = fiveOf(team, page || LASTPAGE.get(team)); if (!f) return { score: null, pairs: [], why: "no listed five for this season" };
+  const st = {}; for (const l of ORB_LANES) { const p = s18Of(f[l], team), N = ORB_NORM[l]; if (p && p.games >= 8 && N.n >= 8) st[l] = r3(Math.max(-3, Math.min(3, 0.5 * (p.kills + p.deaths - N.a[0]) / N.a[1] + 0.5 * (p.kp - N.k[0]) / N.k[1]))); }
+  const pairs = ORB_PAIRS_M.filter(([x, y]) => st[x] != null && st[y] != null).map(([x, y]) => ({ la: x, lb: y, na: f[x], nb: f[y], sa: st[x], sb: st[y], wa: styleWordM(st[x]), wb: styleWordM(st[y]), gap: r3(Math.abs(st[x] - st[y])) }));
+  return { score: pairs.length ? r3(pairs.reduce((a, x) => a + x.gap, 0) / pairs.length) : null, pairs, worst: [...pairs].sort((a, b) => b.gap - a.gap)[0] || null, missing: 3 - pairs.length, why: pairs.length ? null : "no Season 18 numbers (8+ games) for these players" }; }
+const ORBM_TEAMS = Object.fromEntries([...LASTPAGE.keys()].map((t) => [t, orbM(t)]).filter(([, o]) => o.pairs.length));
+{ const sc = Object.values(ORBM_TEAMS).map((o) => o.score).sort((a, b) => a - b); ORBM.typical = sc.length ? sc[Math.floor(sc.length / 2)] : null; }
+writeJSON(path.join(OUT, "draft.json"), { orb: { ...ORBM, teams: ORBM_TEAMS }, traits: TR, avgLineup, shortLong: Object.fromEntries(HERO.filter((h) => h.shortLong).map((h) => [h.id, h.shortLong])), patch: lastPatch ? { patch: lastPatch.patch, release: lastPatch.release } : null, wd: P.wd, scale: { hero: 0.2, syn: 0.1, cnt: 0.04 }, heroes: Object.fromEntries([...D.H].map(([k, v]) => [k, [r1(v.n), r1(v.w)]])), pairs: Object.fromEntries([...D.PAIR].filter(([, v]) => v.n >= 3).map(([k, v]) => [k, [r1(v.n), r1(v.w)]])), vs: Object.fromEntries([...D.VS].filter(([, v]) => v.n >= 3).map(([k, v]) => [k, [r1(v.n), r1(v.w)]])) });
 writeJSON(path.join(OUT, "heroes.json"), HERO);
 
 // ---------------------------------------------------------------- projections: upcoming matches and any pairing
@@ -648,7 +680,7 @@ for (const m of upcoming) {
   // the parts of the single-game chance (logits), so the site's analysis switches can rebuild the odds: ratings, career win
   // rate while ratings settle, big-stage experience, archetype matchups
   const TA0 = R.T.get(m.a), TB0 = R.T.get(m.b), parts = { base: Math.round((ratingOf(m.a) - ratingOf(m.b)) * crossOf(m.a, m.b) * 10000) / 10000, cw: TA0 && TB0 ? Math.round(cwEdge(R.PLR, R.SGc, TA0, TB0, lineupOf(m.a, m.page), lineupOf(m.b, m.page), seasonOf(m.page)) * 10000) / 10000 : 0, exp: ndg.exp, arch: ndg.arch };
-  const rec = { warn: warn0, context: rec0ctx, noArch, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n, m), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
+  const rec = { orb: { a: orbM(m.a, m.page), b: orbM(m.b, m.page), typical: ORBM.typical, hero: ORBM.hero }, warn: warn0, context: rec0ctx, noArch, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, ...pr, confidence: confOf(pr.pSeries, n, m), records: [R.T.get(m.a)?.w + "-" + R.T.get(m.a)?.l, R.T.get(m.b)?.w + "-" + R.T.get(m.b)?.l] };
   writeJSON(path.join(OUT, "matches", `${m.id}.json`), rec);
   upOut.push({ warn: warn0, noArch: { pSeries: noArch.pSeries, pGame: noArch.pGame, expMaps: noArch.expMaps }, parts, id: m.id, date: m.date, timed: m.timed, league: m.league, stage: m.stage, bo: m.bo, a: m.a, b: m.b, pSeries: pr.pSeries, pGame: pr.pGame, expMaps: pr.expMaps, confidence: rec.confidence });
   if (n >= 6) { const fav = pr.pSeries >= 0.5 ? m.a : m.b, pf = Math.min(0.9, Math.max(pr.pSeries, 1 - pr.pSeries)); picks.push({ id: m.id, date: m.date, league: m.league, kind: "series", pick: `${fav} to win the series`, p: r3(pf), game: `${m.a} vs ${m.b}` });

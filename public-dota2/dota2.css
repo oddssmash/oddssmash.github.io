@@ -650,3 +650,8 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
   .dg { grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px; }
   .dg-h, .dg-mini .dg-h { min-height: 58px; padding: 4px 2px; } .dg-h .himg { width: 32px; height: 32px; } .dg-n { font-size: 10px; }
 }
+
+/* orb effect */
+.orb .orb-h{font-size:14px;margin:10px 0 4px}
+.orb-l{margin:0;padding-left:18px;display:grid;gap:6px}
+.orb-l li{line-height:1.45}
