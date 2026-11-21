@@ -18,7 +18,7 @@ async function wikitext(titles) {
   for (let i = 0; i < titles.length; i += 50) {
     const wait = last + 2500 - Date.now(); if (wait > 0) await sleep(wait); last = Date.now();
     const q = new URLSearchParams({ action: "query", prop: "revisions", rvprop: "content", rvslots: "main", format: "json", redirects: "1", titles: titles.slice(i, i + 50).join("|") });
-    try { const r = await fetch("https://liquipedia.net/dota2/api.php?" + q, { headers: UA }); if (!r.ok) { console.log("Liquipedia HTTP", r.status); continue; }
+    try { const r = await fetch("https://liquipedia.net/dota2/api.php?" + q, { headers: UA, signal: AbortSignal.timeout(30000) }); if (!r.ok) { console.log("Liquipedia HTTP", r.status); continue; }
       const j = await r.json(), back = {}; for (const x of [...(j.query?.normalized || []), ...(j.query?.redirects || [])]) back[x.to] = back[x.from] || x.from;
       for (const p of Object.values(j.query?.pages || {})) { const w = p.revisions?.[0]?.slots?.main?.["*"]; const key = back[p.title] || p.title; out[key] = w || null; out[p.title] = w || null; }
     } catch (e) { console.log("Liquipedia fetch failed:", e.message); }

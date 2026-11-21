@@ -17,7 +17,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let last = 0;
 async function api(params) {
   const wait = last + 2100 - Date.now(); if (wait > 0) await sleep(wait); last = Date.now();
-  for (let i = 0; i < 3; i++) { try { const r = await fetch(API + "?" + new URLSearchParams({ format: "json", ...params }), { headers: UA }); if (r.ok) return await r.json(); if (r.status === 429) await sleep(30000); } catch { await sleep(5000); } }
+  for (let i = 0; i < 3; i++) { try { const r = await fetch(API + "?" + new URLSearchParams({ format: "json", ...params }), { headers: UA, signal: AbortSignal.timeout(30000) }); if (r.ok) return await r.json(); if (r.status === 429) await sleep(30000); } catch { await sleep(5000); } }
   return null;
 }
 const safe = (t) => t.replace(/[^A-Za-z0-9]+/g, "_");

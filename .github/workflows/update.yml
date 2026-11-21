@@ -68,6 +68,7 @@ jobs:
       # A FIBA hiccup must not stop the NBA update, so these steps may fail without failing the run.
       - name: FIBA fetch and model
         continue-on-error: true
+        timeout-minutes: 15 # a stalled request must not hold up the refresh chain
         run: |
           node scripts/fiba/fetch.mjs
           node scripts/fiba/model.mjs
@@ -78,6 +79,7 @@ jobs:
       # changed pages), official stats from the MPL PH and MPL ID sites, then the walk-forward model.
       - name: MLBB fetch and model
         continue-on-error: true
+        timeout-minutes: 15 # a stalled request must not hold up the refresh chain
         run: |
           node scripts/mlbb/fetch.mjs
           node scripts/mlbb/teamnames.mjs
@@ -91,6 +93,7 @@ jobs:
       # batched query requests, cached 6 to 24 hours). Like MLBB and FIBA, a hiccup here must not stop the rest of the site.
       - name: Dota 2 fetch and model
         continue-on-error: true
+        timeout-minutes: 20 # a stalled request must not hold up the refresh chain
         env:
           ODDSPAPI_KEY: ${{ secrets.ODDSPAPI_KEY }}
         run: |
