@@ -181,14 +181,18 @@ function makeDraft(tau = 120 * DAY) {
 
 // ---------------------------------------------------------------- replay (team + player ratings, side edge, draft check)
 const PATCH_T = PATCHES.map((p) => ({ t: Date.parse(p.date) / 1000, changed: p.patch === PNOTES?.patch ? PNOTES.heroes : {} }));
-const WARM = 8; // games a team needs on record before its series are graded
+const WARM = 8;
+// LINEUP HELPERS: shared players between two fives; games in a row with (at least four of) the same five; players new to a team
+const overlap = (a, b) => (a && b ? a.filter((x) => b.includes(x)).length : 0);
+const chemOf = (T, accs) => (T.lineup && overlap(accs, T.lineup) >= 4 ? T.chem || 0 : 0);
+const standOf = (T, accs) => (accs || []).filter((a) => (T.pc?.get(a) || 0) < 5).length; // games a team needs on record before its series are graded
 function replay(P, record = false) {
   const TR = new Map(), PRt = new Map(), DR = makeDraft(), log = [], glog = [];
   const PQ = PATCH_T.filter((p) => p.t > (G[0]?.t || 0)).map((p) => ({ ...p })); let side = { n: 40, w: 20.8 }; // Radiant wins, prior 52%
   const team = (id, t) => { let x = TR.get(id); if (!x) TR.set(id, (x = { r: P.r0, n: 0, last: t, lineup: null, hist: [] })); const f = Math.exp(-(t - x.last) / (P.H * DAY)); x.r = P.r0 + (x.r - P.r0) * f; x.last = t; return x; };
   const player = (acc, t) => { let x = PRt.get(acc); if (!x) PRt.set(acc, (x = { r: P.r0, n: 0, last: t })); const f = Math.exp(-(t - x.last) / (P.H * DAY)); x.r = P.r0 + (x.r - P.r0) * f; x.last = t; return x; };
   const strength = (T, accs, t) => { if (!P.w || !accs || accs.length !== 5) return T.r; const pr = accs.reduce((a, acc) => a + player(acc, t).r, 0) / 5; return (1 - P.w) * T.r + P.w * pr; };
-  let bS = 0, nS = 0, bG = 0, nG = 0, bGD = 0, nGD = 0, hit = 0;
+  let bS = 0, nS = 0, bG = 0, nG = 0, bGD = 0, nGD = 0, hit = 0; const LG = [];
   for (const s of series) {
     const A = team(s.a, s.t), B = team(s.b, s.t), warm = A.n >= WARM && B.n >= WARM;
     const sa = strength(A, A.lineup, s.t), sb = strength(B, B.lineup, s.t), pg = lg(sa - sb), sp = seriesP(pg, s.bo);
@@ -200,6 +204,7 @@ function replay(P, record = false) {
       const R = team(g.r, g.t), Dd = team(g.d, g.t), accR = g.lines[0].map((l) => l.acc), accD = g.lines[1].map((l) => l.acc);
       const sideL = logit(side.w / side.n), base = strength(R, accR.length === 5 ? accR : R.lineup, g.t) - strength(Dd, accD.length === 5 ? accD : Dd.lineup, g.t) + sideL;
       const p = lg(base), y = g.rw, wm = R.n >= WARM && Dd.n >= WARM;
+      if (record && wm && accR.length === 5 && accD.length === 5) { const cR = chemOf(R, accR), cD = chemOf(Dd, accD), sR = standOf(R, accR), sD = standOf(Dd, accD); LG.push({ base, y, t: g.t, f: [Math.log1p(cR) - Math.log1p(cD), sR - sD] }); }
       if (wm) { bG += (p - y) ** 2; nG++; }
       if (wm && g.pick[0].length === 5 && g.pick[1].length === 5) { const pd = lg(base + P.dw * DR.logitOf(g.pick[0], g.pick[1])); bGD += (pd - y) ** 2; nGD++; if (record) { const fr = draftVec(g.pick[0], DR.tempo), fd = draftVec(g.pick[1], DR.tempo); glog.push({ g, p, pd, base, dl: DR.logitOf(g.pick[0], g.pick[1]), fv: fr.map((x, i) => x - fd[i]), ex: extraVec(g.pick[0], g.pick[1], DR.counterScore(g.pick[0], g.pick[1])), fr, fd }); } }
       else if (record) glog.push({ g, p, pd: null });
@@ -207,13 +212,14 @@ function replay(P, record = false) {
       const err = y - p, kR = P.K * (1 + 2 / (1 + R.n / 10)), kD = P.K * (1 + 2 / (1 + Dd.n / 10));
       R.r += kR * err; Dd.r -= kD * err; R.n++; Dd.n++;
       if (P.w) { for (const acc of accR) { const x = player(acc, g.t); x.r += P.K * (1 + 2 / (1 + x.n / 10)) * err; x.n++; } for (const acc of accD) { const x = player(acc, g.t); x.r -= P.K * (1 + 2 / (1 + x.n / 10)) * err; x.n++; } }
+      for (const [T, accs] of [[R, accR], [Dd, accD]]) { if (accs.length !== 5) continue; T.chem = T.lineup && overlap(accs, T.lineup) >= 4 ? (T.chem || 0) + 1 : 1; T.pc ||= new Map(); for (const a of accs) T.pc.set(a, (T.pc.get(a) || 0) + 1); }
       if (accR.length === 5) R.lineup = accR; if (accD.length === 5) Dd.lineup = accD;
       if (record) { R.hist.push([g.t, r3(R.r)]); Dd.hist.push([g.t, r3(Dd.r)]); }
       while (PQ.length && g.t >= PQ[0].t) { const pq = PQ.shift(); DR.patchShift(pq.changed); }
       side.n++; side.w += y; DR.learn(g);
     }
   }
-  return { TR, PRt, DR, log, glog, side: side.w / side.n, brier: bS / Math.max(1, nS), n: nS, hit: hit / Math.max(1, nS), gBrier: bG / Math.max(1, nG), gBrierDraft: bGD / Math.max(1, nGD), nGD, strength };
+  return { LG, TR, PRt, DR, log, glog, side: side.w / side.n, brier: bS / Math.max(1, nS), n: nS, hit: hit / Math.max(1, nS), gBrier: bG / Math.max(1, nG), gBrierDraft: bGD / Math.max(1, nGD), nGD, strength };
 }
 
 // SETTINGS FREEZE: the grid search runs once a week (or with RETUNE=1); in between, the saved settings are reused, so a
@@ -308,6 +314,14 @@ function gameAnalysis(rad, dire, base, aRad) {
   const upset = dog && (dog === "a" ? postA - preA : preA - postA) >= 0.05 ? { team: dog, pre: dog === "a" ? preA : r3(1 - preA), post: dog === "a" ? postA : r3(1 - postA), why: dv.filter((d) => (dog === "a" ? d.c > 0 : d.c < 0)).slice(0, 3).map((d) => d.f) } : null;
   return { preA, postA, phases, drivers: dv, upset, readA: readDraft(aRad ? fr : fd), readB: readDraft(aRad ? fd : fr) };
 }
+// LINEUP TEST (chemistry and stand-ins): a two-factor logistic fit on top of the full pre-game edge (player ratings + side),
+// fitted on the first 70% of games by date and judged on the last 30%. Adopted into projections only if it lowers the
+// held-out Brier score. Player ratings already follow the five who play, so these measure only what is left over.
+const LINEUP = (() => { const rows = R.LG, cut = Math.floor(rows.length * 0.7), tr = rows.slice(0, cut), te = rows.slice(cut);
+  let w = [0, 0]; for (let it = 0; it < 500; it++) { const g = [0, 0]; for (const x of tr) { const e = x.y - lg(x.base + w[0] * x.f[0] + w[1] * x.f[1]); g[0] += e * x.f[0]; g[1] += e * x.f[1]; } w = w.map((v, j) => v + (2 * (g[j] - 5 * v)) / tr.length); }
+  const br = (ww) => te.reduce((a, x) => a + (lg(x.base + ww[0] * x.f[0] + ww[1] * x.f[1]) - x.y) ** 2, 0) / Math.max(1, te.length), b0 = br([0, 0]), b1 = br(w);
+  return { w: w.map((v) => Math.round(v * 1000) / 1000), adopted: b1 < b0, brierBase: Math.round(b0 * 10000) / 10000, brierLineup: Math.round(b1 * 10000) / 10000, test: te.length, train: tr.length }; })();
+console.log(`lineup test: chemistry w ${LINEUP.w[0]}, stand-ins w ${LINEUP.w[1]}; held-out Brier ${LINEUP.brierBase} -> ${LINEUP.brierLineup} (${LINEUP.adopted ? "adopted" : "not adopted"}, ${LINEUP.test} games)`);
 // CALIBRATION TEST: pull single-game chances toward 50% (logit x T), fitted on the first 70% of graded series by date and
 // judged on the last 30% (series Brier). Adopted only if it helps on the held-out part.
 const GR = R.log.filter((x) => x.warm && !x.s.draw), cut = Math.floor(GR.length * 0.7);
@@ -513,6 +527,7 @@ function explainMatch(up, A, B, pa, pb, mk) {
   const base = [];
   if (FS.elo && US.elo) base.push(`Rating ${F} ${FS.elo} (#${FS.rank ?? "-"}) against ${U} ${US.elo} (#${US.rank ?? "-"}): ratings come from each of the five players' results in every pro game of the last 400 days (OpenDota).`);
   if (FS.form || US.form) base.push(`Last five series: ${F} ${FS.form || "-"}, ${U} ${US.form || "-"} (W win, L loss, D draw).`);
+  { const L0 = up.lineup; if (L0?.a && L0?.b) base.push(`Lineup chemistry: ${an} have played ${L0.a.chem} game(s) in a row with (at least four of) their current five, ${bn} ${L0.b.chem}.${L0.a.fresh.length || L0.b.fresh.length ? ` New to the team (under 5 games): ${[...L0.a.fresh.map((x) => `${x} (${an})`), ...L0.b.fresh.map((x) => `${x} (${bn})`)].join(", ")}.` : ""} Tested on ${L0.test.test.toLocaleString("en-US")} newer games, chemistry and stand-ins ${L0.adopted ? `helped a little (Brier ${L0.test.brierBase} to ${L0.test.brierLineup}), so they are in the chance: they move this series ${L0.shiftPts > 0 ? "+" : ""}${L0.shiftPts} points for ${an}` : "did not help, so they are shown but not used"}. Player ratings already follow the five who play.`); }
   for (const [t, T0] of [[an, A], [bn, B]]) { const si = T0 ? standIns(+T0.id) : []; if (si.length) base.push(`${t} fielded ${si.join(", ")} last game, not one of their usual five (last 15 games): ratings follow the players who played, so this is already in the chance, but a stand-in adds uncertainty.`); }
   if (up.h2h.length) { const w = up.h2h.filter((x) => (fav === "a" ? x.score[0] > x.score[1] : x.score[1] > x.score[0])).length; base.push(`Head-to-head: ${F} won ${w} of the last ${up.h2h.length} meetings (last 400 days).`); }
   const risks = [];
@@ -586,7 +601,11 @@ const upcoming = [];
 for (const m of UP.matches) {
   const start = Date.parse(m.date) / 1000; if (start < now - 10 * 3600) continue; // started more than 4 hours ago: the result arrives through OpenDota
   const A = findTeam(m.a), B = findTeam(m.b), ta = A && R.TR.get(+A.id), tb = B && R.TR.get(+B.id);
-  const ra = A ? lineupRating(+A.id) ?? P.r0 : P.r0, rb = B ? lineupRating(+B.id) ?? P.r0 : P.r0, pg = cal(lg(ra - rb)), sp = seriesP(pg, m.bo);
+  // lineup factors: chemistry (games in a row with the current five) and new players, from each team's last game
+  const TA0 = A && R.TR.get(+A.id), TB0 = B && R.TR.get(+B.id), lu = (T0) => (T0?.lineup ? { chem: T0.chem || 0, fresh: T0.lineup.filter((a) => (T0.pc?.get(a) || 0) < 5).map((a) => pname(a) || `player ${a}`) } : null), LA = lu(TA0), LB = lu(TB0);
+  const lineupL = LINEUP.adopted && LA && LB ? LINEUP.w[0] * (Math.log1p(LA.chem) - Math.log1p(LB.chem)) + LINEUP.w[1] * (LA.fresh.length - LB.fresh.length) : 0;
+  const ra = A ? lineupRating(+A.id) ?? P.r0 : P.r0, rb = B ? lineupRating(+B.id) ?? P.r0 : P.r0, pg = cal(lg(ra - rb + lineupL)), sp = seriesP(pg, m.bo);
+  const lineupInfo = { a: LA, b: LB, shiftPts: r1((headline(seriesP(pg, m.bo)) - headline(seriesP(cal(lg(ra - rb)), m.bo))) * 100), adopted: LINEUP.adopted, test: LINEUP };
   const id = sid(`${m.date.slice(0, 16)}_${m.a.name}_${m.b.name}`), known = (ta?.n || 0) >= WARM && (tb?.n || 0) >= WARM;
   const side = (id2) => id2 ? profile(+id2) : null, pa = side(A?.id), pb = side(B?.id);
   const scen = [];
@@ -605,6 +624,7 @@ for (const m of UP.matches) {
   writeJSON(path.join(OUT, "matches", `${id}.json`), up);
   // pre-match record: keep overwriting until the match starts, then it stays frozen
   up.formA = A ? (R.TR.get(+A.id)?.hist || []).slice(-25).map(([d, r]) => elo(r)) : []; up.formB = B ? (R.TR.get(+B.id)?.hist || []).slice(-25).map(([d, r]) => elo(r)) : [];
+  up.lineup = lineupInfo;
   up.markets = A && B ? nextMarkets(+A.id, +B.id, pg, m.a.name, m.b.name) : null; up.explain = explainMatch(up, A, B, pa, pb, up.markets);
   if (A && B) { up.series = seriesState(+A.id, +B.id, start, m.bo, pg); if (up.series.done && start < now - 3600) { upcoming.pop(); } else writeJSON(path.join(OUT, "matches", `${id}.json`), up); }
   // ESTIMATED MAIN LINES (no sportsbook feed for Dota 2 is open to us): series winner, map handicap and total maps saved
@@ -657,7 +677,7 @@ writeJSON(LN_F, LN);
 const preDone = Object.values(PRE.entries).filter((e) => e.result && !e.result.missing && !e.result.draw && e.known);
 accuracy.prematch = { n: preDone.length, hit: preDone.filter((e) => e.result.right).length, brier: preDone.length ? r3(preDone.reduce((a, e) => a + (e.p - (e.result.score[0] > e.result.score[1] ? 1 : 0)) ** 2, 0) / preDone.length) : null,
   list: Object.values(PRE.entries).filter((e) => e.result && !e.result.missing).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) };
-accuracy.phases = PHTEST; accuracy.upsets = UP_TEST;
+accuracy.lineup = LINEUP; accuracy.phases = PHTEST; accuracy.upsets = UP_TEST;
 accuracy.kills = { test: KTEST, lines: LINE, pace: PB, sd: Object.fromEntries(Object.entries(SD).map(([k, v]) => [k, r1(v)])) };
 writeJSON(path.join(OUT, "accuracy.json"), accuracy);
 writeJSON(path.join(OUT, "upcoming.json"), upcoming.map(({ a, b, scenarios, h2h, ...m }) => ({ ...m, a: { name: a.name, short: a.short, id: a.id, logo: a.logo, elo: a.elo, rank: a.rank, form: a.form }, b: { name: b.name, short: b.short, id: b.id, logo: b.logo, elo: b.elo, rank: b.rank, form: b.form } })));
