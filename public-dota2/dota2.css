@@ -641,3 +641,12 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 .try-btn { display: inline-flex; align-items: center; justify-content: center; min-height: 40px; padding: 0 14px; margin: 8px 0 0; font-size: 13px; }
 .lib-act { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
 .orig { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; margin: 8px 0; border-radius: 10px; background: var(--gold-wash); border: 1px solid var(--gold); font-size: 13px; } .orig .fbtn { align-self: flex-start; }
+/* phone: hero search above the team names, compact results; desktop unchanged */
+.ds-msearch { display: none; }
+@media (max-width: 759px) {
+  .ds-msearch { display: block; position: sticky; top: 0; z-index: 5; background: var(--page); padding: 8px 0; margin: 8px 0 0; }
+  .ds-msearch + .ds-cols { margin-top: 4px; } #sim-q { display: none; }
+  .dg-mini { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px; margin-top: 8px; max-height: 46vh; overflow-y: auto; }
+  .dg { grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 8px; }
+  .dg-h, .dg-mini .dg-h { min-height: 58px; padding: 4px 2px; } .dg-h .himg { width: 32px; height: 32px; } .dg-n { font-size: 10px; }
+}

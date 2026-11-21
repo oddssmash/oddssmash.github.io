@@ -486,6 +486,7 @@ async function vSim() {
       document.body.classList.remove("sim-wide-on");
       const tbox = (s) => `<div class="ds-team ${col(s)}"><span class="lbl">${s === blue ? "BLUE · FIRST PICK" : "RED · SECOND PICK"}</span>${pickBox(`st${s}`, "Choose a team", team(s) ? sn(team(s).name) : "")}</div>`;
       app.innerHTML = `<div class="sim" id="sim"><div class="ds-head"><h1>Draft simulator</h1><button class="ds-widebtn" type="button" data-act="wide">${icon("M3 9h18v10H3zM7 3l-2 2 2 2M5 5h9a4 4 0 014 4")}Wide view</button></div>
+        <div class="ds-msearch"><label class="ds-search">${icon("M11 4a7 7 0 100 14 7 7 0 000-14zM20 20l-3.5-3.5", 18)}<input id="dsq2" type="search" placeholder="Search heroes" aria-label="Search heroes" value="${esc(st.q)}" autocomplete="off"></label><div class="dg dg-mini" id="dgm">${st.q.trim() ? grid() : ""}</div></div>
         <div class="ds-teams">${tbox(blue)}${tbox(red)}</div>
         <section class="ds-stage" aria-label="Draft stage"><div class="ds-ph">${phaseLine()}</div>${toolRow()}${mapRow()}${track()}<div class="ds-banrow">${bans(blue)}<span class="lbl">BANS</span>${bans(red)}</div><div class="ds-cols">${picks(blue)}${picks(red)}</div>${W.html}</section>
         <section class="ds-picker" aria-label="Hero picker">${roleBtns(false)}${search("Search heroes")}<p class="small ds-info" id="dsi">${selInfo()}</p><div class="dg" id="dg">${grid()}</div></section>
@@ -530,7 +531,7 @@ async function vSim() {
       else if (a === "next") { st.used1.push(...st.h1.filter(Boolean)); st.used2.push(...st.h2.filter(Boolean)); for (const k of ["h1", "h2", "b1", "b2"]) st[k] = ["", "", "", "", ""]; st.hist = []; render(); }
     });
     root.addEventListener("toggle", (e) => { const d = e.target.closest?.("details[data-k]"); if (d) st.open[d.dataset.k] = d.open; }, true);
-    const q = document.getElementById("dsq"); q?.addEventListener("input", () => { st.q = q.value; document.getElementById("dg").innerHTML = grid(); });
+    for (const id of ["dsq", "dsq2"]) { const q = document.getElementById(id); q?.addEventListener("input", () => { st.q = q.value; const g = document.getElementById("dg"), m = document.getElementById("dgm"); if (g) g.innerHTML = grid(); if (m) m.innerHTML = st.q.trim() ? grid() : ""; for (const o of ["dsq", "dsq2"]) { const x = document.getElementById(o); if (x && x !== q) x.value = st.q; } }); }
     document.getElementById("ds-series")?.addEventListener("change", (e) => { st.series = e.target.checked; render(); });
     document.getElementById("ds-nobans")?.addEventListener("change", (e) => { st.noBans = e.target.checked; if (st.noBans) { st.b1 = st.b1.map(() => ""); st.b2 = st.b2.map(() => ""); } try { localStorage.setItem("mlbb-nobans", st.noBans ? "1" : "0"); } catch {} st.sel = ""; render(); });
     document.getElementById("ds-map")?.addEventListener("change", (e) => { st.map = e.target.value; render(); });
