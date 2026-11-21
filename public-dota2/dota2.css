@@ -655,3 +655,16 @@ a.rcard { display: block; color: inherit; text-decoration: none; } a.rcard:hover
 .orb .orb-h{font-size:14px;margin:10px 0 4px}
 .orb-l{margin:0;padding-left:18px;display:grid;gap:6px}
 .orb-l li{line-height:1.45}
+
+/* lineup card */
+.lu-l { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.lu-r { display: grid; grid-template-columns: 52px minmax(0, 1fr); gap: 2px 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.lu-r:last-child { border-bottom: 0; }
+.lu-pos { font-size: 12px; font-weight: 700; letter-spacing: .04em; color: var(--muted); grid-row: span 2; }
+.lu-n { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; overflow-wrap: anywhere; }
+.lu-tags { display: flex; flex-wrap: wrap; gap: 4px; grid-column: 2; }
+.lu-tags:empty { display: none; }
+.lu-t { font-size: 11px; font-weight: 650; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line); color: var(--ink-2); }
+.lu-t.new { border-color: var(--accent); color: var(--accent); }
+.lu-t.warn { border-color: var(--gold); color: var(--gold); }
+.lu-x { margin: 10px 0 0; padding-left: 18px; display: grid; gap: 4px; }

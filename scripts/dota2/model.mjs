@@ -651,15 +651,63 @@ function bookFor(m) { const t0 = Date.parse(m.date), same = (x, y) => { const a 
     if (hit(fa, ma) && hit(fb, mb)) return { ...f, swapped: false }; if (hit(fa, mb) && hit(fb, ma)) return { ...f, swapped: true }; } return null; }
 const numIn = (s0) => { const x = /([+-]?\d+(?:\.\d+)?)/.exec(String(s0 || "")); return x ? +x[1] : null; };
 const sideOf = (o, f) => { const t = `${o.name} ${o.raw}`.toLowerCase(); if (/\bover\b/.test(t)) return "over"; if (/\bunder\b/.test(t)) return "under"; if (/\bhome\b/.test(t)) return "p1"; if (/\baway\b/.test(t)) return "p2"; const nm = String(o.name).trim(); if (nm === "1") return "p1"; if (nm === "2") return "p2"; if (bnk(t).includes(bnk(f.a))) return "p1"; if (bnk(t).includes(bnk(f.b))) return "p2"; return null; };
+// LINEUPS FOR EVERY SCHEDULED TEAM. Sources, best first:
+//  1) Liquipedia (scripts/dota2/rosters.mjs): the tournament's participant list (five with positions and Dota account ids),
+//     else the team page's active squad; the team page adds join dates, captain, coach and inactive players.
+//  2) OpenDota: the five in the team's last pro game (also used to spot stand-ins: someone in the last game who is not on
+//     the listed roster). A team with few games still gets the five from its most recent match, labelled as such.
+// Liquipedia and OpenDota sometimes name a team differently (Liquipedia "1w Team" is OpenDota "1win"): when the name finds
+// no team, the listed players do: 3 or more of the five in a team's last game or usual five (last 15 games), and the most
+// recently active such team wins, because rosters move between org tags (this roster played as "Iron Wing" before "1win").
+// Rating when no team record matches: the average of the listed players' own ratings (3+ with games), blended with a
+// default team rating the way every lineup is; with fewer, the default rating, labelled. Such teams never get a pick.
+const LPR = readJSON(path.join(D, "rosters.json"), { tours: {}, teams: {} });
+const accByName = new Map(); for (const [id, p] of Object.entries(PLAYERS)) { const k = nk(p.name); if (k) (accByName.get(k) || accByName.set(k, []).get(k)).push(+id); }
+// a listed player without an account id is linked by name only when the name is unique among pro players or the player is on that team
+const accOf = (p, teamId) => { if (p.acc) return p.acc; const c = accByName.get(nk(p.name)) || []; const on = teamId ? c.filter((a) => PLAYERS[a]?.team === teamId) : []; return on.length === 1 ? on[0] : c.length === 1 ? c[0] : null; };
+const POSR = ["Core (pos 1)", "Core (pos 2)", "Offlane (pos 3)", "Support (pos 4)", "Support (pos 5)"];
+function lpFor(m, o) { const T = LPR.tours[m.tpage]?.teams || {}; const tl = T[o.name] || Object.entries(T).find(([k]) => nk(k) === nk(o.name) || strip(k) === strip(o.name))?.[1] || null;
+  const tp = o.page && !/redlink|index\.php/.test(o.page) ? LPR.teams[o.page] || null : null; return { tl, tp, tour: m.tournament }; }
+const listedOf = (lp) => { const t = (lp.tl?.players || []).filter((p) => !p.sub), p = lp.tp?.players || []; return t.length >= 5 || t.length >= p.length ? { five: t, from: t.length ? "tour" : null } : { five: p, from: "page" }; };
+function teamByPlayers(accs) { const set = new Set(accs.filter(Boolean)); if (set.size < 3) return null; let best = null;
+  for (const [id, T] of R.TR) { if (!T.lineup || T.last < now - 365 * DAY) continue; const u = new Set([...T.lineup, ...usualFive(id)]), hit = [...set].filter((a) => u.has(a)).length; if (hit >= 3 && (!best || T.last > best.last || (T.last === best.last && hit > best.hit))) best = { id, hit, last: T.last }; }
+  return best ? { ...(TEAMS[best.id] || { name: tname(best.id) }), id: best.id, byPlayers: best.hit } : null; }
+const prOf = (acc) => { const x = R.PRt.get(acc); return x ? P.r0 + (x.r - P.r0) * Math.exp(-(now - x.last) / (P.H * DAY)) : null; };
+function lineupFor(o, T0id, lp) {
+  const T0 = T0id != null ? R.TR.get(+T0id) : null, last = T0id != null ? rosterOf(+T0id) : [], lastSet = new Set(last.map((p) => p.id));
+  const { five, from } = listedOf(lp), src = from === "tour" ? `Liquipedia: ${lp.tour} participant list` : from === "page" && five.length ? "Liquipedia: team page" : null;
+  const joinOf = (name) => (lp.tp?.players || []).find((x) => nk(x.name) === nk(name));
+  const out = { coach: [...(lp.tp?.coach || []), ...(lp.tl?.coach || [])].filter((c, i, a) => a.findIndex((d) => nk(d.name) === nk(c.name)) === i).map((c) => ({ name: c.name, role: c.role })),
+    subs: (lp.tl?.players || []).filter((p) => p.sub).map((p) => ({ name: p.name, pos: p.pos })), inactive: (lp.tp?.inactive || []).map((p) => ({ name: p.name, pos: p.pos, since: p.since })) };
+  let players, source, note = null;
+  if (five.length) {
+    players = five.slice().sort((a, b) => (a.pos || 9) - (b.pos || 9)).map((p) => { const acc = accOf(p, T0id != null ? +T0id : null), j = joinOf(p.name), isNew = !!(j?.join && Date.parse(j.join) / 1000 > now - 60 * DAY);
+      return { id: acc || null, name: p.name, pos: p.pos, role: p.pos ? POSR[p.pos - 1] : null, flag: p.flag || j?.flag || null, captain: j?.captain || undefined,
+        joined: j?.join || null, isNew: isNew || undefined, notLast: last.length && acc && !lastSet.has(acc) ? true : undefined }; });
+    // stand-ins: someone in the last game who is not on the listed five, only when 4+ of the five are linked to an account
+    const ids = new Set(players.map((p) => p.id).filter(Boolean)), names = new Set(players.map((p) => nk(p.name))); out.standIns = last.length && ids.size >= 4 ? last.filter((p) => !ids.has(p.id) && !names.has(nk(p.name))).map((p) => p.name) : [];
+    if (ids.size < 4) for (const p of players) delete p.notLast;
+    source = src; if (five.length < 5) note = `Liquipedia lists ${five.length} of the five.`;
+  } else if (last.length) { players = last; source = (T0?.n || 0) < WARM ? `OpenDota: most recent match (only ${T0?.n || 0} game(s) in our data)` : "OpenDota: last game"; out.standIns = standIns(+T0id); }
+  else { players = []; source = null; note = "No lineup on record: Liquipedia lists no players for this team and it has no pro games in OpenDota."; }
+  let rating = "team", r = null;
+  if (!T0) { const pr = players.map((p) => (p.id ? prOf(p.id) : null)), known = pr.filter((x) => x != null);
+    if (known.length >= 3) { rating = "players"; r = (1 - (P.w || 0)) * P.r0 + (P.w || 0) * (pr.reduce((a, x) => a + (x ?? P.r0), 0) / 5); } else rating = "default"; }
+  return { players, source, note, rating, r, ...out };
+}
+let LU_MISSING_BEFORE = 0, LU_MISSING_AFTER = 0; const LU_TEAMS_BEFORE = new Set(), LU_TEAMS_AFTER = new Set(), LP_BY_TEAM = new Map();
 const upcoming = [];
 for (const m of UP.matches) {
   const start = Date.parse(m.date) / 1000; if (start < now - 10 * 3600) continue; // started more than 4 hours ago: the result arrives through OpenDota
-  const A = findTeam(m.a), B = findTeam(m.b), ta = A && R.TR.get(+A.id), tb = B && R.TR.get(+B.id);
+  const LPA = lpFor(m, m.a), LPB = lpFor(m, m.b), lpAccs = (lp) => listedOf(lp).five.map((p) => accOf(p, null));
+  const A0 = findTeam(m.a), B0 = findTeam(m.b), A = A0 || teamByPlayers(lpAccs(LPA)), B = B0 || teamByPlayers(lpAccs(LPB)), ta = A && R.TR.get(+A.id), tb = B && R.TR.get(+B.id);
+  const LUA = lineupFor(m.a, A?.id ?? null, LPA), LUB = lineupFor(m.b, B?.id ?? null, LPB);
+  for (const [o, X0, LU, X] of [[m.a, A0, LUA, A], [m.b, B0, LUB, B]]) { if (!X0 || !rosterOf(+X0.id).length) { LU_MISSING_BEFORE++; LU_TEAMS_BEFORE.add(o.name); } if (!LU.players.length) { LU_MISSING_AFTER++; LU_TEAMS_AFTER.add(o.name); } if (X && !LP_BY_TEAM.has(+X.id)) LP_BY_TEAM.set(+X.id, { listedAs: o.name, ...LU }); }
   // lineup factors: chemistry (games in a row with the current five) and new players, from each team's last game
   const TA0 = A && R.TR.get(+A.id), TB0 = B && R.TR.get(+B.id), lu = (T0) => (T0?.lineup ? { chem: T0.chem || 0, fresh: T0.lineup.filter((a) => (T0.pc?.get(a) || 0) < 5).map((a) => pname(a) || `player ${a}`) } : null), LA = lu(TA0), LB = lu(TB0);
   const lineupL0 = LINEUP.adopted && LA && LB ? LINEUP.w[0] * (Math.log1p(LA.chem) - Math.log1p(LB.chem)) + LINEUP.w[1] * (LA.fresh.length - LB.fresh.length) : 0;
   const OA = A ? orbRead(+A.id) : null, OB = B ? orbRead(+B.id) : null, orbL = ORB.player.adopted && OA?.score != null && OB?.score != null ? ORB.player.w * (OA.score - OB.score) : 0, lineupL = lineupL0 + orbL;
-  const ra = A ? lineupRating(+A.id) ?? P.r0 : P.r0, rb = B ? lineupRating(+B.id) ?? P.r0 : P.r0, pg = cal(lg(ra - rb + lineupL)), sp = seriesP(pg, m.bo);
+  const ra = A ? lineupRating(+A.id) ?? P.r0 : LUA.r ?? P.r0, rb = B ? lineupRating(+B.id) ?? P.r0 : LUB.r ?? P.r0, pg = cal(lg(ra - rb + lineupL)), sp = seriesP(pg, m.bo);
   const orbInfo = { a: OA, b: OB, typical: ORB.typical, test: ORB, shiftPts: orbL ? r1((headline(seriesP(cal(lg(ra - rb + lineupL)), m.bo)) - headline(seriesP(cal(lg(ra - rb + lineupL0)), m.bo))) * 100) : 0 };
   const lineupInfo = { orb: orbInfo, a: LA, b: LB, shiftPts: r1((headline(seriesP(pg, m.bo)) - headline(seriesP(cal(lg(ra - rb)), m.bo))) * 100), adopted: LINEUP.adopted, test: LINEUP };
   const id = sid(`${m.date.slice(0, 16)}_${m.a.name}_${m.b.name}`), known = (ta?.n || 0) >= WARM && (tb?.n || 0) >= WARM;
@@ -671,10 +719,10 @@ for (const m of UP.matches) {
   scen.push({ t: `Game on Radiant for ${m.a.name}`, d: `Radiant has won ${(R.side * 100).toFixed(1)}% of pro games in our data. Single game: ${m.a.name} ${Math.round(cal(lg(ra - rb + sideL)) * 100)}% on Radiant, ${Math.round(cal(lg(ra - rb - sideL)) * 100)}% on Dire.`, pA: null });
   if (pa && pb && pa.short[1] >= 4 && pa.long[1] >= 4 && pb.short[1] >= 4 && pb.long[1] >= 4) scen.push({ t: "Short games vs long games", d: `Under 30 minutes: ${m.a.name} ${pa.short[0]}-${pa.short[1] - pa.short[0]}, ${m.b.name} ${pb.short[0]}-${pb.short[1] - pb.short[0]}. 40 minutes or more: ${m.a.name} ${pa.long[0]}-${pa.long[1] - pa.long[0]}, ${m.b.name} ${pb.long[0]}-${pb.long[1] - pb.long[0]}. Average game: ${pa.avgMin} vs ${pb.avgMin} minutes.`, pA: null });
   const exp = Object.entries(sp.scores).reduce((a, [k, v]) => a + v * k.split("-").reduce((x, y) => +x + +y, 0), 0);
-  const tside = (o, T0, Tm, r, prof) => ({ name: o.name, short: o.short, id: T0?.id ?? null, logo: T0?.logo || null, elo: T0 ? elo(r) : null, rank: T0 ? rankOf.get(+T0.id) ?? null : null, games: Tm?.n || 0, roster: T0 ? rosterOf(+T0.id) : [], profile: prof,
+  const tside = (o, T0, Tm, r, prof, LU) => ({ name: o.name, short: o.short, id: T0?.id ?? null, logo: T0?.logo || null, elo: T0 || LU.rating === "players" ? elo(r) : null, rank: T0 ? rankOf.get(+T0.id) ?? null : null, games: Tm?.n || 0, roster: LU.players, lineupSrc: LU.source, lineupNote: LU.note, rating: LU.rating, coach: LU.coach, subs: LU.subs, inactive: LU.inactive, standIns: LU.standIns || [], matchedBy: T0?.byPlayers ? `the players (${T0.byPlayers} of the listed five play for ${tname(+T0.id)} in OpenDota)` : null, odName: T0 ? tname(+T0.id) : null, profile: prof,
     form: T0 ? (teamSeries.get(+T0.id) || []).filter((s) => s.complete).slice(-5).map((s) => (s.draw ? "D" : (s.a === +T0.id ? s.score[0] > s.score[1] : s.score[1] > s.score[0]) ? "W" : "L")).join("") : "" });
   const likely = (prof) => { if (!prof?.comfort?.length) return null; const hs = prof.comfort.slice(0, 5).map((c) => c.h); if (hs.length < 5) return null; return { heroes: hs, ...readDraft(draftVec(hs, (h) => DRf.tempo(h))) }; };
-  const up = { id, date: m.date, likelyA: likely(pa), likelyB: likely(pb), started: start <= now, bo: m.bo, tournament: m.tournament, stage: m.stage, a: tside(m.a, A, ta, ra, pa), b: tside(m.b, B, tb, rb, pb), known,
+  const up = { id, date: m.date, likelyA: likely(pa), likelyB: likely(pb), started: start <= now, bo: m.bo, tournament: m.tournament, stage: m.stage, a: tside(m.a, A, ta, ra, pa, LUA), b: tside(m.b, B, tb, rb, pb, LUB), known,
     pGame: r3(pg), pSeries: r3(headline(sp)), pDraw: r3(sp.draw), scores: Object.fromEntries(Object.entries(sp.scores).map(([k, v]) => [k, r3(v)])), expMaps: r1(exp), h2h: A && B ? h2h(+A.id, +B.id) : [], scenarios: scen };
   upcoming.push(up);
   writeJSON(path.join(OUT, "matches", `${id}.json`), up);
@@ -738,10 +786,11 @@ dl.orb = { player: ORB.player, hero: ORB.hero, typical: ORB.typical, quartiles: 
 accuracy.kills = { test: KTEST, lines: LINE, pace: PB, sd: Object.fromEntries(Object.entries(SD).map(([k, v]) => [k, r1(v)])) };
 writeJSON(path.join(OUT, "accuracy.json"), accuracy);
 writeJSON(path.join(OUT, "upcoming.json"), upcoming.map(({ a, b, scenarios, h2h, ...m }) => ({ ...m, a: { name: a.name, short: a.short, id: a.id, logo: a.logo, elo: a.elo, rank: a.rank, form: a.form }, b: { name: b.name, short: b.short, id: b.id, logo: b.logo, elo: b.elo, rank: b.rank, form: b.form } })));
+console.log(`lineups: ${LU_MISSING_BEFORE} scheduled team slot(s) without a lineup by the old method (${[...LU_TEAMS_BEFORE].join(", ") || "none"}), ${LU_MISSING_AFTER} now (${[...LU_TEAMS_AFTER].join(", ") || "none"})`);
 
 // team pages (after upcoming, so each can show its next match)
 for (const t of teamsOut) { const ss = (teamSeries.get(t.id) || []).filter((s) => s.complete).slice(-25).reverse(), T0 = R.TR.get(t.id);
-  writeJSON(path.join(OUT, "teams", `${fileId(t.id)}.json`), { ...t, profile: profile(t.id), roster: rosterOf(t.id), hist: (T0?.hist || []).slice(-60).map(([d, r]) => [new Date(d * 1000).toISOString().slice(0, 10), elo(r)]),
+  writeJSON(path.join(OUT, "teams", `${fileId(t.id)}.json`), { ...t, profile: profile(t.id), roster: rosterOf(t.id), lp: LP_BY_TEAM.get(t.id) || null, hist: (T0?.hist || []).slice(-60).map(([d, r]) => [new Date(d * 1000).toISOString().slice(0, 10), elo(r)]),
     next: upcoming.find((m) => m.a.id === t.id || m.b.id === t.id) ? (({ id, date, bo, tournament, a, b, pSeries }) => ({ id, date, bo, tournament, opp: a.id === t.id ? b.name : a.name, p: a.id === t.id ? pSeries : r3(1 - pSeries) }))(upcoming.find((m) => m.a.id === t.id || m.b.id === t.id)) : null,
     series: ss.map((s) => ({ id: s.key, date: new Date(s.t * 1000).toISOString(), league: leagueName(s.league), bo: s.bo, opp: tname(s.a === t.id ? s.b : s.a), oppId: s.a === t.id ? s.b : s.a, score: s.a === t.id ? s.score : [s.score[1], s.score[0]], page: fs.existsSync(path.join(OUT, "series", `${s.key}.json`)) })) }); }
 

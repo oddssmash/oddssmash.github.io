@@ -87,13 +87,15 @@ jobs:
 
       # Dota 2 section: pro matches with drafts and player lines from OpenDota (open API and SQL explorer), the schedule
       # from Liquipedia (one page render), Valve patch notes, then the walk-forward model and headlines (Google News, Reddit,
-      # YouTube, Steam news). Like MLBB and FIBA, a hiccup here must not stop the rest of the site.
+      # YouTube, Steam news), lineups for every scheduled team from Liquipedia (tournament participant lists and team pages,
+      # batched query requests, cached 6 to 24 hours). Like MLBB and FIBA, a hiccup here must not stop the rest of the site.
       - name: Dota 2 fetch and model
         continue-on-error: true
         env:
           ODDSPAPI_KEY: ${{ secrets.ODDSPAPI_KEY }}
         run: |
           node scripts/dota2/fetch.mjs
+          node scripts/dota2/rosters.mjs
           node scripts/dota2/odds.mjs
           node scripts/dota2/live.mjs
           node scripts/dota2/model.mjs
