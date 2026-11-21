@@ -1,8 +1,11 @@
 name: Refresh data and publish
 
 on:
+  # The refresh runs on a chain: each run ends by starting the refresh timer (timer.yml) with the wait planned by
+  # scripts/next-run.mjs (about every 20 minutes while games are on, 30 on match days, 60 otherwise). GitHub starts cron
+  # runs only a few times a day here, so the cron below is only a backup that restarts the chain if it ever breaks.
   schedule:
-    - cron: "7,37 * * * *" # every 30 minutes, so finished MLBB (and NBA/FIBA) results are learned quickly; a run takes about 9 minutes
+    - cron: "11 */2 * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -20,6 +23,8 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    outputs:
+      wait: ${{ steps.plan.outputs.wait }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -102,6 +107,10 @@ jobs:
           node scripts/site.mjs "$v"
           grep -o 'app.js?v=[^"]*' site/nba/index.html
 
+      - name: Plan the next refresh
+        id: plan
+        run: node scripts/next-run.mjs
+
       # The assembled site is cached so the quick deploy workflow can publish code changes on top of it in minutes.
       - name: Cache the assembled site
         uses: actions/cache/save@v4
@@ -123,3 +132,20 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
+  # Start the refresh timer, which waits the planned minutes and then starts the next run (see timer.yml). It runs even when
+  # this run failed, so one bad run does not stop the refreshes.
+  timer:
+    needs: [build, deploy]
+    if: always() && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Start the refresh timer
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WAIT: ${{ needs.build.outputs.wait || '30' }}
+        run: |
+          code=$(curl -s -o /tmp/r.txt -w "%{http_code}" -X POST -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/vnd.github+json"             "https://api.github.com/repos/${{ github.repository }}/actions/workflows/timer.yml/dispatches" -d "{\"ref\":\"main\",\"inputs\":{\"wait\":\"$WAIT\"}}")
+          echo "timer started (wait $WAIT min): HTTP $code"; [ "$code" = 204 ] || { cat /tmp/r.txt; exit 1; }

@@ -21,12 +21,20 @@ async function get(p, params = {}, metered = true) {
   catch (e) { (status.errors ||= []).push(`${p} ${e.message.replace(KEY, "***")}`); return null; }
 }
 const meta = readJSON(META_F, {}), DAY = 86400000, now = Date.now();
+// Pace: the site refreshes every 20-60 minutes, more often than the odds need, so the book is asked at most once an hour
+// when a Dota 2 match starts within 12 hours, otherwise every 6 hours, and nothing for 12 hours after a "too many requests"
+// reply. That keeps it to about 24 metered calls on a busy day. The previous status file is kept when a run is skipped.
+{ const up = readJSON(path.join(D, "upcoming.json"), { matches: [] }).matches || [], soon = up.some((m) => { const t = Date.parse(m.date); return t > now - 3 * 3600000 && t < now + 12 * 3600000; });
+  const last = Date.parse(meta.lastOddsAt || 0) || 0, gap = soon ? 3600000 : 6 * 3600000;
+  if (meta.pauseUntil && Date.parse(meta.pauseUntil) > now) { console.log(`OddsPapi: paused after a rate-limit reply until ${meta.pauseUntil}`); process.exit(0); }
+  if (now - last < gap - 120000) { console.log(`OddsPapi: not due (last call ${Math.round((now - last) / 60000)} min ago, every ${gap / 3600000} h now)`); process.exit(0); } }
+meta.lastOddsAt = new Date(now).toISOString();
 // 1) quota (unmetered)
 const acct = await get("account", {}, false);
 const limit = +(acct?.request_limit ?? acct?.requestLimit ?? 0), used = +(acct?.request_count ?? acct?.requestCount ?? 0);
 status.quota = { limit: limit || null, used: used || null };
 const d = new Date(), daysLeft = Math.max(1, new Date(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) - d) / DAY;
-const runBudget = limit ? Math.max(0, Math.floor((limit - used) / (daysLeft * 48))) : 2; // 48 runs a day
+const runBudget = limit ? Math.max(0, Math.floor((limit - used) / (daysLeft * 24))) : 2; // at most 24 odds calls a day (see the pace above)
 status.runBudget = runBudget;
 // 2) cached sport id, markets and tournaments
 if (!meta.sportId || now - Date.parse(meta.sportsAt || 0) > 14 * DAY) { const sp = await get("sports"); const ds = (sp || []).find((x) => /dota/i.test(`${x.sportName} ${x.slug}`)); if (ds) { meta.sportId = ds.sportId; meta.sportsAt = new Date().toISOString(); } }
@@ -57,6 +65,7 @@ for (const f of fixtures) { const B = f.bookmakerOdds?.[bk]; if (!B?.markets) co
   // keep the main line per kind (flagged by the book, else the line priced closest to even)
   const best = {}; for (const l of lines) { const key = `${l.kind}|${l.map || ""}`, even = Math.abs((l.outcomes[0]?.p ?? 0.5) - 0.5); const cur = best[key]; if (!cur || (l.main && !cur.main) || (l.main === cur.main && even < cur.even)) best[key] = { ...l, even }; }
   if (Object.keys(best).length) out.push({ fixtureId: f.fixtureId, a: f.participant1Name, b: f.participant2Name, aShort: f.participant1ShortName || f.participant1Abbr || null, bShort: f.participant2ShortName || f.participant2Abbr || null, start: f.startTime, tournament: f.tournamentName, lines: Object.values(best).map(({ even, ...l }) => l) }); }
+if (status.limited) meta.pauseUntil = new Date(now + 12 * 3600000).toISOString();
 if (!out.length) { meta.bookTry = ((meta.bookTry || 0) + 1) % BOOKS.length; delete meta.book; writeJSON(META_F, meta); }
 else { meta.book = bk; writeJSON(META_F, meta); }
 const store = readJSON(BOOKS_F, { fixtures: [] }), keep = store.fixtures.filter((x) => Date.parse(x.start) > now - 2 * DAY && !out.some((y) => y.fixtureId === x.fixtureId));

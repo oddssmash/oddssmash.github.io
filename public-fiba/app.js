@@ -475,7 +475,13 @@ async function pretipCard() {
 }
 
 // ---------------------------------------------------------------- router + back links
-function stamp(meta) { const el = document.getElementById("updated"); if (el && meta) el.textContent = `Data refreshed ${new Date(meta.built).toLocaleString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} PH time · ${meta.games.toLocaleString()} games graded · ${meta.players.toLocaleString()} players tracked.`; }
+// next planned data refresh (site root refresh.json, written by scripts/next-run.mjs each run)
+function nextRefresh() { fetch("/refresh.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((R) => { const el = document.getElementById("updated"); if (!R?.next || !el || el.querySelector(".nxt")) return;
+  const t = Date.parse(R.next), late = Date.now() > t + 15 * 60000, sp = document.createElement("span"); sp.className = "nxt";
+  const dot = /\.\s*$/.test(el.textContent), lead = dot ? " Next" : " · next";
+  sp.textContent = late ? `${lead} refresh due now.` : `${lead} refresh about ${new Date(t).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" })} (${R.mode}: every ${R.mode === "game time" ? "~20" : R.mode === "match day" ? "~30" : "~60"} min)${dot ? "." : ""}`;
+  el.appendChild(sp); }).catch(() => {}); }
+function stamp(meta) { const el = document.getElementById("updated"); if (el && meta) el.textContent = `Data refreshed ${new Date(meta.built).toLocaleString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} PH time · ${meta.games.toLocaleString()} games graded · ${meta.players.toLocaleString()} players tracked.`; nextRefresh(); }
 async function route() {
   const seq = (S.seq = (S.seq || 0) + 1), h = location.hash || "#/games", st = (S.stack ||= []);
   if (st.length > 1 && st[st.length - 2] === h) st.pop(); else if (st[st.length - 1] !== h) st.push(h);

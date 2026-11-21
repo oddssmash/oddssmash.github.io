@@ -34,6 +34,12 @@ const timePH = (iso) => `${time(iso)} ${PHT}`;
 const dayKey = (iso) => fmtD(iso, { year: "numeric", month: "2-digit", day: "2-digit" }); // Manila calendar day, for grouping
 const stamp = (iso) => `${dayLong(iso)}, ${timePH(iso)}`;
 const ago = (iso) => { const m = Math.round((Date.now() - Date.parse(iso)) / 60000); return m < 60 ? `${m} min ago` : m < 1440 ? `${Math.round(m / 60)} h ago` : `${Math.round(m / 1440)} d ago`; };
+// next planned data refresh (site root refresh.json, written by scripts/next-run.mjs each run)
+function nextRefresh() { fetch("/refresh.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((R) => { const el = document.getElementById("updated"); if (!R?.next || !el || el.querySelector(".nxt")) return;
+  const t = Date.parse(R.next), late = Date.now() > t + 15 * 60000, sp = document.createElement("span"); sp.className = "nxt";
+  const dot = /\.\s*$/.test(el.textContent), lead = dot ? " Next" : " · next";
+  sp.textContent = late ? `${lead} refresh due now.` : `${lead} refresh about ${new Date(t).toLocaleTimeString("en-US", { timeZone: "Asia/Manila", hour: "numeric", minute: "2-digit" })} (${R.mode}: every ${R.mode === "game time" ? "~20" : R.mode === "match day" ? "~30" : "~60"} min)${dot ? "." : ""}`;
+  el.appendChild(sp); }).catch(() => {}); }
 const T = (id) => S.T[id] || { abbr: "?", name: "Unknown", short: "Unknown", color: "555555" };
 const badge = (id) => `<span class="tb" style="--tc:#${esc(T(id).color || "555555")}">${esc(T(id).abbr)}</span>`;
 
@@ -3606,7 +3612,7 @@ async function boot() {
     S.T = Object.fromEntries(S.teams.map((t) => [t.id, t]));
     S.P = Object.fromEntries(plist.map((p) => [p.id, p]));
     S.PN = new Map(plist.map((p) => [String(p.n).toLowerCase(), p.id]));
-    document.getElementById("updated").textContent = `Data refreshed ${stamp(S.meta.updated)} (${ago(S.meta.updated)}) · ${Number(S.meta.predicted || 0).toLocaleString()} games graded · ${S.meta.players} players tracked`;
+    document.getElementById("updated").textContent = `Data refreshed ${stamp(S.meta.updated)} (${ago(S.meta.updated)}) · ${Number(S.meta.predicted || 0).toLocaleString()} games graded · ${S.meta.players} players tracked`; nextRefresh();
   } catch (e) {
     app.innerHTML = `<div class="card"><h2>Data is not available yet</h2><p class="muted">Run the data refresh, then reload. (${esc(e.message)})</p></div>`;
     return;

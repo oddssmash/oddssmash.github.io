@@ -1,7 +1,7 @@
 name: Quick deploy (code only)
 
 # A code change (app, styles, pages) goes live in a couple of minutes: the last full build's site is restored from the cache,
-# the new code is copied over it, and it is published. Data still refreshes with "Refresh data and publish" every 30 minutes.
+# the new code is copied over it, and it is published. Data refreshes on the refresh timer chain (timer.yml): about every 20 minutes while games are on, 30 on match days, 60 otherwise.
 on:
   push:
     branches: [main]

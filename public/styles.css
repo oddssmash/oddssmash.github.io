@@ -1204,3 +1204,11 @@ a.card .ml-cs { margin-top: 8px; }
 .xp { border: 1px solid var(--line); border-radius: 12px; background: var(--surface); margin: 8px 0; } .xp summary { list-style: none; display: grid; grid-template-columns: minmax(0, 1fr) auto 18px; gap: 10px; align-items: center; padding: 12px; cursor: pointer; min-height: 56px; } .xp summary::-webkit-details-marker { display: none; }
 .xp-t { display: flex; flex-direction: column; gap: 2px; min-width: 0; } .xp-t em { font-style: normal; font-size: 11px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); } .xp-p { display: flex; flex-direction: column; align-items: flex-end; } .xp-p .num { font-size: 20px; }
 .xp-chev { transition: transform .2s; color: var(--muted); } .xp[open] .xp-chev { transform: rotate(180deg); } .xp-b { padding: 0 12px 12px; border-top: 1px solid var(--line); } .xp-b h3 { margin: 10px 0 4px; } .xp-b ul { padding-left: 18px; margin: 4px 0; }
+
+/* phones up to 420px: logo, sport switcher and three icon buttons fit in one row without sideways scrolling */
+@media (max-width: 420px) {
+  .top { gap: 4px; padding-left: max(10px, env(safe-area-inset-left)); padding-right: max(10px, env(safe-area-inset-right)); }
+  .lg-switch a { padding: 0 5px; font-size: 11.5px; }
+  .top .icon-btn { width: 38px; height: 38px; border-radius: 10px; }
+  .top .brand img.brand-full { height: 30px; }
+}

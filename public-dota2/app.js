@@ -712,7 +712,13 @@ async function vSources() { const meta = await load("meta.json");
   <div class="card doc-c"><h2>Linked, not read</h2><ul class="dots"><li><b>Dotabuff</b>, <b>Dota2ProTracker (D2PT)</b> and <b>Spectral.gg</b>: their site rules do not allow AI tools to collect their pages, so we link to them from hero, team and player pages instead.</li><li><b>STRATZ</b>: its API needs a personal account token. The fetcher is ready to use one if the site owner adds it; until then STRATZ is linked, not read.</li><li><b>GosuGamers</b>, <b>hawk.live</b>, <b>DLTV</b>: score and live sites; their match pages are not offered as a data feed, and several carry betting content.</li><li>Facebook, Instagram, X, TikTok and Discord: need a login.</li></ul></div>
   <div class="card doc-c"><h2>Not used</h2><ul class="dots"><li>No sportsbook or betting data is read or shown. Headlines from betting and prediction-market outlets are filtered out.</li></ul></div>`; }
 function vMissing() { app.innerHTML = `<div class="card"><h2>Page not found</h2><p><a class="go" href="#/matches">Back to matches</a></p></div>`; }
-function stamp(meta) { const el = document.getElementById("updated"); if (el && meta) el.textContent = `Data refreshed ${new Date(meta.updated).toLocaleString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} PH time · ${meta.series.toLocaleString()} series and ${meta.games.toLocaleString()} games in our data · ${meta.players} players · ${meta.heroes} heroes.`; }
+// next planned data refresh (site root refresh.json, written by scripts/next-run.mjs each run)
+function nextRefresh() { fetch("/refresh.json", { cache: "no-store" }).then((r) => (r.ok ? r.json() : null)).then((R) => { const el = document.getElementById("updated"); if (!R?.next || !el || el.querySelector(".nxt")) return;
+  const t = Date.parse(R.next), late = Date.now() > t + 15 * 60000, sp = document.createElement("span"); sp.className = "nxt";
+  const dot = /\.\s*$/.test(el.textContent), lead = dot ? " Next" : " · next";
+  sp.textContent = late ? `${lead} refresh due now.` : `${lead} refresh about ${new Date(t).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" })} (${R.mode}: every ${R.mode === "game time" ? "~20" : R.mode === "match day" ? "~30" : "~60"} min)${dot ? "." : ""}`;
+  el.appendChild(sp); }).catch(() => {}); }
+function stamp(meta) { const el = document.getElementById("updated"); if (el && meta) el.textContent = `Data refreshed ${new Date(meta.updated).toLocaleString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} PH time · ${meta.series.toLocaleString()} series and ${meta.games.toLocaleString()} games in our data · ${meta.players} players · ${meta.heroes} heroes.`; nextRefresh(); }
 
 async function route() {
   const seq = (S.seq = (S.seq || 0) + 1), h = location.hash || "#/matches", st = (S.stack ||= []);
