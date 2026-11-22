@@ -42,6 +42,10 @@
     .lg .sub { color: var(--ink-2); }
     .lg .nx { font-size: 13px; color: var(--muted); min-height: 1.5em; }
     .lg .go { margin-top: 6px; align-self: flex-start; padding: 10px 16px; border-radius: 12px; background: var(--silver-metal); color: #0b0b0b; font-weight: 650; font-size: 14px; }
+    .wrall { margin: -8px auto 22px; max-width: 760px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); text-align: center; }
+    .wrall b.p { display: block; font-size: 34px; letter-spacing: -.02em; line-height: 1.1; } .wrall .s { color: var(--muted); font-size: 13px; }
+    .wrall .row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; margin-top: 10px; } .wrall .row div { padding: 8px 4px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; } .wrall .row b { display: block; font-size: 16px; }
+    .lg .wr1 { font-size: 13px; color: var(--ink-2); }
     .foot { margin-top: 28px; font-size: 12px; color: var(--muted); text-align: center; }
     .foot a { color: var(--link); }
     .theme { position: fixed; top: max(12px, env(safe-area-inset-top)); right: 12px; width: 44px; height: 44px; border-radius: 12px; border: 1px solid var(--line); background: var(--surface); color: var(--ink-2); display: grid; place-items: center; cursor: pointer; }
@@ -53,6 +57,7 @@
     <img class="logo on-dark" src="brand/stack-silver.png" alt="ODDSSMASH">
     <img class="logo on-light" src="brand/stack-black.png" alt="ODDSSMASH">
     <h1>Projections that grade themselves against every real result</h1>
+    <div class="wrall" id="wr-all" hidden></div>
     <div class="pick">
       <a class="lg" href="nba/"><b>NBA</b><span class="sub">Every game, player props, live predictions, Scout, simulations and the accuracy record.</span><span class="nx" id="nx-nba"></span><span class="go">Open NBA ›</span></a>
       <a class="lg" href="fiba/"><b>FIBA</b><span class="sub">World Cup qualifiers, continental cups and FIBA club competitions: projections, players, zones and results.</span><span class="nx" id="nx-fiba"></span><span class="go">Open FIBA ›</span></a>
@@ -69,6 +74,12 @@
     fetch("mlbb/data/meta.json").then((r) => r.json()).then((m) => { document.getElementById("nx-mlbb").textContent = m.upcoming ? `${m.upcoming} upcoming matches` : `${m.series} series graded · next: MCT SEA and M8`; }).catch(() => {});
     fetch("dota2/data/meta.json").then((r) => r.json()).then((m) => { document.getElementById("nx-dota2").textContent = `${m.upcoming} upcoming matches · ${m.graded.toLocaleString()} series graded`; }).catch(() => {});
     fetch("fiba/data/upcoming.json").then((r) => r.json()).then((u) => { const f = (u.games || u).filter((g) => Date.parse(g.date) > Date.now()); if (f.length) document.getElementById("nx-fiba").textContent = `Next tip-off: ${when(f[0].date)} PH · ${f.length} upcoming games`; }).catch(() => {});
+    // overall record, all sports together (site/winrate.json from scripts/winrate.mjs): picks saved before the game, graded after
+    fetch("winrate.json", { cache: "no-store" }).then((r) => r.json()).then((W) => { const pc = (c) => (c.n ? (Math.round((c.hit / c.n) * 1000) / 10) + "%" : "–"), ct = (c) => c.hit.toLocaleString("en-US") + " of " + c.n.toLocaleString("en-US");
+      const el = document.getElementById("wr-all"); if (!W.all.n) return;
+      el.innerHTML = '<span class="s">Our overall record, all sports</span><b class="p">' + pc(W.all) + '</b><span class="s">' + ct(W.all) + ' picks right · last 30 days ' + pc(W.d30) + ' (' + W.d30.n.toLocaleString("en-US") + ') · last 7 days ' + pc(W.d7) + ' (' + W.d7.n.toLocaleString("en-US") + ')</span><div class="row">' +
+        Object.entries(W.sports).map(([k, v]) => '<div>' + v.name + '<b>' + pc(v.all) + '</b><span class="s">' + v.all.n + ' picks</span></div>').join("") + '</div><p class="s" style="margin:8px 0 0">Saved before each game and graded after. Each sport counts its own kind of pick (NBA includes many high-probability player lines), so compare sports with care. Statistical analysis only, not betting advice.</p>';
+      el.hidden = false; }).catch(() => {});
   </script>
 </body>
 </html>

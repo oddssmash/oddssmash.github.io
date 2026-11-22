@@ -692,7 +692,7 @@ async function vSeries(id) {
   const s = await load(`series/${id}.json`), aw = s.score[0] > s.score[1];
   const ordered = (picks, pl) => bestPos(picks, pl);
   const side = (picks, bans, label, cls, byFarm = false) => `<div class="sg-t ${cls}"><span class="lbl">${esc(label)}</span><div class="sg-p">${picks.map((h, i) => `<a href="#/hero/${h}">${himg(h, 34)}<b>${esc(hn(h))}</b>${byFarm ? `<em class="small muted">Pos ${i + 1}</em>` : ""}</a>`).join("") || `<span class="small muted">Draft not recorded.</span>`}</div>${bans.length ? `<div class="sg-b"><span class="lbl">BANS</span>${bans.map((h) => `<span title="${esc(hn(h))} banned">${himg(h, 20)}</span>`).join("")}</div>` : ""}</div>`;
-  const lines = (pl) => `<table class="tbl small"><tbody>${pl.map((p) => `<tr><td>${himg(p.h, 18)}${p.n ? `<a href="#/player/${p.id}">${esc(p.n)}</a>` : `<span class="muted">${esc(hn(p.h))}</span>`}</td><td class="n">${p.k}/${p.d}/${p.a}</td><td class="n">${p.gpm} gpm</td></tr>`).join("")}</tbody></table>`;
+  const lines = (pl) => `<table class="tbl small"><tbody>${pl.map((p) => `<tr><td>${himg(p.h, 18)}${p.n ? `<a href="#/player/${p.id}">${esc(p.n)}</a>` : `<span class="muted">${esc(hn(p.h))}</span>`}</td><td class="n">${p.k}/${p.d}/${p.a}</td><td class="n">${p.gpm} gpm</td></tr>`).join("")}</tbody></table></div>`;
   app.innerHTML = `${subHead("#/history", `${s.league} · BO${s.bo}`, `${s.a} vs ${s.b}`)}
     <section class="mp-hero"><div class="sc big"><span class="${aw ? "w" : "l"}">${tlink(s.a, s.aId)}</span><span class="num">${s.score[0]} – ${s.score[1]}</span><span class="${aw ? "l" : "w"}">${tlink(s.b, s.bId)}</span></div>
       <p class="small">${esc(dshort(s.date))} · Before the series we said <b>${esc(s.p >= 0.5 ? s.a : s.b)} ${pct(Math.max(s.p, 1 - s.p))}</b> (ratings ${s.elo[0]} vs ${s.elo[1]}). ${s.draw ? "Drawn 1-1." : !s.graded ? "Not graded: a team had too few games." : s.close ? "Too close to call." : s.right ? "<b class='up'>Called.</b>" : "<b class='down'>Missed.</b>"}</p></section>
@@ -740,6 +740,31 @@ function nextRefresh() { fetch("/refresh.json", { cache: "no-store" }).then((r) 
   el.appendChild(sp); }).catch(() => {}); }
 function stamp(meta) { const el = document.getElementById("updated"); if (el && meta) el.textContent = `Data refreshed ${new Date(meta.updated).toLocaleString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} PH time · ${meta.series.toLocaleString()} series and ${meta.games.toLocaleString()} games in our data · ${meta.players} players · ${meta.heroes} heroes.`; nextRefresh(); }
 
+// OVERALL RECORD CARD (top of the main page): picks saved before the game and graded after, from data/winrate.json
+// (scripts/winrate.mjs). Counts sit next to every percentage so small samples are obvious.
+async function winBanner() {
+  let W; try { W = await load("winrate.json"); } catch { return; }
+  if (!W || app.querySelector(".wr")) return;
+  if (!document.getElementById("wr-css")) document.head.insertAdjacentHTML("beforeend", `<style id="wr-css">
+.wr{margin:0 0 16px;padding:14px 16px;border:1px solid var(--line,#8884);border-radius:14px;background:var(--surface,transparent)}
+.wr-top{display:flex;align-items:center;gap:12px}.wr-pct{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.wr-top span{display:flex;flex-direction:column;gap:2px;min-width:0}.wr-per{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0 4px}
+.wr-per div{padding:8px;border-radius:10px;border:1px solid var(--line,#8884);text-align:center}.wr-per b{display:block;font-size:17px}.wr-per span{font-size:12px;opacity:.75}
+.wr details{margin-top:8px}.wr summary{cursor:pointer;font-weight:650;font-size:14px;padding:6px 0}
+.wr table{width:100%;border-collapse:collapse;font-size:13px}.wr-tw{overflow-x:auto;max-width:100%}.wr th,.wr td{padding:6px 4px;border-bottom:1px solid var(--line,#8884);text-align:right;vertical-align:top;line-height:1.3}.wr td .sm{margin:0}
+.wr th:first-child,.wr td:first-child{text-align:left;white-space:normal}.wr .sm{font-size:12px;opacity:.75;margin:8px 0 0}</style>`);
+  const pc = (c) => (c.n ? `${Math.round((c.hit / c.n) * 1000) / 10}%` : "–"), ct = (c) => `${c.hit.toLocaleString("en-US")} of ${c.n.toLocaleString("en-US")}`;
+  const cell = (c) => (c.n ? `${pc(c)}<br><span class="sm">${c.hit.toLocaleString("en-US")}/${c.n.toLocaleString("en-US")}</span>` : `<span class="sm">none yet</span>`);
+  const table = (ms) => `<div class="wr-tw"><table><thead><tr><th>Market</th><th>7 days</th><th>30 days</th><th>All</th></tr></thead><tbody>${ms.map((m) => `<tr><td>${esc(m.label)}</td><td>${cell(m.d7)}</td><td>${cell(m.d30)}</td><td>${cell(m.all)}</td></tr>`).join("")}</tbody></table>`;
+  const P = W.picks, small = P.all.n && P.all.n < 30 ? " Small sample so far: read it with care." : "";
+  const html = `<section class="wr" aria-label="Our prediction record">
+    <div class="wr-top"><b class="wr-pct">${pc(P.all)}</b><span><b>Our overall record</b><span class="sm" style="margin:0">${P.all.n ? `${ct(P.all)} picks right, all time${P.since ? ` (since ${new Date(P.since).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})` : ""}` : "No saved pick has been graded yet."}</span></span></div>
+    <div class="wr-per"><div><b>${pc(P.d7)}</b><span>last 7 days · ${P.d7.n.toLocaleString("en-US")}</span></div><div><b>${pc(P.d30)}</b><span>last 30 days · ${P.d30.n.toLocaleString("en-US")}</span></div><div><b>${pc(P.all)}</b><span>all time · ${P.all.n.toLocaleString("en-US")}</span></div></div>
+    ${P.markets.length ? `<details><summary>By market</summary>${table(P.markets)}</details>` : ""}
+    ${W.book && W.book.all.n ? `<details><summary>${esc(W.book.label)}: ${pc(W.book.all)} (${ct(W.book.all)})</summary>${table(W.book.markets)}<p class="sm">Shown separately: the line comes from a sportsbook, our chance at that line is always our own model's.</p></details>` : ""}
+    <p class="sm">${esc(W.note)}${small} Statistical analysis only, not betting advice.</p></section>`;
+  app.insertAdjacentHTML("afterbegin", html);
+}
 async function route() {
   const seq = (S.seq = (S.seq || 0) + 1), h = location.hash || "#/matches", st = (S.stack ||= []);
   if (st.length > 1 && st[st.length - 2] === h) st.pop(); else if (st[st.length - 1] !== h) st.push(h);
@@ -749,6 +774,7 @@ async function route() {
   if (!S.logos) { const [ts, up] = await Promise.all([load("teams.json").catch(() => []), load("upcoming.json").catch(() => [])]); S.logos = {}; for (const t of ts) if (t.logo) S.logos[t.name] = t.logo; for (const m of up) for (const t of [m.a, m.b]) if (t.logo) S.logos[t.name] = t.logo; }
   try { await ({ matches: vMatches, match: vMatch, versus: vVersus, events: vEvents, m8: vEvents, picks: vPicks, draft: vSim, sim: vSim, library: vLibrary, heroes: vHeroes, hero: vHero, leagues: vLeagues, matrix: vMatrix, playbook: vPlaybook, patch: vPatch, teams: vTeams, team: vTeam, players: vPlayers, player: vPlayer, stats: vStats, pstat: vPstat, pcompare: vPcompare, more: vMore, results: vResults, learning: vLearning, history: vHistory, series: vSeries, news: vNews, checklist: vChecklist, lines: vLines, how: vHow, sources: vSources }[view] || vMissing)(decodeURIComponent(arg || "")); }
   catch (e) { if (seq === S.seq) app.innerHTML = `<div class="card"><h2>Could not load this page</h2><p class="muted">${esc(e.message)}</p><p><a class="go" href="#/matches">Back to matches</a></p></div>`; }
+  if (view === "matches" && seq === S.seq) await winBanner(); // overall record
   if (S.last !== h) window.scrollTo(0, 0); S.last = h;
   if (!document.getElementById("updated").textContent) load("meta.json").then(stamp).catch(() => {});
 }

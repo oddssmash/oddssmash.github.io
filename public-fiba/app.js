@@ -241,7 +241,7 @@ function court(shots, zones) {
     ${dots}</svg>`;
 }
 function zoneTable(z) {
-  return `<table class="ft"><thead><tr><th>Zone</th><th class="n">Shots</th><th class="n">FG%</th><th class="n">FIBA avg</th><th class="n">Share</th><th></th></tr></thead><tbody>${z.map((x) => `<tr><td>${esc(x.label)}</td><td class="n">${x.att}</td><td class="n">${x.pct == null ? "-" : f1(x.pct) + "%"}</td><td class="n muted">${f1(x.lgPct)}%</td><td class="n muted">${f1(x.share)}%</td><td>${x.tag !== "neutral" ? `<span class="ztag ${x.tag}">${x.tag.toUpperCase()}</span>` : ""}</td></tr>`).join("")}</tbody></table>`;
+  return `<table class="ft"><thead><tr><th>Zone</th><th class="n">Shots</th><th class="n">FG%</th><th class="n">FIBA avg</th><th class="n">Share</th><th></th></tr></thead><tbody>${z.map((x) => `<tr><td>${esc(x.label)}</td><td class="n">${x.att}</td><td class="n">${x.pct == null ? "-" : f1(x.pct) + "%"}</td><td class="n muted">${f1(x.lgPct)}%</td><td class="n muted">${f1(x.share)}%</td><td>${x.tag !== "neutral" ? `<span class="ztag ${x.tag}">${x.tag.toUpperCase()}</span>` : ""}</td></tr>`).join("")}</tbody></table></div>`;
 }
 async function vPlayer(pid) {
   const p = await load(`players/${pid}.json`);
@@ -482,6 +482,31 @@ function nextRefresh() { fetch("/refresh.json", { cache: "no-store" }).then((r) 
   sp.textContent = late ? `${lead} refresh due now.` : `${lead} refresh about ${new Date(t).toLocaleTimeString("en-US", { timeZone: TZ, hour: "numeric", minute: "2-digit" })} (${R.mode}: every ${R.mode === "game time" ? "~20" : R.mode === "match day" ? "~30" : "~60"} min)${dot ? "." : ""}`;
   el.appendChild(sp); }).catch(() => {}); }
 function stamp(meta) { const el = document.getElementById("updated"); if (el && meta) el.textContent = `Data refreshed ${new Date(meta.built).toLocaleString("en-US", { timeZone: TZ, weekday: "long", month: "long", day: "numeric", hour: "numeric", minute: "2-digit" })} PH time · ${meta.games.toLocaleString()} games graded · ${meta.players.toLocaleString()} players tracked.`; nextRefresh(); }
+// OVERALL RECORD CARD (top of the main page): picks saved before the game and graded after, from data/winrate.json
+// (scripts/winrate.mjs). Counts sit next to every percentage so small samples are obvious.
+async function winBanner() {
+  let W; try { W = await load("winrate.json"); } catch { return; }
+  if (!W || app.querySelector(".wr")) return;
+  if (!document.getElementById("wr-css")) document.head.insertAdjacentHTML("beforeend", `<style id="wr-css">
+.wr{margin:0 0 16px;padding:14px 16px;border:1px solid var(--line,#8884);border-radius:14px;background:var(--surface,transparent)}
+.wr-top{display:flex;align-items:center;gap:12px}.wr-pct{font-size:30px;font-weight:800;letter-spacing:-.02em;line-height:1}
+.wr-top span{display:flex;flex-direction:column;gap:2px;min-width:0}.wr-per{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin:12px 0 4px}
+.wr-per div{padding:8px;border-radius:10px;border:1px solid var(--line,#8884);text-align:center}.wr-per b{display:block;font-size:17px}.wr-per span{font-size:12px;opacity:.75}
+.wr details{margin-top:8px}.wr summary{cursor:pointer;font-weight:650;font-size:14px;padding:6px 0}
+.wr table{width:100%;border-collapse:collapse;font-size:13px}.wr-tw{overflow-x:auto;max-width:100%}.wr th,.wr td{padding:6px 4px;border-bottom:1px solid var(--line,#8884);text-align:right;vertical-align:top;line-height:1.3}.wr td .sm{margin:0}
+.wr th:first-child,.wr td:first-child{text-align:left;white-space:normal}.wr .sm{font-size:12px;opacity:.75;margin:8px 0 0}</style>`);
+  const pc = (c) => (c.n ? `${Math.round((c.hit / c.n) * 1000) / 10}%` : "–"), ct = (c) => `${c.hit.toLocaleString("en-US")} of ${c.n.toLocaleString("en-US")}`;
+  const cell = (c) => (c.n ? `${pc(c)}<br><span class="sm">${c.hit.toLocaleString("en-US")}/${c.n.toLocaleString("en-US")}</span>` : `<span class="sm">none yet</span>`);
+  const table = (ms) => `<div class="wr-tw"><table><thead><tr><th>Market</th><th>7 days</th><th>30 days</th><th>All</th></tr></thead><tbody>${ms.map((m) => `<tr><td>${esc(m.label)}</td><td>${cell(m.d7)}</td><td>${cell(m.d30)}</td><td>${cell(m.all)}</td></tr>`).join("")}</tbody></table>`;
+  const P = W.picks, small = P.all.n && P.all.n < 30 ? " Small sample so far: read it with care." : "";
+  const html = `<section class="wr" aria-label="Our prediction record">
+    <div class="wr-top"><b class="wr-pct">${pc(P.all)}</b><span><b>Our overall record</b><span class="sm" style="margin:0">${P.all.n ? `${ct(P.all)} picks right, all time${P.since ? ` (since ${new Date(P.since).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })})` : ""}` : "No saved pick has been graded yet."}</span></span></div>
+    <div class="wr-per"><div><b>${pc(P.d7)}</b><span>last 7 days · ${P.d7.n.toLocaleString("en-US")}</span></div><div><b>${pc(P.d30)}</b><span>last 30 days · ${P.d30.n.toLocaleString("en-US")}</span></div><div><b>${pc(P.all)}</b><span>all time · ${P.all.n.toLocaleString("en-US")}</span></div></div>
+    ${P.markets.length ? `<details><summary>By market</summary>${table(P.markets)}</details>` : ""}
+    ${W.book && W.book.all.n ? `<details><summary>${esc(W.book.label)}: ${pc(W.book.all)} (${ct(W.book.all)})</summary>${table(W.book.markets)}<p class="sm">Shown separately: the line comes from a sportsbook, our chance at that line is always our own model's.</p></details>` : ""}
+    <p class="sm">${esc(W.note)}${small} Statistical analysis only, not betting advice.</p></section>`;
+  app.insertAdjacentHTML("afterbegin", html);
+}
 async function route() {
   const seq = (S.seq = (S.seq || 0) + 1), h = location.hash || "#/games", st = (S.stack ||= []);
   if (st.length > 1 && st[st.length - 2] === h) st.pop(); else if (st[st.length - 1] !== h) st.push(h);
@@ -489,6 +514,7 @@ async function route() {
   drawNav(TAB[view] || "games");
   try { await ({ games: vGames, game: vGame, picks: vPicks, record: vRecord, players: vPlayers, player: vPlayer, teams: vTeams, team: vTeam, results: vResults, accuracy: vResults, result: vResults, why: vResults, lab: vMore, board: vPicks, scout: vPlayers, insights: vGames, today: vNews, more: vMore, how: vHow, sources: vSources, news: vNews }[view] || vMissing)(decodeURIComponent(arg || "")); }
   catch (e) { if (seq === S.seq) app.innerHTML = `<div class="card"><h2>Could not load this page</h2><p class="muted">${esc(e.message)}</p><p><a class="go" href="#/games">Back to games</a></p></div>`; }
+  if (view === "games" && seq === S.seq) await winBanner(); // overall record
   if (st.length > 1) app.querySelectorAll("a.back").forEach((a) => (a.textContent = "‹ Back"));
   if (S.last !== h) window.scrollTo(0, 0);
   S.last = h;
