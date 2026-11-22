@@ -66,24 +66,40 @@ jobs:
       # FIBA section: schedules, box scores, shot locations and the latest posted rosters (next 21 days) from fiba.basketball,
       # then the walk-forward model, then headlines (Google News, Reddit, FIBA YouTube) tagged to teams and players.
       # A FIBA hiccup must not stop the NBA update, so these steps may fail without failing the run.
-      - name: FIBA fetch and model
+      # Downloads and models are separate steps: a slow source can no longer stop the model from publishing that sport.
+      - name: FIBA fetch
         continue-on-error: true
-        timeout-minutes: 15 # a stalled request must not hold up the refresh chain
+        timeout-minutes: 15
+        env:
+          NODE_OPTIONS: --import ./scripts/lib/fetch-timeout.mjs
+        run: node scripts/fiba/fetch.mjs
+      - name: FIBA model
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          NODE_OPTIONS: --import ./scripts/lib/fetch-timeout.mjs
         run: |
-          node scripts/fiba/fetch.mjs
           node scripts/fiba/model.mjs
           node scripts/fiba/picks-ledger.mjs
           node scripts/fiba/news.mjs
 
       # MLBB section: matches, drafts and season lineups from Liquipedia (API, one request every 2 seconds, only
       # changed pages), official stats from the MPL PH and MPL ID sites, then the walk-forward model.
-      - name: MLBB fetch and model
+      - name: MLBB fetch
         continue-on-error: true
-        timeout-minutes: 15 # a stalled request must not hold up the refresh chain
+        timeout-minutes: 20
+        env:
+          NODE_OPTIONS: --import ./scripts/lib/fetch-timeout.mjs
         run: |
           node scripts/mlbb/fetch.mjs
           node scripts/mlbb/teamnames.mjs
           node scripts/mlbb/ranked.mjs
+      - name: MLBB model
+        continue-on-error: true
+        timeout-minutes: 20
+        env:
+          NODE_OPTIONS: --import ./scripts/lib/fetch-timeout.mjs
+        run: |
           node scripts/mlbb/model.mjs
           node scripts/mlbb/images.mjs
 
@@ -91,26 +107,47 @@ jobs:
       # from Liquipedia (one page render), Valve patch notes, then the walk-forward model and headlines (Google News, Reddit,
       # YouTube, Steam news), lineups for every scheduled team from Liquipedia (tournament participant lists and team pages,
       # batched query requests, cached 6 to 24 hours). Like MLBB and FIBA, a hiccup here must not stop the rest of the site.
-      - name: Dota 2 fetch and model
+      - name: Dota 2 fetch
         continue-on-error: true
-        timeout-minutes: 20 # a stalled request must not hold up the refresh chain
+        timeout-minutes: 15
         env:
           ODDSPAPI_KEY: ${{ secrets.ODDSPAPI_KEY }}
+          NODE_OPTIONS: --import ./scripts/lib/fetch-timeout.mjs
         run: |
           node scripts/dota2/fetch.mjs
           node scripts/dota2/rosters.mjs
           node scripts/dota2/odds.mjs
           node scripts/dota2/live.mjs
+      - name: Dota 2 model
+        continue-on-error: true
+        timeout-minutes: 15
+        env:
+          NODE_OPTIONS: --import ./scripts/lib/fetch-timeout.mjs
+        run: |
           node scripts/dota2/model.mjs
           node scripts/dota2/news.mjs
 
       # One site: homepage at the root, NBA under /nba/, FIBA under /fiba/. The version tag makes phones
       # load the new code right after a deploy.
+      # Safety net: the last published site is restored first, so a sport whose model did not finish this run keeps its last
+      # published data instead of going blank.
+      - name: Restore the last published site
+        uses: actions/cache/restore@v4
+        with:
+          path: site
+          key: site-none
+          restore-keys: site-
       - name: Assemble the site
         run: |
           v="${GITHUB_SHA::7}-${GITHUB_RUN_NUMBER}"
+          if [ -d site ]; then mv site prev-site; fi
           node scripts/site.mjs "$v"
+          for app in nba fiba mlbb dota2; do
+            if [ ! -f "site/$app/data/meta.json" ] && [ -f "prev-site/$app/data/meta.json" ]; then rm -rf "site/$app/data"; cp -r "prev-site/$app/data" "site/$app/data"; echo "::warning::$app model did not publish this run: kept its last published data"; fi
+          done
+          rm -rf prev-site
           grep -o 'app.js?v=[^"]*' site/nba/index.html
+          node scripts/winrate.mjs || echo "win rate skipped"
 
       - name: Plan the next refresh
         id: plan
