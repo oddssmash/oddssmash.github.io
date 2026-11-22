@@ -14,7 +14,10 @@ import { clamp, round, mean, sd, phi, posGroup, phaseOf, tsa, ew, normName, regr
 // Back-test (2026-11-11): K=400, half-life 40 games cut points MAE 4.949 -> 4.933 (2025-26) and 4.950 -> 4.922 (2026-27), game Brier unchanged.
 // Roster rule (see ensemble): pull toward the player-by-player margin when it differs from the team systems.
 const ROSTER_PULL = Number(process.env.CL_ROSTER_PULL ?? 0), ROSTER_GAP = Number(process.env.CL_ROSTER_GAP ?? 3), ROSTER_EARLY = Number(process.env.CL_ROSTER_EARLY ?? 0);
-const EFF_K = Number(process.env.CL_EFF_K ?? 400), EFF_HL = Number(process.env.CL_EFF_HL ?? 40);
+// Sweep (2026-11-22, 22 walk-forward variants scored on 2026-27 games and props): a 60-game half-life was equal or slightly
+// better on every measure (winners 66.4% -> 66.8%, Brier 0.2029 -> 0.2027 over all regular seasons, prop leans unchanged);
+// every other setting tested was no better than the current one.
+const EFF_K = Number(process.env.CL_EFF_K ?? 400), EFF_HL = Number(process.env.CL_EFF_HL ?? 60);
 // Upset-watch calibration: in flagged games the favourite has won less often than its stated chance, so the win chance
 // is pulled toward 50% by a shrink learned walk-forward from past flagged games only (grid search on squared error).
 // Back-test (2026-11-11): Brier 0.2072 -> 0.2038 over every game since October 2025; winners called unchanged.
@@ -22,6 +25,15 @@ const UPSET_GRID = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8], UPSET_ON = proce
 const upsetLearn = { n: 0, se: UPSET_GRID.map(() => 0) };
 const upsetShrink = () => (upsetLearn.n < 100 ? 0 : UPSET_GRID[upsetLearn.se.indexOf(Math.min(...upsetLearn.se))]);
 const upsetAdj = (p) => 0.5 + (p - 0.5) * (1 - upsetShrink());
+// Phase calibration (2026-11-22): preseason games (starters rest, rotations unknown) and playoff games were over-confident
+// (preseason picks at 80%+ won 43% of the time). In those phases the win chance is pulled toward 50% by a share learned
+// walk-forward from earlier games of the same kind only (grid search on squared error, active after 30 such games).
+// Back-test on 2026-27 preseason: Brier 0.303 -> about 0.25; playoffs 0.233 -> 0.230; regular season untouched.
+const PHASE_ON = process.env.CL_PHASE_SHRINK !== "0", phaseGroup = (stype) => (stype === 1 ? "pre" : stype === 3 || stype === 5 ? "post" : null);
+const phaseLearn = { pre: { n: 0, se: UPSET_GRID.map(() => 0) }, post: { n: 0, se: UPSET_GRID.map(() => 0) } };
+const phaseShrink = (grp) => { const L = grp && phaseLearn[grp]; return !L || L.n < 30 ? 0 : UPSET_GRID[L.se.indexOf(Math.min(...L.se))]; };
+const phaseAdj = (p, stype) => (PHASE_ON ? 0.5 + (p - 0.5) * (1 - phaseShrink(phaseGroup(stype))) : p);
+function phaseLearnGame(p, homeWon, stype) { const L = phaseLearn[phaseGroup(stype)]; if (!L) return; L.n++; UPSET_GRID.forEach((c, i) => { L.se[i] += (0.5 + (p - 0.5) * (1 - c) - (homeWon ? 1 : 0)) ** 2; }); }
 function upsetLearnGame(rawP, homeWon) { upsetLearn.n++; UPSET_GRID.forEach((c, i) => { const p = 0.5 + (rawP - 0.5) * (1 - c); upsetLearn.se[i] += (p - (homeWon ? 1 : 0)) ** 2; }); }
 import { teamBox, repairBlankRows, markCupFinals, scoreOnlyGames } from "./lib/boxfix.mjs";
 import { loadPbp } from "./lib/zonedata.mjs";
@@ -1260,11 +1272,13 @@ for (const g of walk) {
     const upsetWatch = upsetSignals(pred, H, A); // pre-game information only
     const rawPHome = pred.pHome;
     if (UPSET_ON && upsetWatch.flag) pred.pHome = upsetAdj(rawPHome);
+    const prePhaseP = pred.pHome; pred.pHome = phaseAdj(pred.pHome, phase.stype);
     const favHome = pred.pHome >= 0.5;
     const correct = (actMargin > 0) === favHome;
     const dogProb = favHome ? 1 - pred.pHome : pred.pHome;
     const upset = !correct;
     if (upsetWatch.flag) upsetLearnGame(rawPHome, actMargin > 0); // learn only after the game is graded
+    phaseLearnGame(prePhaseP, actMargin > 0, phase.stype);
     const sum = {
       id: g.id, date: g.date, phase: phase.label, pk: phase.key, home: g.home, away: g.away,
       pred: { hs: round(pred.h.pts), as: round(pred.a.pts), pHome: round(pred.pHome, 3) },
@@ -1383,6 +1397,7 @@ for (const e of futureEvents) {
   const pred = finishGame(g, H, A, { starters: null, newsLimit: new Set([...kH.newsLimit, ...kA.newsLimit]) });
   const up = upsetSignals(pred, H, A);
   if (UPSET_ON && up.flag) { pred.pHomeRaw = pred.pHome; pred.pHome = upsetAdj(pred.pHome); } // keep the before-upset-watch number for display
+  { const ps = phaseOf(e.season, e.stype).stype, adj = phaseAdj(pred.pHome, ps); if (adj !== pred.pHome) { pred.pHomeRaw ??= pred.pHome; pred.pHome = adj; pred.phaseShrink = phaseShrink(phaseGroup(ps)); } }
   const sideOut = (side, inj) => side.proj.sort((a, b) => b.proj.pts - a.proj.pts).map((x) => ({
     id: x.id, n: x.n, pos: x.pos, role: x.role, r2k: x.r2k, min: round(x.proj.min), pts: round(x.proj.pts), reb: round(x.proj.reb), ast: round(x.proj.ast), tpm: round(x.proj.tpm),
     stl: round(x.proj.stl), blk: round(x.proj.blk), scen: x.scen.map((s) => ({ s, pts: round(learn.scen[scenKey(s, x.role, "pts")]?.w || 0, 2), n: learn.scen[scenKey(s, x.role, "pts")]?.n || 0 })),
@@ -1963,6 +1978,7 @@ writeJSON(path.join(OUT, "learning.json"), {
   params: learn.history,
   factors: factorReport,
   inloop: inloopReport(),
+  phaseShrink: { applied: PHASE_ON, preseason: { shrink: phaseShrink("pre"), games: phaseLearn.pre.n }, playoffs: { shrink: phaseShrink("post"), games: phaseLearn.post.n }, note: "Preseason and playoff win chances are pulled toward 50% by these shares, learned walk-forward from earlier games of the same kind (active after 30 games). Regular-season chances are not changed." },
   upsetShrink: { applied: UPSET_ON, shrink: upsetShrink(), flaggedGames: upsetLearn.n, note: "In upset-watch games the win chance is pulled toward 50% by this share, learned walk-forward from past flagged games only. Back-test: Brier 0.2072 -> 0.2038 over every game since October 2025, winners called unchanged (67.0%)." },
   efficiency: { applied: EFF_K > 0, k: EFF_K, halfLife: EFF_HL, note: "Scoring rate = shot volume (recent games, half-life 10) x shooting efficiency (points per true shot attempt over a long window, half-life " + EFF_HL + " games, shrunk toward his position average with " + EFF_K + " attempts of league shooting). A hot or cold week moves the volume, not the efficiency. Walk-forward test (2026-11-11), players projected 15+ minutes: points error 4.949 -> 4.933 (2025-26 regular season) and 4.950 -> 4.922 (2026-27); game-level Brier score unchanged." },
 });

@@ -334,16 +334,29 @@ console.log("phases: " + Object.entries(PHTEST).map(([k, o]) => `${k} ${o.hit}/$
 // UPSET ALERTS: the rating underdog (under 45% before the draft) whose draft lifts it by 5+ points. Graded on held-out games.
 const UP_TEST = (() => { let n = 0, hit = 0, exp = 0; for (const x of DG.slice(dcut)) { for (const sd of [0, 1]) { const pre = sd === 0 ? lg(x.base) : 1 - lg(x.base), post = sd === 0 ? lg(x.base + draftPart(FM, x)) : 1 - lg(x.base + draftPart(FM, x)); if (pre < 0.45 && post - pre >= 0.05) { n++; exp += post; if ((x.g.rw === 1) === (sd === 0)) hit++; } } } return { n, hit, rate: r3(hit / Math.max(1, n)), expected: r3(exp / Math.max(1, n)) }; })();
 console.log(`upset alerts (held-out): ${UP_TEST.hit}/${UP_TEST.n} underdogs won (${UP_TEST.rate}; our draft-adjusted chance averaged ${UP_TEST.expected})`);
+// UPSET SHRINK (like the NBA upset watch): flagged underdogs have won less often than the draft-adjusted chance said, so in a
+// flagged game the draft's lift is trimmed by a share c (0 to 90%). c is chosen on the first half of the held-out flagged
+// games and judged on the second half; it is used only if it lowers the Brier score there, and then refitted on all of them.
+const UPS = (() => { const rows = []; for (const x of DG.slice(dcut)) { const dp = draftPart(FM, x); for (const sd of [0, 1]) { const b = sd === 0 ? x.base : -x.base, d = sd === 0 ? dp : -dp, pre = lg(b), post = lg(b + d);
+      if (pre < 0.45 && post - pre >= 0.05) rows.push({ b, d, y: (x.g.rw === 1) === (sd === 0) ? 1 : 0 }); } }
+  const grid = [0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9], br = (rs, c) => rs.reduce((a, r) => a + (lg(r.b + (1 - c) * r.d) - r.y) ** 2, 0) / Math.max(1, rs.length);
+  const best = (rs) => grid.reduce((m, c) => (br(rs, c) < br(rs, m) ? c : m), 0), half = Math.floor(rows.length / 2), fit = rows.slice(0, half), te = rows.slice(half), c1 = best(fit);
+  const b0 = br(te, 0), b1 = br(te, c1), adopted = rows.length >= 60 && b1 < b0, c = adopted ? best(rows) : 0;
+  const after = rows.reduce((a, r) => a + lg(r.b + (1 - c) * r.d), 0) / Math.max(1, rows.length);
+  return { c, adopted, n: rows.length, test: te.length, cFit: c1, brierBase: Math.round(b0 * 10000) / 10000, brierShrink: Math.round(b1 * 10000) / 10000, won: r3(rows.reduce((a, r) => a + r.y, 0) / Math.max(1, rows.length)), expectedAfter: r3(after) }; })();
+console.log(`upset shrink: trim ${Math.round(UPS.c * 100)}% of the draft lift in flagged games (${UPS.adopted ? "adopted" : "not adopted"}; second-half Brier ${UPS.brierBase} -> ${UPS.brierShrink}, ${UPS.n} flagged games; won ${UPS.won}, our chance now ${UPS.expectedAfter})`);
 // the biggest draft reasons behind a shift: each factor's contribution in logit for Radiant
 function drivers(x) { const labels = [...FACTORS.map(([, l]) => l), ...EXTRA.map(([, l]) => l), "Hero strength, combos and counters"], out = [];
   for (let j = 0; j < NF + NX + 1; j++) { const c = DMODEL.w[j] * XV(x, j); if (Math.abs(c) >= 0.02) out.push({ f: labels[j], c: r3(c) }); } return out.sort((a, b) => Math.abs(b.c) - Math.abs(a.c)).slice(0, 5); }
 // full draft analysis for one game, Team A's view (aRad: A on Radiant)
 function gameAnalysis(rad, dire, base, aRad) {
   const fr = draftVec(rad, DRf.tempo), fd = draftVec(dire, DRf.tempo), x = { base, dl: DRf.logitOf(rad, dire), fv: fr.map((v, i) => v - fd[i]), ex: extraVec(rad, dire, DRf.counterScore(rad, dire)) };
-  const o = (p) => r3(aRad ? p : 1 - p), pre = lg(base), post = lg(base + draftPart(DMODEL, x));
+  const o = (p) => r3(aRad ? p : 1 - p), pre = lg(base), dp0 = draftPart(DMODEL, x), post0 = lg(base + dp0);
+  // a flagged underdog lift is trimmed by the learned upset shrink (see UPS)
+  const flagged = (pre < 0.45 && post0 - pre >= 0.05) || (1 - pre < 0.45 && pre - post0 >= 0.05), post = flagged && UPS.adopted ? lg(base + (1 - UPS.c) * dp0) : post0;
   const phases = Object.fromEntries(PHASES.map(([k]) => [k, o(PHTEST[k].rate > PHTEST[k].baseRate ? phP(PHM[k], x) : pre)])); // a phase fit is used only where it beat the ratings on held-out games
   const dv = drivers(x).map((d) => ({ f: d.f, c: aRad ? d.c : -d.c })), preA = o(pre), postA = o(post), dog = preA < 0.45 ? "a" : 1 - preA < 0.45 ? "b" : null;
-  const upset = dog && (dog === "a" ? postA - preA : preA - postA) >= 0.05 ? { team: dog, pre: dog === "a" ? preA : r3(1 - preA), post: dog === "a" ? postA : r3(1 - postA), why: dv.filter((d) => (dog === "a" ? d.c > 0 : d.c < 0)).slice(0, 3).map((d) => d.f) } : null;
+  const upset = dog && flagged ? { trimmed: UPS.adopted ? UPS.c : 0, team: dog, pre: dog === "a" ? preA : r3(1 - preA), post: dog === "a" ? postA : r3(1 - postA), why: dv.filter((d) => (dog === "a" ? d.c > 0 : d.c < 0)).slice(0, 3).map((d) => d.f) } : null;
   return { preA, postA, phases, drivers: dv, upset, readA: readDraft(aRad ? fr : fd), readB: readDraft(aRad ? fd : fr) };
 }
 // LINEUP TEST (chemistry and stand-ins): a two-factor logistic fit on top of the full pre-game edge (player ratings + side),
@@ -782,7 +795,7 @@ const preDone = Object.values(PRE.entries).filter((e) => e.result && !e.result.m
 accuracy.prematch = { n: preDone.length, hit: preDone.filter((e) => e.result.right).length, brier: preDone.length ? r3(preDone.reduce((a, e) => a + (e.p - (e.result.score[0] > e.result.score[1] ? 1 : 0)) ** 2, 0) / preDone.length) : null,
   list: Object.values(PRE.entries).filter((e) => e.result && !e.result.missing).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 60) };
 accuracy.lineup = LINEUP; accuracy.orb = { player: ORB.player, hero: ORB.hero, typical: ORB.typical, quartiles: ORB.quartiles };
-dl.orb = { player: ORB.player, hero: ORB.hero, typical: ORB.typical, quartiles: ORB.quartiles, teams: Object.fromEntries(active.map(([id]) => [id, orbRead(id)]).filter(([, o]) => o && o.pairs.length)) }; writeJSON(path.join(OUT, "draft.json"), dl); accuracy.phases = PHTEST; accuracy.upsets = UP_TEST;
+dl.orb = { player: ORB.player, hero: ORB.hero, typical: ORB.typical, quartiles: ORB.quartiles, teams: Object.fromEntries(active.map(([id]) => [id, orbRead(id)]).filter(([, o]) => o && o.pairs.length)) }; writeJSON(path.join(OUT, "draft.json"), dl); accuracy.phases = PHTEST; accuracy.upsets = { ...UP_TEST, shrink: UPS };
 accuracy.kills = { test: KTEST, lines: LINE, pace: PB, sd: Object.fromEntries(Object.entries(SD).map(([k, v]) => [k, r1(v)])) };
 writeJSON(path.join(OUT, "accuracy.json"), accuracy);
 writeJSON(path.join(OUT, "upcoming.json"), upcoming.map(({ a, b, scenarios, h2h, ...m }) => ({ ...m, a: { name: a.name, short: a.short, id: a.id, logo: a.logo, elo: a.elo, rank: a.rank, form: a.form }, b: { name: b.name, short: b.short, id: b.id, logo: b.logo, elo: b.elo, rank: b.rank, form: b.form } })));
