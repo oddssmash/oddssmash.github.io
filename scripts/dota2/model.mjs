@@ -216,14 +216,14 @@ function replay(P, record = false) {
   const team = (id, t) => { let x = TR.get(id); if (!x) TR.set(id, (x = { r: P.r0, n: 0, last: t, lineup: null, hist: [] })); const f = Math.exp(-(t - x.last) / (P.H * DAY)); x.r = P.r0 + (x.r - P.r0) * f; x.last = t; return x; };
   const player = (acc, t) => { let x = PRt.get(acc); if (!x) PRt.set(acc, (x = { r: P.r0, n: 0, last: t })); const f = Math.exp(-(t - x.last) / (P.H * DAY)); x.r = P.r0 + (x.r - P.r0) * f; x.last = t; return x; };
   const strength = (T, accs, t) => { if (!P.w || !accs || accs.length !== 5) return T.r; const pr = accs.reduce((a, acc) => a + player(acc, t).r, 0) / 5; return (1 - P.w) * T.r + P.w * pr; };
-  let bS = 0, nS = 0, bG = 0, nG = 0, bGD = 0, nGD = 0, hit = 0; const LG = [];
+  let bS = 0, nS = 0, bG = 0, nG = 0, bGD = 0, nGD = 0, hit = 0; const LG = [], HO = { bS: 0, nS: 0, hit: 0, bG: 0, nG: 0, bGD: 0, nGD: 0, eS: 0, eN: 0, eG: 0, eGN: 0 }, cutT = P.cutT || Infinity;
   const STY = new Map(), RM = [0, 1, 2, 3, 4].map(() => ({ a: [0.3, 0.02], k: [0.55, 0.02] })); // per position: [mean, variance] of fight involvement and kill participation
   for (const s of series) {
     const A = team(s.a, s.t), B = team(s.b, s.t), warm = A.n >= WARM && B.n >= WARM;
     const sa = strength(A, A.lineup, s.t), sb = strength(B, B.lineup, s.t), pg = lg(sa - sb), sp = seriesP(pg, s.bo);
     if (s.complete) {
       if (record) log.push({ s, pg, sp, warm, ra: sa, rb: sb, na: A.n, nb: B.n });
-      if (warm && !s.draw) { const y = s.score[0] > s.score[1] ? 1 : 0, p = headline(sp); bS += (p - y) ** 2; nS++; if ((p >= 0.5) === (y === 1)) hit++; }
+      if (warm && !s.draw) { const y = s.score[0] > s.score[1] ? 1 : 0, p = headline(sp); bS += (p - y) ** 2; nS++; if ((p >= 0.5) === (y === 1)) hit++; if (s.t >= cutT) { HO.bS += (p - y) ** 2; HO.nS++; if ((p >= 0.5) === (y === 1)) HO.hit++; } else { HO.eS += (p - y) ** 2; HO.eN++; } }
     }
     for (const g of s.games) {
       const R = team(g.r, g.t), Dd = team(g.d, g.t), accR = g.lines[0].map((l) => l.acc), accD = g.lines[1].map((l) => l.acc);
@@ -232,13 +232,13 @@ function replay(P, record = false) {
       if (record && wm && accR.length === 5 && accD.length === 5) { const cR = chemOf(R, accR), cD = chemOf(Dd, accD), sR = standOf(R, accR), sD = standOf(Dd, accD), oR = orbOf(STY, accR), oD = orbOf(STY, accD);
         const hR = g.pick[0].length === 5 && g.pick[1].length === 5 ? heroOrb(g.pick[0], DR.tempo) : null, hD = hR ? heroOrb(g.pick[1], DR.tempo) : null;
         LG.push({ base, y, t: g.t, f: [Math.log1p(cR) - Math.log1p(cD), sR - sD], o: oR?.score != null && oD?.score != null ? oR.score - oD.score : null, xd: hR ? base + P.dw * DR.logitOf(g.pick[0], g.pick[1]) : null, ho: hR ? hR.score - hD.score : null }); }
-      if (wm) { bG += (p - y) ** 2; nG++; }
-      if (wm && g.pick[0].length === 5 && g.pick[1].length === 5) { const pd = lg(base + P.dw * DR.logitOf(g.pick[0], g.pick[1])); bGD += (pd - y) ** 2; nGD++; if (record) { const fr = draftVec(g.pick[0], DR.tempo), fd = draftVec(g.pick[1], DR.tempo); glog.push({ g, p, pd, base, dl: DR.logitOf(g.pick[0], g.pick[1]), fv: fr.map((x, i) => x - fd[i]), ex: extraVec(g.pick[0], g.pick[1], DR.counterScore(g.pick[0], g.pick[1])), fr, fd }); } }
+      if (wm) { bG += (p - y) ** 2; nG++; if (g.t >= cutT) { HO.bG += (p - y) ** 2; HO.nG++; } else { HO.eG += (p - y) ** 2; HO.eGN++; } }
+      if (wm && g.pick[0].length === 5 && g.pick[1].length === 5) { const pd = lg(base + P.dw * DR.logitOf(g.pick[0], g.pick[1])); bGD += (pd - y) ** 2; nGD++; if (g.t >= cutT) { HO.bGD += (pd - y) ** 2; HO.nGD++; } if (record) { const fr = draftVec(g.pick[0], DR.tempo), fd = draftVec(g.pick[1], DR.tempo); glog.push({ g, p, pd, base, dl: DR.logitOf(g.pick[0], g.pick[1]), fv: fr.map((x, i) => x - fd[i]), ex: extraVec(g.pick[0], g.pick[1], DR.counterScore(g.pick[0], g.pick[1])), fr, fd }); } }
       else if (record) glog.push({ g, p, pd: null });
       // learn
-      const err = y - p, kR = P.K * (1 + 2 / (1 + R.n / 10)), kD = P.K * (1 + 2 / (1 + Dd.n / 10));
+      const KB = P.kb ?? 2, err = y - p, kR = P.K * (1 + KB / (1 + R.n / 10)), kD = P.K * (1 + KB / (1 + Dd.n / 10));
       R.r += kR * err; Dd.r -= kD * err; R.n++; Dd.n++;
-      if (P.w) { for (const acc of accR) { const x = player(acc, g.t); x.r += P.K * (1 + 2 / (1 + x.n / 10)) * err; x.n++; } for (const acc of accD) { const x = player(acc, g.t); x.r -= P.K * (1 + 2 / (1 + x.n / 10)) * err; x.n++; } }
+      if (P.w) { for (const acc of accR) { const x = player(acc, g.t); x.r += P.K * (1 + KB / (1 + x.n / 10)) * err; x.n++; } for (const acc of accD) { const x = player(acc, g.t); x.r -= P.K * (1 + KB / (1 + x.n / 10)) * err; x.n++; } }
       for (const [T, accs] of [[R, accR], [Dd, accD]]) { if (accs.length !== 5) continue; T.chem = T.lineup && overlap(accs, T.lineup) >= 4 ? (T.chem || 0) + 1 : 1; T.pc ||= new Map(); for (const a of accs) T.pc.set(a, (T.pc.get(a) || 0) + 1); }
       if (accR.length === 5) R.lineup = accR; if (accD.length === 5) Dd.lineup = accD;
       if (g.dur > 600) for (const L of g.lines) { if (L.length !== 5) continue; const tk = Math.max(1, L.reduce((t, l) => t + l.k, 0)), mins = g.dur / 60; // update playstyles after the game
@@ -251,9 +251,25 @@ function replay(P, record = false) {
       side.n++; side.w += y; DR.learn(g);
     }
   }
-  return { STY, LG, TR, PRt, DR, log, glog, side: side.w / side.n, brier: bS / Math.max(1, nS), n: nS, hit: hit / Math.max(1, nS), gBrier: bG / Math.max(1, nG), gBrierDraft: bGD / Math.max(1, nGD), nGD, strength };
+  return { HO, STY, LG, TR, PRt, DR, log, glog, side: side.w / side.n, brier: bS / Math.max(1, nS), n: nS, hit: hit / Math.max(1, nS), gBrier: bG / Math.max(1, nG), gBrierDraft: bGD / Math.max(1, nGD), nGD, strength };
 }
 
+// FORMULA SWEEP (DOTA_SWEEP=1, a test run that changes nothing): every variant replays all games walk-forward. A variant is
+// CHOSEN on the older 70% of games (by date) and JUDGED only on the newest 30%, against the current frozen settings.
+if (process.env.DOTA_SWEEP) {
+  const ts = series.filter((x) => x.complete).map((x) => x.t).sort((a, b) => a - b), cutT = ts[Math.floor(ts.length * 0.7)], cur = readJSON(path.join(D, "frozen-params.json"), null)?.P;
+  const rows = [], run = (p) => { const r = replay({ ...p, cutT }), H = r.HO; const o = { p, early: H.eS / H.eN + 0.5 * H.eG / H.eGN, sBrier: H.bS / H.nS, sHit: H.hit / H.nS, n: H.nS, gBrier: H.bG / H.nG, gDraft: H.bGD / Math.max(1, H.nGD) }; rows.push(o); return o; };
+  const base = run(cur); console.log("CURRENT", JSON.stringify(cur), "held-out series Brier", base.sBrier.toFixed(4), "hit", (base.sHit * 100).toFixed(1) + "%", "games Brier", base.gBrier.toFixed(4), "with draft", base.gDraft.toFixed(4), "n", base.n);
+  for (const K of [0.08, 0.12, 0.15, 0.2, 0.25, 0.3, 0.4]) for (const H of [120, 240, 365, 730, 1095]) for (const w of [0, 0.5, 0.7, 0.85, 1]) for (const r0 of [0, -0.3]) for (const kb of [0, 2, 4]) run({ K, H, w, r0, kb, dw: cur.dw });
+  const pick = rows.slice(1).sort((a, b) => a.early - b.early)[0];
+  for (const dw of [0, 0.15, 0.25, 0.35, 0.5, 0.75]) run({ ...pick.p, dw });
+  const pickD = rows.filter((x) => JSON.stringify({ ...x.p, dw: 0 }) === JSON.stringify({ ...pick.p, dw: 0 })).sort((a, b) => a.gDraft - b.gDraft)[0];
+  const top = [...rows].sort((a, b) => a.sBrier - b.sBrier).slice(0, 8);
+  console.log("CHOSEN on older games", JSON.stringify(pick.p), "held-out series Brier", pick.sBrier.toFixed(4), "hit", (pick.sHit * 100).toFixed(1) + "%", "games", pick.gBrier.toFixed(4));
+  console.log("draft weight best on held-out with chosen", pickD.p.dw, "games with draft", pickD.gDraft.toFixed(4), "(current dw", cur.dw, base.gDraft.toFixed(4) + ")");
+  console.log("best 8 on held-out (for reference only, not a fair pick):"); for (const t of top) console.log("  ", JSON.stringify(t.p), t.sBrier.toFixed(4), (t.sHit * 100).toFixed(1) + "%", t.gBrier.toFixed(4));
+  console.log("variants tried", rows.length); process.exit(0);
+}
 // SETTINGS FREEZE: the grid search runs once a week (or with RETUNE=1); in between, the saved settings are reused, so a
 // published chance only moves when a game is played, and games after the freeze are graded on settings that never saw them.
 const FROZEN_FILE = path.join(D, "frozen-params.json"), FZ = readJSON(FROZEN_FILE, null);

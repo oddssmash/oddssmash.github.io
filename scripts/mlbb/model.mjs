@@ -157,6 +157,20 @@ function replay(P, record = false) {
   return { lateBrier, lateN: late.length, T, REG, D, PLR, SGc, ibrier: inn ? ib / inn : 0, inn, brier: sb / sn, ll: sll / sn, acc: sright / sn, n: sn, gBrier: gb / gn, gBrierDraft: gbD / gn, gn, log };
 }
 const grid = []; for (const k of [0.1, 0.16, 0.24, 0.32]) for (const carry of [0.5, 0.7, 0.85, 0.9, 0.95, 1]) for (const kr of [0.04]) for (const cx of (process.env.CX ? [+process.env.CX] : [0.1, 0.2, 0.3, 0.5])) for (const regW of [1]) for (const wd of [0, 0.5, 1, 1.5]) grid.push({ k, carry, kr, regW, wd, cx });
+// FORMULA SWEEP (MLBB_SWEEP=1, a test run that changes nothing): each variant replays every series walk-forward; it is CHOSEN on
+// the older 70% of graded series and JUDGED only on the newest 30% (lateBrier), against the current frozen settings.
+if (process.env.MLBB_SWEEP) {
+  const cur = readJSON(path.join(MD, "frozen-params.json"), null)?.P, rows = [];
+  const run = (P) => { const r = replay(P), gl = r.log.filter((x) => x.warm), cut = Math.floor(gl.length * 0.7), y = (x) => (x.m.score[0] > x.m.score[1] ? 1 : 0), dec = gl.filter((x) => x.m.score[0] !== x.m.score[1]);
+    const early = gl.slice(0, cut), late = gl.slice(cut), b = (xs) => xs.reduce((a, x) => a + (x.pS - y(x)) ** 2, 0) / Math.max(1, xs.length), hit = (xs) => { const d = xs.filter((x) => x.m.score[0] !== x.m.score[1]); return d.filter((x) => (x.pS >= 0.5) === (y(x) === 1)).length / Math.max(1, d.length); };
+    const o = { P, early: b(early) + 0.5 * r.gBrierDraft, late: b(late), lateHit: hit(late), n: late.length, g: r.gBrierDraft }; rows.push(o); return o; };
+  const base = run(cur); console.log("CURRENT", JSON.stringify(cur), "held-out series Brier", base.late.toFixed(4), "winners", (base.lateHit * 100).toFixed(1) + "%", "n", base.n, "games w/ draft", base.g.toFixed(4));
+  for (const k of [0.06, 0.1, 0.13, 0.16, 0.2, 0.24, 0.32]) for (const carry of [0.5, 0.7, 0.85, 0.9, 0.95, 1]) for (const kr of [0.04, 0.08]) for (const cx of [0.1, 0.2, 0.3, 0.5]) for (const wd of [0, 0.5, 1, 1.5, 2]) run({ k, carry, kr, regW: 1, wd, cx });
+  const pick = rows.slice(1).sort((a, b) => a.early - b.early)[0], top = [...rows].sort((a, b) => a.late - b.late).slice(0, 8);
+  console.log("CHOSEN on older series", JSON.stringify(pick.P), "held-out series Brier", pick.late.toFixed(4), "winners", (pick.lateHit * 100).toFixed(1) + "%", "games w/ draft", pick.g.toFixed(4));
+  console.log("best 8 on held-out (reference only):"); for (const t of top) console.log("  ", JSON.stringify(t.P), t.late.toFixed(4), (t.lateHit * 100).toFixed(1) + "%");
+  console.log("variants tried", rows.length); process.exit(0);
+}
 // SETTINGS FREEZE: the grid search runs once a week (or with RETUNE=1). In between, the saved settings are reused, so a
 // published chance only moves when a game is played, and games after the freeze are graded on settings that never saw them.
 const FROZEN_FILE = path.join(MD, "frozen-params.json"), FZ = readJSON(FROZEN_FILE, null);
