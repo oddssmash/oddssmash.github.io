@@ -96,7 +96,12 @@ lap(`${boxes.length} finished box scores`);
 const hist = createHistory();
 const cachePath = path.join(DATA, "sim-cache.json");
 let cache = cfg.cal === "fresh" ? null : readJSON(cachePath, null);
-if (!cache || cache.engine !== ENGINE || cache.calN !== cfg.calN) cache = { engine: ENGINE, calN: cfg.calN, games: {} };
+// NEAR-LINE CALIBRATION (2026-11-23): books post player lines near his season average, where our chances were too confident
+// (65-75% calls went over 64% of the time against his average). Each calibrated game also records, for players projected 20+
+// minutes, our simulated chance over/under a line at his season-to-date average (x.5, 5+ games) and what happened. No sportsbook data.
+const NL_V = 2, NL_AVG = new Map(), NL_ST = ["pts", "reb", "ast", "tpm"];
+const nlLine = (pid, season, st) => { const a = NL_AVG.get(pid + "|" + season); return a && a.n >= 5 ? Math.floor(a[st] / a.n) + 0.5 : null; };
+if (!cache || cache.engine !== ENGINE || cache.calN !== cfg.calN || cache.nlv !== NL_V) cache = { engine: ENGINE, calN: cfg.calN, nlv: NL_V, games: {} };
 const doCal = cfg.cal !== "off";
 const calRecs = [];
 let nonPre = 0, simulatedNow = 0, fromCache = 0;
@@ -118,16 +123,18 @@ for (let i = 0; i < boxes.length;) {
     if (hit && hit.fp === fp) { calRecs.push(hit); fromCache++; continue; }
     const G = buildGame(src, (row) => hist.playerRates(row.id, row.pos), params);
     const { out } = runGame(G, params, cfg.calN, cfg.calPilot, hashSeed(cfg.seed, b.id, "cal"));
-    calRecs.push((cache.games[b.id] = calibrateOne(G, out, b, r, fp)));
+    calRecs.push((cache.games[b.id] = calibrateOne(G, out, b, r, fp, (pid, st) => nlLine(pid, r.pk.split("-")[0], st))));
     simulatedNow++;
   }
   for (const { b, page } of group) hist.absorb(b, page, loadFlow(b.id));
+  for (const { b } of group) { const r = resultById.get(String(b.id)); if (!r || r.pk.endsWith("-1")) continue; const season = r.pk.split("-")[0];
+    for (const p of b.players || []) { if (!p.id || !(Number(p.min) > 0)) continue; const k = String(p.id) + "|" + season, a = NL_AVG.get(k) || { n: 0, pts: 0, reb: 0, ast: 0, tpm: 0 }; a.n++; for (const st of NL_ST) a[st] += Number(p[st]) || 0; NL_AVG.set(k, a); } }
   i = j;
 }
 lap(`history built; calibration games: ${calRecs.length} (${simulatedNow} simulated now, ${fromCache} from cache)`);
 if (doCal) writeJSON(cachePath, cache);
 
-function calibrateOne(G, out, box, r, fp) {
+function calibrateOne(G, out, box, r, fp, lineOf) {
   const act = { hs: Number(box.hs), as: Number(box.as), players: new Map() };
   const byPid = new Map((box.players || []).filter((p) => p.id).map((p) => [String(p.id), p]));
   for (let i = 0; i < G.P; i++) {
@@ -164,6 +171,12 @@ function calibrateOne(G, out, box, r, fp) {
       const c = cover(v, a[st]); for (let k = 0; k < 4; k++) cov[st][k] += c[k];
     }
   }
+  // near-line samples: [stat index, our chance of the over, went over (1) / under (0)] at his season-average line
+  const nl = [];
+  if (lineOf) for (let i = 0; i < P; i++) {
+    if (G.projMin[i] < 20) continue; const a = act.players.get(i); if (!a || a.min <= 0) continue; // a player who sits is a void, as at a book
+    NL_ST.forEach((st, si) => { const L = lineOf(G.ids[i], st); if (L == null) return; let o = 0; for (let s = 0; s < N; s++) if (out.pl[(s * P + i) * S + ST[st]] > L) o++; nl.push([si, r3(o / N), a[st] > L ? 1 : 0]); });
+  }
   let pH = 0, pc = 0, pbh = 0, pba = 0, pot = 0, mSum = 0;
   for (let s = 0; s < N; s++) { const f = out.flags[s]; if (out.hs[s] > out.as[s]) pH++; if (f & FLAG.close) pc++; if (f & FLAG.blowH) pbh++; if (f & FLAG.blowA) pba++; if (f & FLAG.ot) pot++; mSum += marg[s]; }
   const am = act.hs - act.as;
@@ -171,7 +184,7 @@ function calibrateOne(G, out, box, r, fp) {
     fp, id: String(box.id), pk: r.pk, date: box.date,
     w: [r3(pH / N), am > 0 ? 1 : 0, r.pred.pHome],
     m: [r1(mSum / N), am, r1(r.pred.hs - r.pred.as)],
-    tab, board, cov,
+    tab, board, cov, nl,
     scen: [r3(pc / N), r3(pbh / N), r3(pba / N), r3(pot / N), Math.abs(am) <= 5 ? 1 : 0, am >= 15 ? 1 : 0, am <= -15 ? 1 : 0, Number(box.periods) > 4 ? 1 : 0],
   };
 }
@@ -201,8 +214,16 @@ function buildSimcal(recs) {
   const phases = {};
   for (const r of recs) { const ph = phases[r.pk] || (phases[r.pk] = { games: 0, brierSim: 0, brierModel: 0 }); ph.games++; ph.brierSim += (r.w[0] - r.w[1]) ** 2; ph.brierModel += (r.w[2] - r.w[1]) ** 2; }
   for (const ph of Object.values(phases)) { ph.brierSim = r3(ph.brierSim / ph.games); ph.brierModel = r3(ph.brierModel / ph.games); }
+  const nearLine = (() => { const out = { note: "Our simulated over/under chance at a line set at each player's season-to-date average (x.5, 5+ games; players projected 20+ minutes who played), the kind of line a book posts. k = share of our lean kept (chance pulled toward 50% by 1 - k), chosen on the older 70% of games and judged on the newest 30%. No sportsbook data.", byStat: {} }, cut = Math.floor(recs.length * 0.7);
+    NL_ST.forEach((st, si) => { const rows = []; recs.forEach((r, ri) => { for (const x of r.nl || []) if (x[0] === si) rows.push({ p: x[1], y: x[2], old: ri < cut }); });
+      if (rows.length < 200) return; const pick = (x) => (x.p >= 0.5 ? [x.p, x.y] : [1 - x.p, 1 - x.y]), br = (xs, k) => xs.reduce((a, x) => { const [p, y] = pick(x); const q = 0.5 + (p - 0.5) * k; return a + (q - y) ** 2; }, 0) / Math.max(1, xs.length);
+      const old = rows.filter((x) => x.old), recent = rows.filter((x) => !x.old), grid = [0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1], kOld = grid.reduce((m, k) => (br(old, k) < br(old, m) ? k : m), 1), kAll = grid.reduce((m, k) => (br(rows, k) < br(rows, m) ? k : m), 1);
+      const bands = [[0.5, 0.58], [0.58, 0.65], [0.65, 0.75], [0.75, 1.01]].map(([lo, hi]) => { const xs = rows.map(pick).filter(([p]) => p >= lo && p < hi); return { band: `${Math.round(lo * 100)}-${hi > 1 ? 100 : Math.round(hi * 100)}%`, n: xs.length, said: xs.length ? pct(xs.reduce((a, [p]) => a + p, 0) / xs.length) : null, happened: xs.length ? pct(xs.reduce((a, [, y]) => a + y, 0) / xs.length) : null }; });
+      const adopted = br(recent, kOld) < br(recent, 1);
+      out.byStat[st] = { n: rows.length, k: adopted ? kAll : 1, adopted, test: { n: recent.length, kOld, brierRaw: r3(br(recent, 1)), brierCal: r3(br(recent, kOld)) }, bands }; });
+    return out; })();
   return {
-    format: 1, generated, dataUpdated, engine: ENGINE,
+    format: 1, generated, dataUpdated, engine: ENGINE, nearLine,
     note: "Walk-forward calibration: each finished game was simulated using only its pre-game projection (the tip-off track, public/data/games/<id>.json) and scenario rates and player percentages counted from games played before it. 'said' is the average simulated probability in the band, 'happened' how often it came true.",
     method: {
       games: recs.length, simsPerGame: cfg.calN, warmup: `the first ${cfg.warmup} projected non-preseason games are left out while the history fills; preseason games are not calibrated`,

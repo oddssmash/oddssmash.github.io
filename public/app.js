@@ -922,6 +922,7 @@ function teamFlowCards(t) {
 
 // ---------------------------------------------------------------- Games (upcoming)
 async function vGames() {
+  await mlCal(); // main-line chances on the cards are calibrated (see mlCal)
   if (S.liveData === undefined) S.liveData = await load("live.json").catch(() => null);
   await liveScoreboard();
   startScoreTicker();
@@ -3251,20 +3252,24 @@ function cmpCard(c, s) {
 
 // ---- MAIN-LINE CALIBRATION: our own graded main-line picks (mainline-log.json, last 21 days) say how far the real hit
 // rate sits from the chance we stated, per market. Each chance is pulled toward 50% by that much: k = (real - 50) / (stated - 50),
-// floored at 0 (no skill shown) and never above 1 (never boosted), mixed with k = 1 at the weight of 20 picks so a small sample
-// cannot swing it. Uses only our results against the line, never the sportsbook's odds.
+// floored at 0 (no skill shown) and never above 1 (never boosted), mixed at the weight of 20 picks with a starting point so a
+// small sample cannot swing it: for player props the large-sample near-line k below, else 1. Uses only our results, never the
+// sportsbook's odds.
 async function mlCal() {
   if (S.mlCal) return S.mlCal;
-  const ML = await load("mainline-log.json").catch(() => null), acc = {};
+  // Starting point (2026-11-23): the share of our lean that held up at a player's season-average line over every past game
+  // (simcal.json > nearLine, thousands of player-games, no sportsbook data). Our record at the real main line then moves it.
+  const [ML, SC] = await Promise.all([load("mainline-log.json").catch(() => null), load("simcal.json").catch(() => null)]), acc = {}, prior = (k) => SC?.nearLine?.byStat?.[k]?.k ?? 1;
   const add = (k, x) => { if (!x || x.p == null || (x.status !== "hit" && x.status !== "miss")) return; const a = (acc[k] ||= { n: 0, hit: 0, ps: 0 }); a.n++; a.ps += x.p; if (x.status === "hit") a.hit++; };
   for (const g of ML?.games || []) { add("winner", g.ml); add("spread", g.spread); add("total", g.total); for (const x of g.props || []) add(x.fam, x); }
   const cal = {};
-  for (const [k, a] of Object.entries(acc)) { const claim = a.ps / a.n - 0.5, real = a.hit / a.n - 0.5, kObs = claim > 0.01 ? Math.max(0, Math.min(1, real / claim)) : 1; cal[k] = { k: (a.n * kObs + 20) / (a.n + 20), n: a.n, hit: a.hit, claim: a.ps / a.n }; }
+  for (const [k, a] of Object.entries(acc)) { const claim = a.ps / a.n - 0.5, real = a.hit / a.n - 0.5, kObs = claim > 0.01 ? Math.max(0, Math.min(1, real / claim)) : 1; cal[k] = { k: (a.n * kObs + 20 * prior(k)) / (a.n + 20), prior: prior(k), n: a.n, hit: a.hit, claim: a.ps / a.n }; }
+  for (const k of ["pts", "reb", "ast", "tpm"]) if (!cal[k] && prior(k) < 1) cal[k] = { k: prior(k), prior: prior(k), n: 0, hit: 0, claim: null };
   return (S.mlCal = cal);
 }
 const mlAdj = (fam, q) => { const c = S.mlCal?.[fam]; return c ? 0.5 + (q - 0.5) * c.k : q; };
 const mlCalNote = () => { const c = S.mlCal || {}, W = { pts: "points", reb: "rebounds", ast: "assists", tpm: "threes", winner: "winners", spread: "spreads", total: "totals" };
-  const rows = Object.entries(W).filter(([k]) => c[k]).map(([k, w]) => `${w} ${c[k].hit}/${c[k].n} (we said ${Math.round(c[k].claim * 100)}%, kept ${Math.round(c[k].k * 100)}% of our lean)`);
+  const rows = Object.entries(W).filter(([k]) => c[k] && c[k].n).map(([k, w]) => `${w} ${c[k].hit}/${c[k].n} (we said ${Math.round(c[k].claim * 100)}%, kept ${Math.round(c[k].k * 100)}% of our lean)`);
   return rows.length ? `Our main-line record so far: ${rows.join("; ")}.` : ""; };
 
 // ---- High-confidence board
@@ -4061,7 +4066,7 @@ const up = await load("upcoming.json").catch(() => []);
             const wc = c ? Math.min(1, (c[0] || 0) / 15) : 0; estAvg = ac != null && ap != null ? wc * ac + (1 - wc) * ap : ac ?? ap;
             const L = Math.floor(estAvg) + 0.5, pO = simOver(pl, fam, L); if (pO == null) continue;
             Object.assign(ref, { line: L, pOver: pO, src: "est" });
-            if (Math.max(pO, 1 - pO) < 0.58) continue; // too close to call at his usual line
+            if (mlAdj(fam, Math.max(pO, 1 - pO)) < 0.58) continue; // too close to call at his usual line (after calibration)
           }
           const over = ref.pOver >= 0.5, praw = Math.max(ref.pOver, 1 - ref.pOver), p = mlAdj(fam, praw);
           const thr = (pl.thr?.[fam] || []).filter(([x]) => Math.abs(x - ref.line) <= (fam === "pts" || fam === "pra" ? 10 : 3)).slice(0, 4);
@@ -4433,7 +4438,8 @@ function linesBlock(g, L) { const o = S.oddsPub?.games?.[g.id], ph = g.pred.pHom
   // each call with our chance: moneyline = win chance; spread and total = chance our projection lands on our side of the
   // book's line (margin spread about 13 points, total about 18, as in our game-page simulations)
   const SDM = 13, SDT = 18, pCover = Number.isFinite(o?.spreadHome) ? 1 - pNorm((-o.spreadHome - pm) / SDM) : null, pOver = Number.isFinite(o?.total) ? 1 - pNorm((o.total - pt) / SDT) : null;
-  const call = o ? [{ t: ph >= 0.5 ? `${H} ML` : `${A} ML`, p: Math.max(ph, 1 - ph) }, pCover != null ? { t: pCover >= 0.5 ? `${H} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : `${A} ${-o.spreadHome > 0 ? "+" : ""}${-o.spreadHome}`, p: Math.max(pCover, 1 - pCover) } : null, pOver != null ? { t: `${pOver >= 0.5 ? "Over" : "Under"} ${o.total}`, p: Math.max(pOver, 1 - pOver) } : null].filter(Boolean) : [];
+  const gapS = Number.isFinite(o?.spreadHome) ? Math.abs(pm + o.spreadHome) : 0; // our margin vs the book's line
+  const call = o ? [{ t: ph >= 0.5 ? `${H} ML` : `${A} ML`, p: mlAdj("winner", Math.max(ph, 1 - ph)) }, pCover != null ? { t: pCover >= 0.5 ? `${H} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : `${A} ${-o.spreadHome > 0 ? "+" : ""}${-o.spreadHome}`, p: mlAdj("spread", Math.max(pCover, 1 - pCover)), big: gapS >= 5 } : null, pOver != null ? { t: `${pOver >= 0.5 ? "Over" : "Under"} ${o.total}`, p: mlAdj("total", Math.max(pOver, 1 - pOver)) } : null].filter(Boolean) : [];
   const tone = (q) => (q >= 0.75 ? "c-green" : q >= 0.5 ? "c-yellow" : q < 0.4 ? "c-red" : "");
   /* FINISHED GAME: grade each call against the final score and each prop against the final box score (hit, miss or push) */
   const lv = (S.liveData?.games || []).find((x) => x.id === g.id && x.state === "post"), fin = lv ? { hs: +lv.hs, as: +lv.as } : null;
@@ -4444,14 +4450,14 @@ function linesBlock(g, L) { const o = S.oddsPub?.games?.[g.id], ph = g.pred.pHom
     const tc = call.find((c) => /^(Over|Under) /.test(c.t)); if (tc) { const d = tc.t.startsWith("Over") ? tot - o.total : o.total - tot; tc.r = d === 0 ? "push" : d > 0; } }
   // top player props at the SPORTSBOOK MAIN LINE: our chance at the book's own line, Over or Under, one per player and stat
   const famN = { pts: "pts", reb: "reb", ast: "ast", tpm: "3PM" }, seenP = new Set();
-  const picks = (S.boardPub?.picks || []).filter((q) => String(q.game) === String(g.id) && q.player && q.comparison?.bookLine != null && q.comparison.ourProbAtBookLine != null).map((q) => { const c = q.comparison.ourProbAtBookLine; return { pid: String(q.player.id), k: q.player.id + "|" + q.fam, n: q.player.n, fam: q.fam, line: q.comparison.bookLine, side: c >= 0.5 ? "Over" : "Under", p: Math.max(c, 1 - c) }; }).sort((a, b) => b.p - a.p).filter((q) => (seenP.has(q.k) ? false : seenP.add(q.k))).slice(0, 3);
+  const picks = (S.boardPub?.picks || []).filter((q) => String(q.game) === String(g.id) && q.player && q.comparison?.bookLine != null && q.comparison.ourProbAtBookLine != null).map((q) => { const c = q.comparison.ourProbAtBookLine; return { pid: String(q.player.id), k: q.player.id + "|" + q.fam, n: q.player.n, fam: q.fam, line: q.comparison.bookLine, side: c >= 0.5 ? "Over" : "Under", p: mlAdj(q.fam, Math.max(c, 1 - c)) }; }).sort((a, b) => b.p - a.p).filter((q) => (seenP.has(q.k) ? false : seenP.add(q.k))).slice(0, 3);
   for (const q of picks) { const h = hrOf(g.id, q.pid, q.fam); if (h && h.line === q.line) q.l10 = q.side === h.side ? h.l10 : [h.l10[1] - h.l10[0], h.l10[1]]; }
   if (lv?.box) for (const q of picks) { const b = lv.box[q.pid], v = b ? b[["pts", "reb", "ast", "tpm"].indexOf(q.fam)] : null; if (v != null) { const d = q.side === "Over" ? v - q.line : q.line - v; q.r = d === 0 ? "push" : d > 0; q.act = v; } }
   return `<div class="gl-t"><div class="gl-r gl-h"><span></span><span>Ours</span><span>Sportsbook</span></div>
     <div class="gl-r"><span>Moneyline</span><span>${esc(A)} ${ml(fairML(1 - ph))} · ${esc(H)} ${ml(fairML(ph))}</span><span>${o ? `${esc(A)} ${ml(o.mlAway)} · ${esc(H)} ${ml(o.mlHome)}` : "-"}</span></div>
     <div class="gl-r"><span>Spread</span><span>${esc(T(L.fav).abbr)} ${spreadTxt(L.spread)}</span><span>${o && Number.isFinite(o.spreadHome) ? `${esc(H)} ${o.spreadHome > 0 ? "+" : ""}${o.spreadHome}` : "-"}</span></div>
     <div class="gl-r"><span>Total</span><span>${L.total.toFixed(1)}</span><span>${o && Number.isFinite(o.total) ? o.total : "-"}</span></div></div>
-    ${call.length ? `<div class="gc-x gl-call"><b>${fin && o ? `Our call at the main line · ${call.filter((c) => c.r === true).length}/${call.filter((c) => c.r != null && c.r !== "push").length} hit` : "Our call at the main line"}:</b> ${call.map((c) => `<span class="chip ${tone(c.p)}">${mark(c.r)}${esc(c.t)} · ${pct(c.p)}</span>`).join(" ")}</div>` : ""}
+    ${call.length ? `<div class="gc-x gl-call"><b>${fin && o ? `Our call at the main line · ${call.filter((c) => c.r === true).length}/${call.filter((c) => c.r != null && c.r !== "push").length} hit` : "Our call at the main line"}:</b> ${call.map((c) => `<span class="chip ${c.big ? "" : tone(c.p)}"${c.big ? ' title="We disagree with the line by 5+ points: in our graded games such spread calls covered only about a third of the time, usually because of late news we did not have"' : ""}>${mark(c.r)}${esc(c.t)} · ${pct(c.p)}${c.big ? " · ⚠ 5+ pts off the line, low trust" : ""}</span>`).join(" ")}</div>` : ""}
     <div class="gc-x gl-call"><b>${picks.some((q) => q.r != null) ? `Top props at the main line · ${picks.filter((q) => q.r === true).length}/${picks.filter((q) => q.r != null && q.r !== "push").length} hit` : "Top props at the main line"}:</b> ${picks.length ? picks.map((q) => `<span class="chip ${tone(q.p)}">${mark(q.r)}${esc(shortName(q.n))} ${q.side} ${q.line} ${famN[q.fam] || q.fam} · ${pct(q.p)}${q.l10 ? ` <span class="hm-a">L10 ${q.l10[0]}/${q.l10[1]}</span>` : ""}${q.act != null ? ` <span class="hm-a">(${q.act})</span>` : ""}</span>`).join(" ") : `<span class="small muted">no sportsbook prop lines posted yet</span>`}</div>`; }
 // HIT RATES (scripts/hitrates.mjs): how often a player or team beat tonight's sportsbook main line in past games.
 // Counts only, shown next to our projections; the model never uses them.
