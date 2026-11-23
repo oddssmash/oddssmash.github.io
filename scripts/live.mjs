@@ -6,7 +6,7 @@
 //
 // Method (simple and transparent):
 //   time left      rem = share of regulation (or of the current overtime) still to play
-//   final margin   current lead + pre-game projected margin x rem
+//   final margin   current lead + pre-game projected margin x rem, minus 10-20% of the lead's surprise vs projection
 //   uncertainty    sd = 1.5 + 13.5 x sqrt(rem) points (the model's game-level spread, shrinking as time runs out)
 //   win chance     normal probability that the final margin is above zero
 //   final scores   current score + pre-game projected points x rem, per team
@@ -66,7 +66,8 @@ for (const d of [addDays(today, -1), today]) {
     const rem = remainingShare(period, clock);
     row.rem = Math.round(rem * 1000) / 1000;
     if (preH != null) {
-      const margin = hs - as + (preH - preA) * rem, sd = 1.5 + 13.5 * Math.sqrt(rem); // the extra 1.5 keeps late-game chances from being over-confident
+      const el = 1 - rem, bM = el <= 0.3 ? -0.2 : -0.1; // a lead bigger than projected partly comes back (back-test 2026-11-23, see public/app.js liveModel)
+      const margin = hs - as + (preH - preA) * rem + bM * (hs - as - (preH - preA) * el), sd = 1.5 + 13.5 * Math.sqrt(rem); // the extra 1.5 keeps late-game chances from being over-confident
       row.pHome = Math.round(phi(margin / sd) * 1000) / 1000;
       row.projH = Math.round((hs + preH * rem) * 10) / 10;
       row.projA = Math.round((as + preA * rem) * 10) / 10;

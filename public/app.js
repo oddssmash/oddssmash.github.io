@@ -4996,13 +4996,15 @@ async function liveFetch(id) {
         const v = a.stats || [], g = (key) => v[k.indexOf(key)];
         const pair = (key) => String(g(key) || "0-0").split("-").map(n0);
         const [fgm, fga] = pair("fieldGoalsMade-fieldGoalsAttempted"), [tpm, tpa] = pair("threePointFieldGoalsMade-threePointFieldGoalsAttempted"), [ftm, fta] = pair("freeThrowsMade-freeThrowsAttempted");
-        box.set(String(a.athlete.id), { t: side.team.id, min: n0(g("minutes")), pts: n0(g("points")), reb: n0(g("rebounds")), ast: n0(g("assists")), tpm, tpa, fgm, fga, ftm, fta, stl: n0(g("steals")), blk: n0(g("blocks")), to: n0(g("turnovers")), pm: n0(g("plusMinus")), pf: n0(g("fouls")), dnp: a.didNotPlay ? 1 : 0, ej: a.ejected ? 1 : 0, starter: !!a.starter });
+        box.set(String(a.athlete.id), { t: side.team.id, min: n0(g("minutes")), pts: n0(g("points")), reb: n0(g("rebounds")), ast: n0(g("assists")), tpm, tpa, fgm, fga, ftm, fta, stl: n0(g("steals")), blk: n0(g("blocks")), to: n0(g("turnovers")), pm: n0(g("plusMinus")), pf: n0(g("fouls")), reason: a.reason || "", on: a.active ? 1 : 0, dnp: a.didNotPlay ? 1 : 0, ej: a.ejected ? 1 : 0, starter: !!a.starter });
       }
     }
+    // players listed Out on ESPN's in-game injury report (a player hurt during the game is usually added here)
+    const outIds = new Set((s.injuries || []).flatMap((t) => (t.injuries || []).filter((x) => /^out$/i.test(x.status || x.type?.description || "")).map((x) => String(x.athlete?.id))));
     const lsOf = (side) => (comp(side)?.linescores || []).map((x) => n0(x.displayValue ?? x.value));
     const tb = {};
     for (const t of s.boxscore?.teams || []) { const m = {}; for (const x of t.statistics || []) m[x.name] = x.displayValue; tb[t.homeAway === "home" ? "h" : "a"] = m; }
-    return { src: "live", fetched: new Date().toISOString(), state: st?.state, detail: st?.shortDetail || "", period: hdr?.status?.period || 0, clock: hdr?.status?.displayClock || "0:00", hs: n0(comp("home")?.score), as: n0(comp("away")?.score), box, ls: { h: lsOf("home"), a: lsOf("away") }, tb };
+    return { outIds, src: "live", fetched: new Date().toISOString(), state: st?.state, detail: st?.shortDetail || "", period: hdr?.status?.period || 0, clock: hdr?.status?.displayClock || "0:00", hs: n0(comp("home")?.score), as: n0(comp("away")?.score), box, ls: { h: lsOf("home"), a: lsOf("away") }, tb };
   } catch {
     const lv = await liveOf(id);
     if (!lv) return null;
@@ -5017,21 +5019,38 @@ function liveModel(g, L) {
   const q4 = L.period >= 4, ot = L.period > 4;
   const blowout = (q4 && Math.abs(lead) >= 18) || (L.period === 3 && Math.abs(lead) >= 24);
   const closeLate = q4 && Math.abs(lead) <= 6 && rem < 0.15;
-  // Team scoring for the rest of the game: mostly the pre-game rate, partly the pace seen so far.
-  const live48 = (L.hs + L.as) / elapsed, w = Math.min(0.4, elapsed * 0.5);
+  // Team scoring for the rest of the game: the pre-game rate (see the tests below).
+  // LIVE TESTS (2026-11-23, 1,533 past games with play-by-play; weights chosen on 2025-26, judged on 2026-27):
+  //  - team pace so far does NOT carry over: leaning on it made rest-of-game totals worse after Q1, at half and after Q3,
+  //    so the rest of the game uses the pre-game scoring rate (w = 0);
+  //  - a lead bigger than projected partly comes back: keep 80% (after Q1) / 90% (later) of the surprise (final margin MAE
+  //    11.25 -> 11.14 after Q1, 6.52 -> 6.45 after Q3);
+  //  - a player's points so far vs expected carry over a little: + 10% of the gap through halftime, 5% after (rest-of-game
+  //    points MAE 3.484 -> 3.472 at half). His shooting % alone carries even less (5%): hot and cold hands are mostly noise.
+  const live48 = (L.hs + L.as) / elapsed, w = 0;
   const restTot = rem * ((1 - w) * preTot + w * live48) + (closeLate ? 3 : 0);
   const restH = restTot * (g.pred.hs / preTot), restA = restTot - restH;
   const projH = L.hs + restH, projA = L.as + restA;
-  const margin = lead + preM * rem, sd = 1.5 + 13.5 * Math.sqrt(rem);
+  const bM = elapsed <= 0.3 ? -0.2 : -0.1, margin = lead + preM * rem + bM * (lead - preM * elapsed), sd = 1.5 + 13.5 * Math.sqrt(rem);
   const pHome = 1 - pNorm((0 - margin) / sd);
   const whyTeam = [];
   if (blowout) whyTeam.push(`Blowout developing (${Math.abs(lead)}-point lead): starters on both sides are expected to sit, bench minutes rise.`);
   if (closeLate) whyTeam.push("Close finish: starters play more, and late fouling adds free throws (about +3 points to the total).");
   if (ot) whyTeam.push("Overtime: extra minutes for the starters.");
-  if (w > 0.05 && Math.abs(live48 - preTot) > 8) whyTeam.push(`Pace so far points to ${f0(live48)} total points over 48 minutes versus ${f0(preTot)} projected; the rest of the game leans ${Math.round(w * 100)}% on the live pace.`);
+  if (elapsed > 0.15 && Math.abs(live48 - preTot) > 8) whyTeam.push(`Pace so far points to ${f0(live48)} total points over 48 minutes versus ${f0(preTot)} projected. In past games early pace did not carry over, so the rest of the game uses the pre-game scoring rate.`);
+  if (Math.abs(lead - preM * elapsed) >= 8) whyTeam.push(`The lead is ${f0(Math.abs(lead - preM * elapsed))} points away from our projection at this stage; in past games about ${Math.round(-bM * 100)}% of such a surprise came back, which the final margin allows for.`);
   // Players
   const players = [];
-  const goneLive = new Set([...L.box.entries()].filter(([, b]) => b.pf >= 6 || b.ej).map(([id]) => id));
+  // Mid-game absences: listed Out on the live injury report, a status reason naming an injury or illness, or a regular who
+  // has had no minutes for a long stretch of game time (tracked across refreshes of this page).
+  const gm = elapsed * 48, TR = ((S.lvTrack ||= {})[g.id] ||= {}), hurt = new Map();
+  for (const [id, b] of L.box) { const t0 = TR[id]; if (!t0 || b.min > t0.min || b.on) TR[id] = { min: b.min, gm: b.on ? gm : t0 && b.min === t0.min ? t0.gm : gm }; }
+  for (const t of [away, home]) for (const p of t.players || []) { const id = String(p.id), b = L.box.get(id); if (!b) continue;
+    if (L.outIds?.has(id) || /\b(injur|ill|illness|sick|concuss)/i.test(b.reason || "")) { hurt.set(id, { out: true, why: "ruled out (live injury report)" }); continue; }
+    const t0 = TR[id], idle = t0 ? gm - t0.gm : 0; if (b.min > 0 && p.min >= 24 && !b.on && L.period <= 4 && !(L.period === 2 && clockS(L.clock) === 0)) {
+      if (idle >= 16) hurt.set(id, { out: true, why: `no minutes for ${f0(idle)} game minutes: treated as out (possible injury)` });
+      else if (idle >= 10) hurt.set(id, { out: false, why: `no minutes for ${f0(idle)} game minutes: possible injury, minutes cut` }); } }
+  const goneLive = new Set([...L.box.entries()].filter(([id, b]) => b.pf >= 6 || b.ej || hurt.get(id)?.out).map(([id]) => id));
   const lateQ = L.period >= 4 || (L.period === 3 && rem < 0.3);
   for (const t of [away, home]) {
     const myLead = t.isHome ? lead : -lead;
@@ -5045,8 +5064,10 @@ function liveModel(g, L) {
       if (wMin > 0.2 && shNow > shPre * 1.25) why.push(`playing more than usual tonight (${c.min} min so far)`);
       else if (wMin > 0.2 && shNow < shPre * 0.7 && c.min > 0) why.push(`playing less than usual tonight (${c.min} min so far)`);
       if (c.dnp || c.ej || c.pf >= 6) { restMin = 0; why.push(c.pf >= 6 ? "fouled out" : c.ej ? "ejected" : "has not played"); }
+      else if (hurt.get(String(p.id))?.out) { restMin = 0; why.push(hurt.get(String(p.id)).why); }
       else if (c.min === 0 && elapsed > 0.45) { restMin = 0; why.push("has not played yet: treated as out"); }
       else {
+        if (hurt.has(String(p.id))) { restMin *= 0.4; why.push(hurt.get(String(p.id)).why); }
         if (c.pf >= 5 && rem > 0.1) { restMin *= 0.55; why.push(`${c.pf} fouls: minutes cut`); }
         else if (c.pf >= 4 && L.period <= 3) { restMin *= 0.8; why.push(`${c.pf} fouls before the 4th: minutes trimmed`); }
         // Game script from his own history (our scenario library), falling back to general rules.
@@ -5076,7 +5097,10 @@ function liveModel(g, L) {
       for (const w of p.wwD || []) if (goneLive.has(String(w.id)) && Math.abs(w.pts) >= 0.8) { absAdj += w.pts * rem; why.push(`${shortName(w.n)} out of the game: he averages ${w.without?.ppg ?? "-"} without vs ${w.with?.ppg ?? "-"} with`); }
       for (const d of p.dm?.defenders || []) if (goneLive.has(String(d.id)) && d.share >= 10 && d.vsExpPct < -3) { absAdj += (p.pts || 0) * (-d.vsExpPct / 100) * (d.share / 100) * rem; why.push(`main defender ${shortName(d.n)} is out of the game`); }
       const rate = (k) => (p[k] || 0) / Math.max(1, p.min) + (k === "pts" ? ptsAdj36 / 36 : 0);
-      const proj = (k) => Math.max(c[k] || 0, (c[k] || 0) + rate(k) * restMin + (k === "pts" ? absAdj : 0));
+      // small carry-over of his scoring so far vs expected (see LIVE TESTS above); none once he is out
+      const gapP = (c.pts || 0) - (p.pts || 0) * elapsed, carry = restMin > 0 ? (elapsed <= 0.55 ? 0.1 : 0.05) * gapP : 0;
+      if (Math.abs(gapP) >= 6 && restMin > 0) why.push(`${gapP > 0 ? "above" : "below"} his expected points so far by ${f0(Math.abs(gapP))}: keeps ${Math.round((elapsed <= 0.55 ? 0.1 : 0.05) * 100)}% of that for the rest of the game`);
+      const proj = (k) => Math.max(c[k] || 0, (c[k] || 0) + rate(k) * restMin + (k === "pts" ? absAdj + carry : 0));
       const line = Math.round((p.pts || 0) - 0.5) + 0.5;
       const sdP = Math.max(0.6, (((p.hi ?? p.pts + 7) - (p.lo ?? p.pts - 7)) / 2.56) * Math.sqrt(Math.max(0.01, restMin / Math.max(1, p.min))));
       const pOver = c.pts > line ? 1 : restMin === 0 ? 0 : 1 - pNorm((line - proj("pts")) / sdP);
