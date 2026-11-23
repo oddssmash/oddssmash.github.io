@@ -234,7 +234,7 @@ const playsSoon = new Set(soon.flatMap((e) => [e.home, e.away]));
       for (const st of L.starters || []) {
         const inj = (injFile?.list || []).find((i) => String(i.id) === String(st.id) || (String(i.team) === String(tid) && normName(i.n) === normName(st.n)));
         if (inj && /out|doubtful/i.test(inj.status || "") && !(inj.returnDate && inj.returnDate <= etDay(e.date))) {
-          (st.status === "confirmed" ? errs : warns).push(`${st.n} (${tn(tid)}) is a ${st.status} NBA.com starter for ${e.id} but ESPN lists him "${inj.status}"`);
+          warns.push(`${st.n} (${tn(tid)}) is a ${st.status} NBA.com starter for ${e.id} but ESPN lists him "${inj.status}"${st.status === "confirmed" ? " (the model plays the confirmed starter)" : ""}`);
         }
       }
       for (const p of pg.late || []) if (String(p.t) === String(tid)) notes.push(`late scratch: ${p.n} (${tn(tid)}) on NBA.com's inactive list for ${e.id}, ESPN injury status "${p.injury || "not listed"}"`);
@@ -270,7 +270,7 @@ const playsSoon = new Set(soon.flatMap((e) => [e.home, e.away]));
   }
   add("conflicts", errs.length ? "error" : warns.length ? "warn" : notes.length ? "note" : "ok", "Sources agree",
     `ESPN vs NBA.com game-log points: ${ptsDiff.length} differences in ${cmp} player-games. Matchup tracking: ${low} of ${muGames} games cover less than 80% of a team's points. ${(errs.length + warns.length)} line-up vs injury-list conflicts for games in the next 30 hours.` +
-    (errs.length ? " A confirmed starter is listed out by ESPN: the model would leave out a player who is starting." : ""),
+    (errs.length ? " Check the conflicts below." : ""),
     [...errs, ...warns, ...notes], errs.length + warns.length + notes.length);
 }
 

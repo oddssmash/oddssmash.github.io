@@ -1380,7 +1380,10 @@ for (const e of futureEvents) {
     // that kept him out last night usually keeps him out the next night, so he stays out until a newer report says otherwise.
     const freshOut = (i) => /ruled out|out for \w+'s game/i.test(i.detail || "") && !/rest|personal|suspen/i.test(i.detail || "") && i.date && Date.parse(e.date) - Date.parse(i.date) < 60 * 3600e3;
     const backBy = (i) => i.returnDate && i.returnDate <= etDay(e.date) && !freshOut(i);
-    const out = inj.filter((i) => /out|doubtful/i.test(i.status) && !backBy(i)).map((i) => i.id);
+    // A starter NBA.com has CONFIRMED for this game plays, whatever an older ESPN injury status says (the confirmed line-up is
+    // newer and game-specific; 2026-11-23: an ESPN "Out" for a confirmed starter used to stop the whole data run).
+    const pgL = pregame[e.id]?.lineups?.[tid === e.home ? "home" : "away"], confirmedStart = new Set((pgL?.starters || []).filter((x) => x.status === "confirmed").map((x) => String(x.id)));
+    const out = inj.filter((i) => /out|doubtful/i.test(i.status) && !backBy(i) && !confirmedStart.has(String(i.id))).map((i) => i.id);
     const q = inj.filter((i) => /questionable|day-to-day/i.test(i.status) || (/out|doubtful/i.test(i.status) && backBy(i))).map((i) => i.id);
     // same rule as the live-like back-test track: recent minutes for this team, recent arrivals, and the injury list
     const ids = new Set([...recentIds(tid)].filter((pid) => onRoster.has(pid)));
